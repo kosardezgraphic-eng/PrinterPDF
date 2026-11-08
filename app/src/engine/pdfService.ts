@@ -528,12 +528,8 @@ export async function exportImposedPdf(params: {
   const loadedSourceDocs = new Map<string, PDFDocument>();
   for (const doc of documents) {
     if (doc.fileType === 'pdf' && doc.rawBytes) {
-      try {
-        const src = await PDFDocument.load(doc.rawBytes, { ignoreEncryption: true });
-        loadedSourceDocs.set(doc.id, src);
-      } catch {
-        // Fallback to vector box rendering if rawBytes unavailable
-      }
+      const src = await PDFDocument.load(doc.rawBytes, { ignoreEncryption: false });
+      loadedSourceDocs.set(doc.id, src);
     }
   }
 
@@ -566,39 +562,23 @@ export async function exportImposedPdf(params: {
       // Embed source PDF page if available
       const srcPdf = loadedSourceDocs.get(cell.page.documentId);
       if (srcPdf && cell.page.sourcePageNumber > 0) {
-        const pageIdxZero = Math.max(
-          0,
-          Math.min(srcPdf.getPageCount() - 1, cell.page.sourcePageNumber - 1)
-        );
-        const [embeddedPage] = await outPdf.embedPages([
-          srcPdf.getPage(pageIdxZero),
-        ]);
-        outPage.drawPage(embeddedPage, {
-          x: contentXPt,
-          y: contentYPt,
-          width: contentWPt,
-          height: contentHPt,
-        });
-      } else if (!cell.page.isBlankPage) {
-        // Draw clean vector summary box
-        outPage.drawRectangle({
-          x: contentXPt + 4,
-          y: contentYPt + 4,
-          width: Math.max(10, contentWPt - 8),
-          height: Math.max(10, contentHPt - 8),
-          borderColor: rgb(0.15, 0.4, 0.7),
-          borderWidth: 1,
-        });
-        outPage.drawText(
-          `Page ${cell.page.sourcePageNumber} (${cell.page.widthMm}x${cell.page.heightMm}mm)`,
-          {
-            x: contentXPt + 12,
-            y: contentYPt + contentHPt / 2,
-            size: 9,
-            font,
-            color: rgb(0.1, 0.15, 0.25),
-          }
-        );
+        const pageIdxZero = cell.page.sourcePageNumber - 1;
+        if (pageIdxZero >= srcPdf.getPageCount()) {
+          throw new Error(`Invalid source page ${cell.page.sourcePageNumber} in ${cell.page.documentName}`);
+        }
+        const sourcePage = srcPdf.getPage(pageIdxZero);
+        // pdf-lib cannot embed a page with no Contents; such a page is empty.
+        if (sourcePage.node.Contents()) {
+          const [embeddedPage] = await outPdf.embedPages([sourcePage]);
+          outPage.drawPage(embeddedPage, {
+            x: contentXPt,
+            y: contentYPt,
+            width: contentWPt,
+            height: contentHPt,
+          });
+        }
+      } else if (cell.page.sourcePageNumber > 0) {
+        throw new Error(`Missing or unsupported source for ${cell.page.documentName}; re-import the original file`);
       }
 
       // Draw optional cell border
