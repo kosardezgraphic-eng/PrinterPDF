@@ -1,8 +1,8 @@
 import React, { useRef, useState } from 'react';
 import type { ComputedCellPlacement } from '@shared/models';
 import type { PageEditScope } from '../store/useAppStore';
-import { dragCrop, IDENTITY_TRANSFORM, pageCropFractions, resizeRect, rotateInsets, type Handle, type Rect } from '../engine/pageGeometry';
-import { buildCssFilterForPage } from '../engine/effectsPipeline';
+import { dragCrop, IDENTITY_TRANSFORM, pageCropFractions, resizeRect, type Handle, type Rect } from '../engine/pageGeometry';
+import { PageContentImage } from './PageContentImage';
 import { useAppStore } from '../store/useAppStore';
 
 export type CanvasTool = 'select' | 'move' | 'crop';
@@ -14,12 +14,11 @@ const HANDLES: { id: Handle; left: string; top: string; cursor: string }[] = [
 ];
 
 type Gesture = { x: number; y: number; pointerId: number; handle: Handle | 'move'; rect: Rect };
-interface Props { cell: ComputedCellPlacement; pxPerMm: number; tool: CanvasTool; scope: PageEditScope; spaceDown: boolean; onCurrentPage: (id: string) => void }
+interface Props { cell: ComputedCellPlacement; pxPerMm: number; tool: CanvasTool; scope: PageEditScope; spaceDown: boolean; onCurrentPage: (id: string, preserveSelection: boolean) => void }
 
 /** Pointer events cover mouse, touch and pen; edits commit once per gesture for undo. */
 export function PageCanvasCell({ cell, pxPerMm, tool, scope, spaceDown, onCurrentPage }: Props) {
   const effects = useAppStore(state => state.effects);
-  const highlightPage = useAppStore(state => state.highlightPage);
   const applyPageGeometry = useAppStore(state => state.applyPageGeometry);
   const page = cell.page!;
   const interaction = useRef<Gesture | null>(null);
@@ -34,14 +33,11 @@ export function PageCanvasCell({ cell, pxPerMm, tool, scope, spaceDown, onCurren
     : base;
   const cropFrame = active && gesture && tool === 'crop' && gesture.handle !== 'move'
     ? resizeRect(base, gesture.handle, delta.x, delta.y) : base;
-  const crop = rotateInsets(pageCropFractions(page), cell.effectiveRotation);
-  const fullW = display.width / (1 - crop.left - crop.right), fullH = display.height / (1 - crop.top - crop.bottom);
-  const ninety = cell.effectiveRotation % 180 !== 0;
 
   const begin = (event: React.PointerEvent<HTMLElement>, handle: Handle | 'move') => {
     if (!canEdit || spaceDown || (event.pointerType === 'mouse' && event.button !== 0)) return;
     event.preventDefault(); event.stopPropagation();
-    onCurrentPage(page.id);
+    onCurrentPage(page.id, true);
     event.currentTarget.setPointerCapture(event.pointerId);
     interaction.current = { x:event.clientX, y:event.clientY, pointerId:event.pointerId, handle, rect:base };
     setDelta({ x:0, y:0 }); setActive(true);
@@ -72,15 +68,12 @@ export function PageCanvasCell({ cell, pxPerMm, tool, scope, spaceDown, onCurren
     }
   };
   const pointerEvents = { onPointerMove:move, onPointerUp:(e: React.PointerEvent<HTMLElement>) => end(e), onPointerCancel:(e: React.PointerEvent<HTMLElement>) => end(e, true) };
-  return <div style={{ left:cell.cellXMm*pxPerMm, top:cell.cellYMm*pxPerMm, width:cell.cellWidthMm*pxPerMm, height:cell.cellHeightMm*pxPerMm }} className="absolute overflow-hidden">
-    <div onClick={() => { if (tool === 'select') { onCurrentPage(page.id); highlightPage(page.id); } }}
+  return <div data-canvas-page-id={page.id} style={{ left:cell.cellXMm*pxPerMm, top:cell.cellYMm*pxPerMm, width:cell.cellWidthMm*pxPerMm, height:cell.cellHeightMm*pxPerMm }} className="absolute overflow-hidden">
+    <div onClick={() => { if (tool === 'select' || !page.isHighlighted) onCurrentPage(page.id, false); }}
       onPointerDown={e => { if (tool === 'move') begin(e,'move'); }} {...pointerEvents}
       style={{ left:display.x, top:display.y, width:display.width, height:display.height, touchAction:canEdit ? 'none' : 'auto', cursor:canEdit && tool === 'move' ? 'move' : 'pointer' }}
       className={`absolute overflow-hidden ${page.isHighlighted ? 'ring-2 ring-inset ring-sky-500' : ''}`}>
-      {page.thumbnailDataUrl && <img draggable={false} src={page.thumbnailDataUrl} alt={`Page ${page.sourcePageNumber}`}
-        style={{ filter:buildCssFilterForPage(page,effects), position:'absolute', left:fullW*(0.5-crop.left), top:fullH*(0.5-crop.top),
-          width:ninety ? fullH : fullW, height:ninety ? fullW : fullH,
-          transform:`translate(-50%, -50%) rotate(${cell.effectiveRotation}deg)` }} className="max-w-none select-none pointer-events-none" />}
+      <PageContentImage page={page} effects={effects} rotation={cell.effectiveRotation} width={display.width} height={display.height} />
     </div>
     {canEdit && <div style={{ left:tool === 'crop' ? cropFrame.x : display.x, top:tool === 'crop' ? cropFrame.y : display.y,
       width:tool === 'crop' ? cropFrame.width : display.width, height:tool === 'crop' ? cropFrame.height : display.height }}

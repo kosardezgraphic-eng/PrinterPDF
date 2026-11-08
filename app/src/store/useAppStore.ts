@@ -196,6 +196,7 @@ interface AppState {
   ribbonCollapsed: boolean;
   sidebarTab: 'pages' | 'bookmarks';
   activeSheetIndex: number;
+  sidebarReveal: { pageId: string } | null;
   zoomPercent: number;
   viewMode: PreviewViewMode;
   showRulers: boolean;
@@ -234,6 +235,7 @@ interface AppState {
   // Page Operations (A3 - A4)
   togglePageSelectedForPrint: (pageId: string) => void;
   highlightPage: (pageId: string, multiSelect?: boolean, rangeSelect?: boolean) => void;
+  focusPageFromPreview: (pageId: string | null, preserveSelection?: boolean) => void;
   selectAllForPrint: (selected: boolean) => void;
   selectOddEvenForPrint: (mode: 'odd' | 'even') => void;
   invertPrintSelection: () => void;
@@ -366,6 +368,7 @@ export const useAppStore = create<AppState>((set, get) => {
     ribbonCollapsed: false,
     sidebarTab: 'pages',
     activeSheetIndex: 0,
+    sidebarReveal: null,
     zoomPercent: 100,
     viewMode: 'single',
     showRulers: true,
@@ -551,6 +554,25 @@ export const useAppStore = create<AppState>((set, get) => {
         before,
         captureSnapshot(get())
       );
+    },
+
+    // Navigation is deliberately separate from edits and sidebar multi-selection.
+    // Only explicit preview navigation replaces the highlighted set.
+    focusPageFromPreview: (pageId, preserveSelection = false) => {
+      set(state => {
+        const target = pageId ? state.pages.find(page => page.id === pageId) : undefined;
+        if (pageId && !target) return state;
+        const keepSelection = !!target && preserveSelection && target.isHighlighted;
+        return {
+          pages: keepSelection ? state.pages : state.pages.map(page => {
+            const highlighted = page.id === target?.id;
+            return page.isHighlighted === highlighted ? page : { ...page, isHighlighted: highlighted };
+          }),
+          documents: target ? state.documents.map(doc => doc.id === target.documentId && doc.collapsed ? { ...doc, collapsed: false } : doc) : state.documents,
+          sidebarTab: target ? 'pages' : state.sidebarTab,
+          sidebarReveal: target ? { pageId: target.id } : null,
+        };
+      });
     },
 
     highlightPage: (pageId, multiSelect = false, rangeSelect = false) => {
