@@ -1,0 +1,44 @@
+appId: com.printstudio.pro
+productName: PrintStudio Pro
+copyright: Copyright © 2026 PrintStudio Pro
+asar: true
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+extraResources:
+  - from: printer-service/bin/Release/net8.0-windows/win-x64/publish
+    to: printer-service
+    filter:
+      - "**/*"
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+  fileAssociations:
+    - ext: pdf
+      name: PDF Document
+      role: Viewer
+    - ext: psp
+      name: PrintStudio Project
+      role: Editor
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: PrintStudio Pro
+portable:
+  artifactName: "${productName}-${version}-Portable-${arch}.exe"
+publish:
+  provider: generic
+  url: https://updates.printstudiopro.local/releases
