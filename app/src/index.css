@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --psp-bg-primary: #020617;
+    --psp-bg-surface: #0f172a;
+    --psp-bg-elevated: #1e293b;
+    --psp-accent: #0284c7;
+    --psp-font-fa: "Vazirmatn", "IRANSans", "Tahoma", system-ui, -apple-system, sans-serif;
+    --psp-font-en: "Inter", system-ui, -apple-system, sans-serif;
+  }
+
+  html[dir="rtl"] body {
+    font-family: var(--psp-font-fa);
+  }
+
+  html[dir="ltr"] body {
+    font-family: var(--psp-font-en);
+  }
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

@@ -1,1 +1,115 @@
-# PrinterPDF
+# PrintStudio Pro (v1.0 — Phase 1 MVP Complete)
+
+**استودیو حرفه‌ای پیش‌نمایش چاپ، چیدمان (Imposition)، شمارش صفحات، ادغام PDF و مدیریت پرینترهای ویندوز**
+الهام‌گرفته از `priPrinter Professional` با معماری مدرن **Electron + React 19 + TypeScript (Strict) + Tailwind CSS 4 + Zustand + pdf-lib + C# (.NET 8) Win32 Spooler Sidecar**.
+
+---
+
+## ۱. معماری سیستم و جریان داده (Architecture & Data Flow)
+
+```text
++-----------------------------------------------------------------------------------+
+|                        Renderer Process (/app - React 19 + TS)                    |
+|  - Tabbed Ribbon UI (RTL/LTR) + Virtualized Sidebar + 60fps WYSIWYG Sheet Canvas  |
+|  - Zustand Store + CommandHistoryManager (Unlimited Undo/Redo) + LRUPageCache     |
+|  - LayoutEngine (N-Up 1..10x10, Step & Repeat, Duplex) + EffectsPipeline (Invert) |
+|  - CounterEngine (Sheets, Sizes, Cost) + Watermark/Bates/Shamsi Engine            |
++-----------------------------------------+-----------------------------------------+
+                                          |
+                 Typed IPC via contextBridge (contextIsolation: true,
+                         nodeIntegration: false, Strict CSP)
+                                          |
+                                          v
++-----------------------------------------------------------------------------------+
+|                         Main Process (/electron - Node.js)                        |
+|  - Single-Instance Lock + CLI/Explorer Open-With Handler                          |
+|  - SessionStore (.psp Gzipped JSON Project + Crash Recovery Auto-Save)            |
+|  - PrinterSidecarClient (Async JSON-RPC 2.0 over Windows Named Pipe)              |
++-----------------------------------------+-----------------------------------------+
+                                          |
+                     Named Pipe: \\.\pipe\PrintStudioPrinterService
+                                  (JSON-RPC 2.0 Stream)
+                                          |
+                                          v
++-----------------------------------------------------------------------------------+
+|                   C# (.NET 8) Sidecar (/printer-service/PrinterService.exe)       |
+|  - Win32 Spooler P/Invoke (winspool.drv: OpenPrinter, DeviceCapabilities, SetJob) |
+|  - System.Printing (LocalPrintServer, PrintQueue, PrintTicket, DEVMODE)           |
+|  - Live Status (Ready, Offline, PaperJam, OutOfPaper, LowToner, DoorOpen)         |
+|  - Direct Spooler Job Control (Pause, Resume, Restart, Cancel, Purge, Priority)   |
++-----------------------------------------------------------------------------------+
+```
+
+---
+
+## ۲. ساختار Monorepo
+
+```text
+PrinterPDF/
+├── shared/
+│   ├── models.ts                  # تمامی مدل‌های داده، تایپ‌های چیدمان، افکت، پرینتر و پروژه .psp
+│   └── ipc-channels.ts            # قراردادهای تایپ‌شده IPC و JSON-RPC 2.0
+├── printer-service/               # Sidecar بومی ویندوز به زبان C# (.NET 8)
+│   ├── PrinterService.csproj      # تنظیمات کامپایل win-x64 Single-File Self-Contained
+│   ├── Program.cs                 # سرور Named Pipe و مفسر JSON-RPC 2.0
+│   ├── Models/RpcModels.cs        # DTOهای همتا با TypeScript
+│   └── Services/
+│       ├── WinSpoolInterop.cs     # توابع P/Invoke کتابخانه winspool.drv
+│       └── PrinterSpoolerService.cs # مدیریت کامل صف، قابلیت‌های درایور و وضعیت پرینتر
+├── electron/                      # پروسه اصلی Electron
+│   ├── main.ts                    # پنجره اصلی، قفل تک‌نمونه‌ای، CSP و ثبت کانال‌های IPC
+│   ├── preload.ts                 # پل امن contextBridge بدون دسترسی مستقیم Node در UI
+│   ├── printerSidecarClient.ts    # کلاینت ارتباط با Named Pipe و مدیریت پروسه Sidecar
+│   └── sessionStore.ts            # ذخیره‌سازی فشرده .psp (Gzip) و بازیابی خودکار نشست
+├── app/src/                       # رابط کاربری و موتورهای محاسباتی
+│   ├── i18n/
+│   │   ├── shamsi.ts              # تبدیل تقویم میلادی به هجری شمسی، ارقام فارسی و اعداد رومی
+│   │   └── translations.ts        # دیکشنری کامل دوزبانه فارسی (RTL) و انگلیسی (LTR)
+│   ├── engine/
+│   │   ├── commandHistory.ts      # الگوی Command برای Undo/Redo نامحدود (A5)
+│   │   ├── pageCache.ts           # کش حافظه LRU برای مدیریت هزاران صفحه بدون افت فریم
+│   │   ├── layoutEngine.ts        # موتور Imposition، ماتریس ۱۰×۱۰، Step & Repeat و دورو (D1–D5)
+│   │   ├── counterEngine.ts       # شمارشگر آنی صفحات، برگ فیزیکی و محاسبه تعرفه چاپ (B1–B2)
+│   │   ├── effectsPipeline.ts     # پایپ‌لاین غیرمخرب افکت‌ها و Invert برداری/پیکسلی (E1–E2)
+│   │   ├── watermarkEngine.ts     # موتور ماکروهای واترمارک، تاریخ شمسی و Bates Numbering (F1–F2)
+│   │   ├── pdfService.ts          # ورود/ادغام/تفکیک واقعی PDF و تصویر با pdf-lib (C1–C2)
+│   │   ├── ipcBridge.ts           # پل ارتباطی هوشمند با پشتیبانی شبیه‌ساز در محیط مرورگر
+│   │   └── engine.test.ts         # مجموعه تست‌های واحد و یکپارچگی Vitest
+│   ├── store/
+│   │   └── useAppStore.ts         # مدیریت وضعیت سراسری Zustand
+│   └── components/
+│       ├── ErrorBoundary.tsx      # مدیریت خطای رابط کاربری با پیام فارسی و بازیابی فوری
+│       ├── QuickBar.tsx           # نوار دسترسی سریع بالا و انتخابگر هوشمند پرینتر
+│       ├── Ribbon.tsx             # ریبون تب‌دار ۹گانه با انتخابگر ماتریس ۱۰×۱۰
+│       ├── SidebarPages.tsx       # پنل صفحات گروه‌بندی‌شده، بوک‌مارک، Drag Reorder و منوی راست‌کلیک
+│       ├── PreviewWorkspace.tsx   # بوم پیش‌نمایش زنده چندبرگ با خط‌کش، Loupe و پنل‌های Batch/Spooler
+│       ├── StatusBar.tsx          # نوار وضعیت پایین، مختصات زنده ماوس، خلاصه شمارش و اسلایدر زوم
+│       └── Modals.tsx             # پنجره‌های شمارش، چاپ، راهنمای ۳بعدی دورو، تفکیک، تنظیمات و تور راهنما
+├── electron-builder.yml           # تنظیمات ساخت نصاب ویندوز (NSIS + Portable x64)
+├── vite.config.ts
+└── package.json
+```
+
+---
+
+## ۳. دستورات نصب، اجرا، تست و ساخت Installer
+
+```bash
+# ۱. نصب وابستگی‌ها
+npm install
+
+# ۲. اجرای محیط توسعه و پیش‌نمایش زنده
+npm run dev
+
+# ۳. اجرای تست‌های واحد و یکپارچگی (Vitest)
+npm test
+
+# ۴. بیلد نسخه وب و کامپایل TypeScript
+npm run build
+
+# ۵. کامپایل سرویس پرینتر C# (.NET 8) روی ویندوز
+dotnet publish printer-service/PrinterService.csproj -c Release -r win-x64 --self-contained true
+
+# ۶. ساخت فایل نصاب ویندوز (NSIS Installer + Portable .exe)
+npm run build:electron
+```
