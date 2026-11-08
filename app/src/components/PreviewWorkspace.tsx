@@ -15,7 +15,8 @@ import {
   WifiOff,
   FileWarning,
 } from 'lucide-react';
-import { useAppStore } from '../store/useAppStore';
+import { useAppStore, type PageEditScope } from '../store/useAppStore';
+import { PageCanvasCell, type CanvasTool } from './PageCanvasCell';
 import { t } from '../i18n/translations';
 import {
   computeImpositionSheets,
@@ -23,7 +24,6 @@ import {
 } from '../engine/layoutEngine';
 import { checkPreflight } from '../engine/preflight';
 import { fitPageZoom, PREVIEW_PX_PER_MM, wheelSheetStep } from '../engine/viewNavigation';
-import { buildCssFilterForPage } from '../engine/effectsPipeline';
 import {
   formatPageNumberLabel,
   resolveTextMacros,
@@ -61,7 +61,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     setZoomPercent,
     importFiles,
     loadSampleWorkspace,
-    highlightPage,
+    applyPageGeometry,
     selectPrinter,
     setDefaultPrinter,
     simulatePrinterStatusChange,
@@ -76,6 +76,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const drag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const suppressClick = useRef(false);
   const [spaceDown, setSpaceDown] = useState(false);
+  const [canvasTool, setCanvasTool] = useState<CanvasTool>('select');
+  const [editScope, setEditScope] = useState<PageEditScope>('selected');
+  const [currentEditPageId, setCurrentEditPageId] = useState<string | null>(null);
   const [panning, setPanning] = useState(false);
   const [showPreflight, setShowPreflight] = useState(false);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -332,15 +335,6 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 const cellW = cell.cellWidthMm * basePxPerMm;
                 const cellH = cell.cellHeightMm * basePxPerMm;
 
-                const contentLeft = cell.contentXMm * basePxPerMm;
-                const contentTop = cell.contentYMm * basePxPerMm;
-                const contentW = cell.contentWidthMm * basePxPerMm;
-                const contentH = cell.contentHeightMm * basePxPerMm;
-
-                const cssFilter = cell.page
-                  ? buildCssFilterForPage(cell.page, effects)
-                  : 'none';
-
                 return (
                   <React.Fragment key={cell.cellIndex}>
                     {/* Cell Bounding Frame & Crop Marks */}
@@ -367,40 +361,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                       )}
                     </div>
 
-                    {/* Rendered Page Content inside Cell */}
-                    {cell.page && (
-                      <div style={{ left: cellLeft, top: cellTop, width: cellW, height: cellH }} className="absolute overflow-hidden">
-                        <div
-                          onClick={() => highlightPage(cell.page!.id)}
-                          style={{
-                            left: contentLeft - cellLeft,
-                            top: contentTop - cellTop,
-                            width: contentW,
-                            height: contentH,
-                          }}
-                          className={`absolute overflow-hidden transition cursor-pointer ${
-                            cell.page.isHighlighted
-                              ? 'ring-2 ring-sky-500'
-                              : 'hover:ring-1 hover:ring-sky-400/60'
-                          }`}
-                        >
-                          {cell.page.thumbnailDataUrl && (
-                            <img
-                              src={cell.page.thumbnailDataUrl}
-                              alt={`Cell ${cell.cellIndex + 1}`}
-                              style={{
-                                filter: cssFilter,
-                                position: 'absolute', left: '50%', top: '50%',
-                                width: cell.effectiveRotation % 180 === 0 ? contentW : contentH,
-                                height: cell.effectiveRotation % 180 === 0 ? contentH : contentW,
-                                transform: `translate(-50%, -50%) rotate(${cell.effectiveRotation}deg)`,
-                              }}
-                              className="object-fill select-none"
-                            />
-                          )}
-                        </div>
-                      </div>
-                    )}
+                    {cell.page && <PageCanvasCell cell={cell} pxPerMm={basePxPerMm} tool={canvasTool} scope={editScope} spaceDown={spaceDown} onCurrentPage={setCurrentEditPageId} />}
                   </React.Fragment>
                 );
               })}
@@ -597,6 +558,25 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
           </div>
         </div>
       )}
+
+      {sheets.length > 0 && <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-200">
+        {(['select', 'move', 'crop'] as const).map(tool => <button key={tool} type="button" aria-pressed={canvasTool === tool}
+          onClick={() => setCanvasTool(tool)} className={`rounded-lg px-3 py-1.5 ${canvasTool === tool ? 'bg-sky-600 text-white' : 'bg-slate-800 hover:bg-slate-700'}`}>
+          {lang === 'fa' ? { select:'انتخاب', move:'جابجایی / اندازه', crop:'برش' }[tool] : { select:'Select', move:'Move / resize', crop:'Crop' }[tool]}
+        </button>)}
+        <label className="flex items-center gap-1">{lang === 'fa' ? 'اعمال روی:' : 'Apply to:'}
+          <select value={editScope} onChange={e => setEditScope(e.target.value as PageEditScope)} className="rounded border border-slate-700 bg-slate-800 px-2 py-1">
+            <option value="current">{lang === 'fa' ? 'فقط این صفحه' : 'This page'}</option>
+            <option value="selected">{lang === 'fa' ? 'صفحات انتخاب‌شده در پنل' : 'Selected thumbnails'}</option>
+            <option value="all">{lang === 'fa' ? 'همه صفحات' : 'All pages'}</option>
+          </select>
+        </label>
+        <button type="button" disabled={!pages.some(page => page.isHighlighted)} onClick={() => {
+          const page = pages.find(item => item.id === currentEditPageId && item.isHighlighted) ?? pages.find(item => item.isHighlighted);
+          if (page) applyPageGeometry(page.id, editScope, { kind:'reset' });
+        }} className="rounded bg-slate-800 px-3 py-1.5 hover:bg-slate-700 disabled:opacity-50">{lang === 'fa' ? 'بازنشانی برش و اندازه' : 'Reset crop and size'}</button>
+        {canvasTool !== 'select' && <span className="text-slate-400">{lang === 'fa' ? 'ابتدا صفحه‌ها را از بندانگشتی‌ها انتخاب کنید؛ دستگیره‌ها را با موس یا لمس بکشید.' : 'Select thumbnails first, then drag the handles with mouse or touch.'}</span>}
+      </div>}
 
       {showPreflight && (
         <div role="status" className="border-b border-slate-700 bg-slate-900 px-4 py-2 text-xs text-slate-200">

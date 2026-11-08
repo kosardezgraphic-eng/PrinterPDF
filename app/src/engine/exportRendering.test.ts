@@ -45,6 +45,46 @@ describe('real output rendering', () => {
     const [r,g,b] = pixel(image,x,y);
     expect(r).toBeGreaterThan(240); expect(g).toBeLessThan(20); expect(b).toBeLessThan(20);
   });
+  it.each([0,90] as const)('crops PDF content and refits it for rotation %i', async angle => {
+    const source = await PDFDocument.create(); const p = source.addPage([100,100]);
+    p.drawRectangle({x:0,y:0,width:50,height:100,color:rgb(1,0,0)});
+    p.drawRectangle({x:50,y:0,width:50,height:100,color:rgb(0,0,1)});
+    const doc = { id:'d', fileType:'pdf', rawBytes:await source.save() } as SourceDocument;
+    const input = { ...page(angle), widthMm:100*ptToMm, heightMm:100*ptToMm,
+      overrides:{ cropBoxMm:{left:50*ptToMm, top:0, right:0, bottom:0} } };
+    const output = await exportImposedPdf({ documents:[doc], pages:[input], layout:{...layout,scaleMode:'original'},
+      effects:{...DEFAULT_EFFECTS, enabled:false}, watermark:{...getDefaultWatermarkSettings(),enabled:false},
+      pageNumbering:{...getDefaultPageNumberSettings(),enabled:false}, userName:'test' });
+    const image = await render(output);
+    expect(pixel(image,50,50)).toEqual([0,0,255]);
+    if (angle === 0) expect(pixel(image,10,50)).toEqual([255,255,255]);
+    else expect(pixel(image,50,10)).toEqual([255,255,255]);
+  });
+  it('honors a nonzero source CropBox when cropping the PDF', async () => {
+    const source = await PDFDocument.create(); const p = source.addPage([120,100]);
+    p.drawRectangle({x:0,y:0,width:60,height:100,color:rgb(1,0,0)});
+    p.drawRectangle({x:60,y:0,width:60,height:100,color:rgb(0,0,1)});
+    p.setCropBox(20,10,80,80);
+    const input = { ...page(0), widthMm:80*ptToMm, heightMm:80*ptToMm,
+      overrides:{ cropBoxMm:{left:40*ptToMm, top:0, right:0, bottom:0} } };
+    const output = await exportImposedPdf({ documents:[{id:'d',fileType:'pdf',rawBytes:await source.save()} as SourceDocument],
+      pages:[input], layout, effects:{...DEFAULT_EFFECTS,enabled:false}, watermark:{...getDefaultWatermarkSettings(),enabled:false},
+      pageNumbering:{...getDefaultPageNumberSettings(),enabled:false}, userName:'test' });
+    const image = await render(output);
+    expect(pixel(image,50,50)).toEqual([0,0,255]);
+    expect(pixel(image,10,50)).toEqual([255,255,255]);
+  });
+  it('exports moved and resized PDF content at its transformed position', async () => {
+    const source = await PDFDocument.create();
+    source.addPage([100,100]).drawRectangle({x:0,y:0,width:100,height:100,color:rgb(1,0,0)});
+    const input = { ...page(0), widthMm:100*ptToMm, overrides:{transform:{x:.25,y:0,scaleX:.5,scaleY:.5}} };
+    const output = await exportImposedPdf({ documents:[{id:'d',fileType:'pdf',rawBytes:await source.save()} as SourceDocument],
+      pages:[input],layout,effects:{...DEFAULT_EFFECTS,enabled:false},watermark:{...getDefaultWatermarkSettings(),enabled:false},
+      pageNumbering:{...getDefaultPageNumberSettings(),enabled:false},userName:'test' });
+    const image = await render(output);
+    expect(pixel(image,75,50)).toEqual([255,0,0]);
+    expect(pixel(image,25,50)).toEqual([255,255,255]);
+  });
   it('clips fill-mode content to its cell, leaving the adjacent empty cell white', async () => {
     const source = await PDFDocument.create();
     source.addPage([100,100]).drawRectangle({ x:0, y:0, width:100, height:100, color:rgb(1,0,0) });

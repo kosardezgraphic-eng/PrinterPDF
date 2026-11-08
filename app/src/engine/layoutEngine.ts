@@ -4,6 +4,7 @@
  * Step & Repeat, Unique Scale, Margins, Gutters, Auto-Rotate, and Duplex sheet ordering.
  */
 
+import { IDENTITY_TRANSFORM, pageCropFractions } from './pageGeometry';
 import {
   STANDARD_PAPER_SIZES,
   type CellAlignment,
@@ -223,9 +224,12 @@ export function computeImpositionSheets(
 
       const { page, globalPageNumber } = entry;
       let effectiveRotation: PageRotation = page.rotation;
+      const crop = pageCropFractions(page);
+      const croppedWidth = page.widthMm * (1 - crop.left - crop.right);
+      const croppedHeight = page.heightMm * (1 - crop.top - crop.bottom);
       const isRotated90 = effectiveRotation === 90 || effectiveRotation === 270;
-      let pageW = isRotated90 ? page.heightMm : page.widthMm;
-      let pageH = isRotated90 ? page.widthMm : page.heightMm;
+      let pageW = isRotated90 ? croppedHeight : croppedWidth;
+      let pageH = isRotated90 ? croppedWidth : croppedHeight;
 
       // D3: Auto-rotate page to best fit the cell aspect ratio
       if (layout.autoRotateToFit) {
@@ -243,7 +247,9 @@ export function computeImpositionSheets(
       const scaleX = cellWidthMm / Math.max(1, pageW);
       const scaleY = cellHeightMm / Math.max(1, pageH);
 
-      switch (layout.scaleMode) {
+      // A cropped page is fitted automatically to its cell.
+      const hasCrop = crop.top + crop.right + crop.bottom + crop.left > 0;
+      switch (hasCrop ? 'fit' : layout.scaleMode) {
         case 'fit':
           scaleFactor = Math.min(scaleX, scaleY);
           break;
@@ -325,6 +331,9 @@ export function computeImpositionSheets(
         layout.alignment
       );
 
+      const transform = item.page.overrides?.transform ?? IDENTITY_TRANSFORM;
+      const finalWidth = contentWidthMm * Math.max(0.05, Math.min(10, transform.scaleX));
+      const finalHeight = contentHeightMm * Math.max(0.05, Math.min(10, transform.scaleY));
       return {
         cellIndex: item.cellIndex,
         row: item.row,
@@ -335,10 +344,10 @@ export function computeImpositionSheets(
         cellYMm: item.cellYMm,
         cellWidthMm: item.cellWidthMm,
         cellHeightMm: item.cellHeightMm,
-        contentXMm: item.cellXMm + offsetX,
-        contentYMm: item.cellYMm + offsetY,
-        contentWidthMm,
-        contentHeightMm,
+        contentXMm: item.cellXMm + offsetX + (contentWidthMm - finalWidth) / 2 + transform.x * item.cellWidthMm,
+        contentYMm: item.cellYMm + offsetY + (contentHeightMm - finalHeight) / 2 + transform.y * item.cellHeightMm,
+        contentWidthMm: finalWidth,
+        contentHeightMm: finalHeight,
         scaleFactor: finalScale,
         effectiveRotation: item.effectiveRotation,
       };

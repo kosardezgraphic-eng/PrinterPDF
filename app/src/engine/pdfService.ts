@@ -25,6 +25,7 @@ import type {
   WatermarkSettings,
 } from '@shared/models';
 import { computeImpositionSheets } from './layoutEngine';
+import { pageCropFractions, rotateInsets } from './pageGeometry';
 import { shouldApplyEffectsToPage } from './effectsPipeline';
 import { formatPageNumberLabel, resolveTextMacros } from './watermarkEngine';
 import { globalThumbnailCache } from './pageCache';
@@ -587,11 +588,31 @@ export async function exportImposedPdf(params: {
         const sourcePage = srcPdf.getPage(pageIdxZero);
         // pdf-lib cannot embed a page with no Contents; such a page is empty.
         if (sourcePage.node.Contents()) {
-          const [embeddedPage] = await outPdf.embedPages([sourcePage]);
+          const box = sourcePage.getCropBox();
+          const crop = pageCropFractions(cell.page);
+          const [embeddedPage] = await outPdf.embedPages([sourcePage], [{
+            left: box.x + box.width * crop.left,
+            right: box.x + box.width * (1 - crop.right),
+            bottom: box.y + box.height * crop.bottom,
+            top: box.y + box.height * (1 - crop.top),
+          }]);
           outPage.drawPage(embeddedPage, drawPlacement);
         }
       } else if (srcImage && cell.page.sourcePageNumber > 0) {
-        outPage.drawImage(srcImage, drawPlacement);
+        const crop = rotateInsets(pageCropFractions(cell.page), rotation);
+        const fullW = contentWPt / (1 - crop.left - crop.right);
+        const fullH = contentHPt / (1 - crop.top - crop.bottom);
+        const fullX = contentXPt - crop.left * fullW;
+        const fullY = contentYPt - crop.bottom * fullH;
+        outPage.pushOperators(pushGraphicsState(), rectangle(contentXPt, contentYPt, contentWPt, contentHPt), clip(), endPath());
+        outPage.drawImage(srcImage, {
+          x: fullX + (rotation === 180 || rotation === 270 ? fullW : 0),
+          y: fullY + (rotation === 90 || rotation === 180 ? fullH : 0),
+          width: rotated ? fullH : fullW,
+          height: rotated ? fullW : fullH,
+          rotate: degrees(-rotation),
+        });
+        outPage.pushOperators(popGraphicsState());
       } else if (cell.page.sourcePageNumber > 0) {
         throw new Error(`Missing or unsupported source for ${cell.page.documentName}; re-import the original file`);
       }
