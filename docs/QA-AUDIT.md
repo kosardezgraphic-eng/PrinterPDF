@@ -187,9 +187,9 @@ exit: 127
 
 | Commit | علت ریشه‌ای → تغییر | تست و محدودیت |
 |---|---|---|
-| `c0b8761` | SVG و رنگ فرضی → PDF.js در Worker با OffscreenCanvas و اندازه‌گیری تخمینی پیکسل؛ خطا به کاربر برمی‌گردد و خروجی build مسیر نسبی دارد. | `pdfRealRenderer.test.ts` رندر واقعی مستطیل‌های سفید/خاکستری/رنگی را با canvas بومی Node تست می‌کند. Electron/Worker مرورگر و PDF فارسی آزمایش نشده‌اند. این تست پیش از اعمال تغییر روی مبنا اجرا نشده؛ نمی‌توان ادعای ثبت red→green آن را کرد. `@napi-rs/canvas` صرفاً وابستگی تست است؛ `pdfjs-dist` از قبل موجود بود. |
-| `852b50a` | fallback خاموش IPC به mock → انتشار خطا، و وضعیت خالی همراه toast هنگام شکست سرویس؛ عملیات موفق صف نتیجه واقعی را مجدداً می‌خواند. | `ipcBridge.test.ts` خطای IPC، نبود preload، پاسخ واقعی صف و نمایش خطا در init را تست می‌کند؛ آزمون red پیش از اصلاح ثبت نشده؛ Electron واقعی تست نشده. |
-| `1798fbd` | job صرفاً پس از تأخیر completed می‌شد → موقتاً با وضعیت failed و پیام واضح متوقف می‌شود؛ چاپ دسته‌ای واقعی پیاده نشده است. | `ipcBridge.test.ts` جلوگیری از موفقیت ساختگی را تست می‌کند؛ red قبل از اصلاح ثبت نشده. |
+| `c0b8761` | SVG و رنگ فرضی → PDF.js در Worker با OffscreenCanvas و اندازه‌گیری تخمینی پیکسل؛ خطا به کاربر برمی‌گردد و خروجی build مسیر نسبی دارد. | `pdfRealRenderer.test.ts` رندر واقعی مستطیل‌های سفید/خاکستری/رنگی را با canvas بومی Node تست می‌کند. Electron/Worker مرورگر و PDF فارسی آزمایش نشده‌اند. تست رندر Node پیش از اصلاح ثبت نشده است؛ آزمون اتصال `pdfWorkerIntegration.test.ts` پس از نوشتن، روی snapshot مبنا اجرا شد و شکست خورد (صفر فراخوانی Worker)، و در شاخه فعلی پاس شد. Worker در این آزمون mock است. `@napi-rs/canvas` صرفاً وابستگی تست است؛ `pdfjs-dist` از قبل موجود بود. |
+| `852b50a` | fallback خاموش IPC به mock → انتشار خطا، و وضعیت خالی همراه toast هنگام شکست سرویس؛ عملیات موفق صف نتیجه واقعی را مجدداً می‌خواند. | `ipcBridge.test.ts` خطای IPC، نبود preload، پاسخ واقعی صف و نمایش خطا در init را تست می‌کند؛ آزمون پس از اصلاح، روی snapshot مبنا نیز اجرا شد: به جای reject، فهرست جعلی برگرداند و شکست خورد؛ روی شاخه فعلی پاس شد. Electron واقعی تست نشده. |
+| `1798fbd` | job صرفاً پس از تأخیر completed می‌شد → موقتاً با وضعیت failed و پیام واضح متوقف می‌شود؛ چاپ دسته‌ای واقعی پیاده نشده است. | `ipcBridge.test.ts` جلوگیری از موفقیت ساختگی را تست می‌کند؛ همان تست پس از اصلاح روی snapshot مبنا اجرا شد و به دلیل completed به جای failed شکست خورد؛ روی شاخه فعلی پاس شد. |
 | `1cc96a2` | فقدان source یا PDF خراب خروجی ساختگی موفق ایجاد می‌کرد → خروجی با خطا متوقف می‌شود؛ صفحه PDF واقعاً خالی مجاز است. | تست `rejects export when a nonblank source document is missing` پیش از رفع شکست خورد چون Promise به PDF جعلی resolve شد؛ اکنون پاس می‌شود. برای export تصاویر هنوز پشتیبانی وجود ندارد و اکنون خطا داده می‌شود. |
 
 ### وضعیت پس از مرحله ۲ (ناتمام)
@@ -212,3 +212,27 @@ exit: 127
 | وابستگی‌های پیشنهادی | برای E2E، Playwright و باینری Electron نصب‌شده و runner گرافیکی لازم است؛ برای چاپ واقعی یک رندرکننده PDF به سطح چاپ Windows و آزمون با درایور واقعی لازم است. ارسال بایت PDF به صف RAW عمومی برای همه پرینترها درست نیست. |
 
 کارهای باقی‌مانده: رفع RPC و مالکیت named pipe، قرارداد خطا و correlation، تولید payload و فیلترهای چاپ، print ticket و چاپ رندرشده با آزمون Windows؛ بازیابی پروژه بدون فقدان bytes؛ حفظ تصاویر و Unicode، چرخش export، تمام افکت‌ها، UI روشن، بارگذاری تدریجی و آزمون‌های مقیاس؛ سپس E2E در Electron واقعی. وضعیت کلی فاز ۱ **آماده استفاده تولیدی نیست**.
+
+### اجرای نهایی تکمیلی
+
+پس از افزودن آزمون اتصال Worker، `npx tsc --noEmit` بدون خروجی و با exit 0 و `npm test` با ۴ فایل و ۱۷ تست پاس شد. اجرای دوباره تست‌های IPC و Batch روی snapshot مبنا بعد از رفع انجام شد، نه پیش از تغییر؛ این یک مقایسه پس‌نگر است.
+
+تلاش واقعی برای نصب باینری Electron با `node node_modules/electron/install.js` شکست خورد (exit 1):
+
+```text
+RequestError: unable to verify the first certificate
+    at ClientRequest.<anonymous> (/home/user/PrinterPDF/node_modules/got/dist/source/core/index.js:970:111)
+    at Object.onceWrapper (node:events:634:26)
+    at ClientRequest.emit (node:events:531:35)
+    at origin.emit (/home/user/PrinterPDF/node_modules/@szmarczak/http-timer/dist/source/index.js:43:20)
+    at emitErrorEvent (node:_http_client:108:11)
+    at TLSSocket.socketErrorListener (node:_http_client:575:5)
+    at TLSSocket.emit (node:events:519:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)
+    at TLSSocket.onConnectSecure (node:internal/tls/wrap:1701:34)
+    at TLSSocket.emit (node:events:519:28)
+    at TLSSocket._finishInit (node:internal/tls/wrap:1099:8)
+    at ssl.onhandshakedone (node:internal/tls/wrap:885:12)
+```
