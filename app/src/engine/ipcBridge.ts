@@ -262,15 +262,19 @@ export function selectOptimalPrinter(
   );
 }
 
+/** Never substitute a simulated printer for an unavailable Electron bridge. */
+function electronApi() {
+  if (window.printStudioAPI?.isElectron) return window.printStudioAPI;
+  if (typeof navigator !== 'undefined' && /Electron\//i.test(navigator.userAgent)) {
+    throw new Error('Electron preload bridge is unavailable');
+  }
+  return undefined;
+}
+
 export const ipcBridge = {
   async listPrinters(): Promise<PrinterInfo[]> {
-    if (window.printStudioAPI?.isElectron) {
-      try {
-        return await window.printStudioAPI.listPrinters();
-      } catch {
-        // Fallback to simulated printers if sidecar pipe not active
-      }
-    }
+    const api = electronApi();
+    if (api) return api.listPrinters();
     return structuredClone(memPrinters);
   },
 
@@ -278,13 +282,8 @@ export const ipcBridge = {
     printerName: string,
     profile: PrinterProfileSettings
   ): Promise<PrinterInfo> {
-    if (window.printStudioAPI?.isElectron) {
-      try {
-        return await window.printStudioAPI.updatePrinterProfile(printerName, profile);
-      } catch {
-        // Fallback
-      }
-    }
+    const api = electronApi();
+    if (api) return api.updatePrinterProfile(printerName, profile);
     memPrinters = memPrinters.map((p) =>
       p.name === printerName ? { ...p, activeProfile: structuredClone(profile) } : p
     );
@@ -294,13 +293,8 @@ export const ipcBridge = {
   },
 
   async setDefaultPrinter(printerName: string): Promise<boolean> {
-    if (window.printStudioAPI?.isElectron) {
-      try {
-        return await window.printStudioAPI.setDefaultPrinter(printerName);
-      } catch {
-        // Fallback
-      }
-    }
+    const api = electronApi();
+    if (api) return api.setDefaultPrinter(printerName);
     memPrinters = memPrinters.map((p) => ({
       ...p,
       isDefault: p.name === printerName,
@@ -312,6 +306,7 @@ export const ipcBridge = {
     printerName: string,
     status: PrinterInfo['status']
   ): Promise<PrinterInfo[]> {
+    if (electronApi()) throw new Error('Printer simulation is unavailable in Electron');
     memPrinters = memPrinters.map((p) =>
       p.name === printerName ? { ...p, status } : p
     );
@@ -319,13 +314,8 @@ export const ipcBridge = {
   },
 
   async listSpoolerJobs(printerName?: string): Promise<SpoolerJobInfo[]> {
-    if (window.printStudioAPI?.isElectron) {
-      try {
-        return await window.printStudioAPI.listSpoolerJobs(printerName);
-      } catch {
-        // Fallback
-      }
-    }
+    const api = electronApi();
+    if (api) return api.listSpoolerJobs(printerName);
     const filtered = printerName
       ? memJobs.filter((j) => j.printerName === printerName)
       : memJobs;
@@ -337,13 +327,8 @@ export const ipcBridge = {
     totalSheets: number,
     pdfBytes?: Uint8Array
   ): Promise<SpoolerJobInfo> {
-    if (window.printStudioAPI?.isElectron) {
-      try {
-        return await window.printStudioAPI.submitPrintJob(request, pdfBytes);
-      } catch {
-        // Fallback
-      }
-    }
+    const api = electronApi();
+    if (api) return api.submitPrintJob(request, pdfBytes);
 
     const newJob: SpoolerJobInfo = {
       jobId: nextJobId++,
@@ -373,17 +358,11 @@ export const ipcBridge = {
     action: 'pause' | 'resume' | 'restart' | 'cancel',
     priority?: number
   ): Promise<SpoolerJobInfo[]> {
-    if (window.printStudioAPI?.isElectron) {
-      try {
-        await window.printStudioAPI.controlSpoolerJob(
-          printerName,
-          jobId,
-          action,
-          priority
-        );
-      } catch {
-        // Fallback
-      }
+    const api = electronApi();
+    if (api) {
+      const success = await api.controlSpoolerJob(printerName, jobId, action, priority);
+      if (!success) throw new Error(`Spooler ${action} failed for job ${jobId}`);
+      return api.listSpoolerJobs();
     }
 
     if (action === 'cancel') {
@@ -405,12 +384,11 @@ export const ipcBridge = {
   },
 
   async purgePrinterQueue(printerName: string): Promise<SpoolerJobInfo[]> {
-    if (window.printStudioAPI?.isElectron) {
-      try {
-        await window.printStudioAPI.purgePrinterQueue(printerName);
-      } catch {
-        // Fallback
-      }
+    const api = electronApi();
+    if (api) {
+      const success = await api.purgePrinterQueue(printerName);
+      if (!success) throw new Error(`Could not purge queue for ${printerName}`);
+      return api.listSpoolerJobs();
     }
     memJobs = memJobs.filter((j) => j.printerName !== printerName);
     memPrinters = memPrinters.map((p) =>
@@ -420,8 +398,9 @@ export const ipcBridge = {
   },
 
   async saveAutoSaveSession(project: PspProjectFile): Promise<boolean> {
-    if (window.printStudioAPI?.isElectron) {
-      return window.printStudioAPI.saveAutoSaveSession(project);
+    const api = electronApi();
+    if (api) {
+      return api.saveAutoSaveSession(project);
     }
     try {
       localStorage.setItem('printstudio:autosave', JSON.stringify(project));
@@ -432,8 +411,9 @@ export const ipcBridge = {
   },
 
   async loadAutoSaveSession(): Promise<PspProjectFile | null> {
-    if (window.printStudioAPI?.isElectron) {
-      return window.printStudioAPI.loadAutoSaveSession();
+    const api = electronApi();
+    if (api) {
+      return api.loadAutoSaveSession();
     }
     try {
       const raw = localStorage.getItem('printstudio:autosave');
@@ -444,8 +424,9 @@ export const ipcBridge = {
   },
 
   async saveSettings(settings: AppSettings): Promise<boolean> {
-    if (window.printStudioAPI?.isElectron) {
-      return window.printStudioAPI.saveSettings(settings);
+    const api = electronApi();
+    if (api) {
+      return api.saveSettings(settings);
     }
     try {
       localStorage.setItem('printstudio:settings', JSON.stringify(settings));

@@ -384,11 +384,22 @@ export const useAppStore = create<AppState>((set, get) => {
     toasts: [],
 
     initializeWorkspace: async () => {
-      const [printers, spoolerJobs, sample] = await Promise.all([
-        ipcBridge.listPrinters(),
-        ipcBridge.listSpoolerJobs(),
+      const [printerResult, jobResult, sample] = await Promise.all([
+        ipcBridge.listPrinters().then(value => ({ value, error: null as unknown })).catch(error => ({ value: [], error })),
+        ipcBridge.listSpoolerJobs().then(value => ({ value, error: null as unknown })).catch(error => ({ value: [], error })),
         createSamplePrintShopWorkspace(),
       ]);
+      const printers = printerResult.value;
+      const spoolerJobs = jobResult.value;
+      const error = printerResult.error ?? jobResult.error;
+      if (error) {
+        console.error('Printer service initialization failed:', error);
+        get().addToast({
+          type: 'error',
+          title: get().settings.language === 'fa' ? 'اتصال به سرویس چاپگر برقرار نشد' : 'Printer service unavailable',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
       const defaultPrinter =
         printers.find((p) => p.isDefault)?.name ?? printers[0]?.name ?? '';
       set({
