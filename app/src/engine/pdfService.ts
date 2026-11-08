@@ -23,9 +23,15 @@ import { computeImpositionSheets } from './layoutEngine';
 import { shouldApplyEffectsToPage } from './effectsPipeline';
 import { formatPageNumberLabel, resolveTextMacros } from './watermarkEngine';
 import { globalThumbnailCache } from './pageCache';
+import {
+  type RealPdfPageAnalysis,
+} from './pdfRealRenderer';
+import type {
+  PdfWorkerRequest,
+  PdfWorkerResponse,
+} from './pdfRendererWorker';
 
 const MM_TO_PT = 72 / 25.4; // 1 mm = 2.83464567 pt
-const PT_TO_MM = 25.4 / 72;
 
 export interface ImportErrorItem {
   fileName: string;
@@ -42,9 +48,30 @@ export interface ImportBatchResult {
   errors: ImportErrorItem[];
 }
 
+/** Render PDFs in a dedicated worker; failures are reported to the importer. */
+async function analyzePdfOffThread(pdfBytes: Uint8Array, fileName: string): Promise<RealPdfPageAnalysis[]> {
+  if (typeof Worker === 'undefined') throw new Error('PDF rendering requires Web Worker support');
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./pdfRendererWorker.ts', import.meta.url), { type: 'module' });
+    const id = `pdf-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const finish = () => worker.terminate();
+    worker.onmessage = (event: MessageEvent<PdfWorkerResponse>) => {
+      if (event.data.id !== id) return;
+      if (event.data.type === 'analyze-pdf-result' && event.data.pages) {
+        finish(); resolve(event.data.pages);
+      } else if (event.data.type === 'analyze-pdf-error') {
+        finish(); reject(new Error(event.data.errorMessage || 'PDF worker failed'));
+      }
+    };
+    worker.onerror = event => { finish(); reject(new Error(event.message || 'PDF worker failed')); };
+    worker.onmessageerror = () => { finish(); reject(new Error('Invalid PDF worker response')); };
+    const payload: PdfWorkerRequest = { id, type: 'analyze-pdf', fileName, pdfBytes: new Uint8Array(pdfBytes) };
+    worker.postMessage(payload, [payload.pdfBytes.buffer]);
+  });
+}
+
 /**
- * Generates a crisp SVG data URL thumbnail for fast 60fps rendering
- * when a page is imported or synthesized.
+ * Generates a crisp SVG data URL thumbnail for blank or synthesized pages.
  */
 export function buildCrispPageSvgDataUrl(opts: {
   title: string;
@@ -114,6 +141,7 @@ function escapeXml(unsafe: string): string {
 
 /**
  * Imports user-dropped or selected File objects (PDFs & Images).
+ * Uses pdfjs-dist to genuinely render and analyze every PDF page.
  * Corrupt files are isolated and reported with actionable Persian solutions (Principle #1).
  */
 export async function importFilesBatch(
@@ -150,19 +178,16 @@ export async function importFilesBatch(
           solutionFa:
             'لطفاً فایل‌های PDF یا تصاویر استاندارد (JPG، PNG، TIFF، WEBP، BMP) را وارد کنید.',
           reasonEn: `Unsupported file format for "${file.name}".`,
-          solutionEn: 'Please import PDF or standard image files (JPG, PNG, TIFF, WEBP, BMP).',
+          solutionEn:
+            'Please import PDF or standard image files (JPG, PNG, TIFF, WEBP, BMP).',
         });
         continue;
       }
 
       if (isPdf) {
-        const pdfDoc = await PDFDocument.load(bytes, {
-          ignoreEncryption: false,
-          updateMetadata: false,
-        });
-
-        const pageCount = pdfDoc.getPageCount();
-        if (pageCount === 0) {
+        // Real PDF parsing & rendering via pdfjs-dist
+        const analyzedPages = await analyzePdfOffThread(bytes, file.name);
+        if (analyzedPages.length === 0) {
           throw new Error('ZERO_PAGES');
         }
 
@@ -171,72 +196,42 @@ export async function importFilesBatch(
           id: docId,
           name: file.name,
           filePath: file.name,
-          fileSize: file.size,
+          fileSize: file.size || bytes.byteLength,
           fileType: 'pdf',
           mimeType: 'application/pdf',
-          pageCount,
+          pageCount: analyzedPages.length,
           createdAt: new Date().toISOString(),
           rawBytes: bytes,
         };
         documents.push(sourceDoc);
 
-        const pdfPages = pdfDoc.getPages();
         const palette = ['#0284c7', '#4f46e5', '#059669', '#d97706', '#e11d48'];
         const accent = palette[i % palette.length];
 
-        for (let pIdx = 0; pIdx < pageCount; pIdx++) {
-          const pdfPage = pdfPages[pIdx];
-          const { width, height } = pdfPage.getSize();
-          const widthMm = Math.max(30, Math.round(width * PT_TO_MM * 10) / 10);
-          const heightMm = Math.max(30, Math.round(height * PT_TO_MM * 10) / 10);
-          const rotationDeg = ((pdfPage.getRotation().angle % 360) + 360) % 360;
-          const validRotation = ([0, 90, 180, 270].includes(rotationDeg)
-            ? rotationDeg
-            : 0) as PageItem['rotation'];
-
-          const pageId = `page-${docId}-${pIdx + 1}`;
-          const colorProfile: PageItem['colorProfile'] =
-            pIdx % 3 === 1 ? 'grayscale' : 'color';
-          const previewLines = [
-            `سند: ${file.name}`,
-            `صفحه ${pIdx + 1} از ${pageCount}`,
-            `ابعاد اصلی: ${widthMm} × ${heightMm} میلی‌متر`,
-            `آماده چیدمان برداری (Vector Imposition)`,
-          ];
-
-          const thumb = buildCrispPageSvgDataUrl({
-            title: file.name,
-            subtitle: `PDF Vector Page #${pIdx + 1}`,
-            pageNumber: pIdx + 1,
-            totalPages: pageCount,
-            widthMm,
-            heightMm,
-            colorProfile,
-            accentColor: accent,
-            lines: previewLines,
-          });
-          globalThumbnailCache.set(pageId, thumb);
+        for (let pIdx = 0; pIdx < analyzedPages.length; pIdx++) {
+          const info = analyzedPages[pIdx];
+          const pageId = `page-${docId}-${info.pageNumber}`;
+          globalThumbnailCache.set(pageId, info.thumbnailDataUrl);
 
           pages.push({
             id: pageId,
             documentId: docId,
             documentName: file.name,
-            sourcePageNumber: pIdx + 1,
-            widthMm,
-            heightMm,
-            rotation: validRotation,
+            sourcePageNumber: info.pageNumber,
+            widthMm: info.widthMm,
+            heightMm: info.heightMm,
+            rotation: info.rotation,
             selectedForPrint: true,
             isHighlighted: pIdx === 0 && i === 0,
-            isBlankPage: false,
-            colorProfile,
-            inkCoveragePercent: colorProfile === 'color' ? 18.4 : 7.2,
-            thumbnailDataUrl: thumb,
-            previewLines,
+            isBlankPage: info.colorProfile === 'blank',
+            colorProfile: info.colorProfile,
+            inkCoveragePercent: info.inkCoveragePercent,
+            thumbnailDataUrl: info.thumbnailDataUrl,
+            previewLines: info.extractedTextLines,
             previewAccentColor: accent,
           });
 
           if (pIdx === 0) {
-            // C2: Auto-create bookmark from file name
             bookmarks.push({
               id: `bm-${docId}`,
               title: file.name.replace(/\.pdf$/i, ''),
@@ -294,13 +289,14 @@ export async function importFilesBatch(
           level: 0,
         });
       }
-    } catch {
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
       errors.push({
         fileName: file.name,
-        reasonFa: `فایل «${file.name}» خراب، ناقص یا دارای قفل رمزنگاری است.`,
+        reasonFa: `فایل «${file.name}» خراب، ناقص یا دارای قفل رمزنگاری است (${detail}).`,
         solutionFa:
           'این فایل به‌صورت ایمن رد شد و سایر فایل‌ها بدون توقف بارگذاری شدند. لطفاً نسخه سالم فایل را بررسی کنید.',
-        reasonEn: `File "${file.name}" is corrupt, truncated, or password-protected.`,
+        reasonEn: `File "${file.name}" is corrupt, truncated, or password-protected (${detail}).`,
         solutionEn:
           'This file was safely skipped so remaining files could load. Please verify the source file.',
       });
@@ -569,7 +565,7 @@ export async function exportImposedPdf(params: {
 
       // Embed source PDF page if available
       const srcPdf = loadedSourceDocs.get(cell.page.documentId);
-      if (srcPdf && !cell.page.isBlankPage) {
+      if (srcPdf && cell.page.sourcePageNumber > 0) {
         const pageIdxZero = Math.max(
           0,
           Math.min(srcPdf.getPageCount() - 1, cell.page.sourcePageNumber - 1)
