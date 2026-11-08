@@ -32,6 +32,7 @@ import {
   importFilesBatch,
   triggerBlobDownload,
 } from '../engine/pdfService';
+import { cropToMm, type Insets } from '../engine/pageGeometry';
 import { ipcBridge, selectOptimalPrinter } from '../engine/ipcBridge';
 
 export type RibbonTabId =
@@ -44,6 +45,8 @@ export type RibbonTabId =
   | 'batch'
   | 'printers'
   | 'view';
+
+export type PageEditScope = 'current' | 'selected' | 'all';
 
 export type PreviewViewMode = 'single' | 'double' | 'grid' | 'continuous';
 
@@ -238,6 +241,7 @@ interface AppState {
   reorderPage: (fromIndex: number, toIndex: number) => void;
   moveHighlightedPages: (direction: 'up' | 'down') => void;
   rotatePages: (pageIds: string[], deltaDeg: 90 | 180 | 270) => void;
+  applyPageGeometry: (pageId: string, scope: PageEditScope, edit: { kind: 'crop'; crop: Insets } | { kind: 'transform'; transform: NonNullable<PageItem['overrides']>['transform'] } | { kind: 'reset' }) => void;
   duplicatePages: (pageIds: string[]) => void;
   makePageArray: (pageId: string, count: number) => void;
   insertBlankPageAfter: (pageId?: string) => void;
@@ -673,6 +677,26 @@ export const useAppStore = create<AppState>((set, get) => {
       if (idx === -1) return;
       const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
       get().reorderPage(idx, targetIdx);
+    },
+
+    applyPageGeometry: (pageId, scope, edit) => {
+      const state = get();
+      const targets = state.pages.filter(page => scope === 'all' || (scope === 'selected' ? page.isHighlighted : page.id === pageId));
+      if (!targets.length) return;
+      const ids = new Set(targets.map(page => page.id));
+      const before = captureSnapshot(state);
+      set(current => ({ pages: current.pages.map(page => {
+        if (!ids.has(page.id)) return page;
+        const overrides = { ...page.overrides };
+        if (edit.kind === 'crop') {
+          overrides.cropBoxMm = cropToMm(page, edit.crop);
+          // Cropping re-fits the remaining content in its cell.
+          delete overrides.transform;
+        } else if (edit.kind === 'transform') overrides.transform = edit.transform;
+        else { delete overrides.cropBoxMm; delete overrides.transform; }
+        return { ...page, overrides };
+      }) }));
+      pushUndo('ویرایش هندسه صفحات', 'Edit page geometry', before, captureSnapshot(get()));
     },
 
     rotatePages: (pageIds, deltaDeg) => {

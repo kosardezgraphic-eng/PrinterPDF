@@ -67,6 +67,8 @@ export interface PagePerPageOverrides {
   grayscale?: boolean;
   threshold?: boolean;
   cropBoxMm?: { top: number; right: number; bottom: number; left: number };
+  /** Relative to the cell: offsets in cell fractions and independent size multipliers. */
+  transform?: { x: number; y: number; scaleX: number; scaleY: number };
 }
 
 export interface PageItem {
