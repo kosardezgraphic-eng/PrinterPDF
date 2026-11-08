@@ -240,10 +240,21 @@ describe('PrintStudio Pro — Core Engines Unit & Integration Tests', () => {
     expect(redone?.after).toEqual([1, 3]);
   });
 
+  it('rejects export when a nonblank source document is missing', async () => {
+    await expect(exportImposedPdf({
+      documents: [], pages: createMockPages(1), layout: baseLayout,
+      effects: { enabled: false, scope: 'all', invert: false, invertPdfStrategy: 'vector-blend', grayscale: false, blackAndWhite: false, threshold: 128, blackText: false, brightness: 0, contrast: 0, gamma: 1, sharpness: 0 },
+      watermark: getDefaultWatermarkSettings(), pageNumbering: getDefaultPageNumberSettings(), userName: 'test',
+    })).rejects.toThrow('source');
+  });
+
   it('C1-C2 & E1: exports valid imposed PDF with Vector BlendMode.Difference for Invert', async () => {
     const pages = createMockPages(4);
+    const source = await PDFDocument.create();
+    for (let i = 0; i < 4; i++) source.addPage([595, 842]);
+    const documents = [{ id: 'doc-1', fileType: 'pdf', rawBytes: await source.save() }] as SourceDocument[];
     const pdfBytes = await exportImposedPdf({
-      documents: [],
+      documents,
       pages,
       layout: baseLayout,
       effects: {
