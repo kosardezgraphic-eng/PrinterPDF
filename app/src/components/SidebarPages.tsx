@@ -40,6 +40,7 @@ export const SidebarPages: React.FC = () => {
     highlightPage,
     selectAllForPrint,
     selectOddEvenForPrint,
+    invertPrintSelection,
     reorderPage,
     moveHighlightedPages,
     rotatePages,
@@ -143,6 +144,12 @@ export const SidebarPages: React.FC = () => {
               >
                 {lang === 'fa' ? 'زوج' : 'Even'}
               </button>
+              <button
+                type="button"
+                onClick={invertPrintSelection}
+                title={lang === 'fa' ? 'معکوس کردن انتخاب چاپ' : 'Invert print selection'}
+                className="rounded bg-slate-800 px-1.5 py-1 text-slate-300 hover:bg-slate-700 cursor-pointer"
+              >{lang === 'fa' ? 'معکوس' : 'Invert'}</button>
             </div>
 
             <div className="flex items-center gap-1">

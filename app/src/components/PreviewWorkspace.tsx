@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   UploadCloud,
   ChevronRight,
@@ -14,7 +14,6 @@ import {
   AlertTriangle,
   WifiOff,
   FileWarning,
-  ShieldCheck,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { t } from '../i18n/translations';
@@ -22,6 +21,8 @@ import {
   computeImpositionSheets,
   convertMmToUnit,
 } from '../engine/layoutEngine';
+import { checkPreflight } from '../engine/preflight';
+import { fitPageZoom, PREVIEW_PX_PER_MM, wheelSheetStep } from '../engine/viewNavigation';
 import { buildCssFilterForPage } from '../engine/effectsPipeline';
 import {
   formatPageNumberLabel,
@@ -39,6 +40,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
 }) => {
   const {
     pages,
+    documents,
     layout,
     effects,
     watermark,
@@ -69,6 +71,14 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   } = useAppStore();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const lastWheelStep = useRef(-Infinity);
+  const drag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+  const suppressClick = useRef(false);
+  const [spaceDown, setSpaceDown] = useState(false);
+  const [panning, setPanning] = useState(false);
+  const [showPreflight, setShowPreflight] = useState(false);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [loupeCoords, setLoupeCoords] = useState<{
     xPercent: number;
@@ -78,7 +88,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const lang = settings.language;
   const tr = t(lang);
 
-  const sheets = computeImpositionSheets(pages, layout);
+  const sheets = useMemo(() => computeImpositionSheets(pages, layout), [pages, layout]);
+  const pageNumbers = useMemo(() => new Map(pages.map((page, index) => [page.id, index + 1])), [pages]);
+  const preflight = useMemo(() => checkPreflight(pages, documents, sheets, effects), [pages, documents, sheets, effects]);
   const safeSheetIdx = Math.min(
     Math.max(0, activeSheetIndex),
     Math.max(0, sheets.length - 1)
@@ -86,13 +98,63 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
 
   // Determine which sheets to render based on viewMode
   const visibleSheets: ComputedSheetSide[] =
-    viewMode === 'grid'
+    viewMode === 'grid' || viewMode === 'continuous'
       ? sheets
       : viewMode === 'double'
         ? sheets.slice(safeSheetIdx, safeSheetIdx + 2)
         : sheets.slice(safeSheetIdx, safeSheetIdx + 1);
 
-  const basePxPerMm = 1.95 * (zoomPercent / 100);
+  const basePxPerMm = PREVIEW_PX_PER_MM * (zoomPercent / 100);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        if (event.deltaY !== 0) setZoomPercent(useAppStore.getState().zoomPercent + (event.deltaY < 0 ? 10 : -10));
+      } else if (viewMode === 'single' && sheets.length) {
+        event.preventDefault();
+        const now = performance.now();
+        const step = wheelSheetStep(event.deltaY, now, lastWheelStep.current);
+        if (step) {
+          lastWheelStep.current = now;
+          setActiveSheetIndex(Math.max(0, Math.min(sheets.length - 1, safeSheetIdx + step)));
+        }
+      }
+    };
+    viewport.addEventListener('wheel', onWheel, { passive: false });
+    return () => viewport.removeEventListener('wheel', onWheel);
+  }, [viewMode, sheets.length, safeSheetIdx, setZoomPercent, setActiveSheetIndex]);
+
+  useEffect(() => {
+    const editable = (target: EventTarget | null) => target instanceof HTMLElement &&
+      (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(target.tagName));
+    const down = (event: KeyboardEvent) => {
+      if (event.code === 'Space' && !editable(event.target) && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault(); setSpaceDown(true);
+      }
+    };
+    const up = (event: KeyboardEvent) => { if (event.code === 'Space') { setSpaceDown(false); drag.current = null; setPanning(false); } };
+    const blur = () => { setSpaceDown(false); drag.current = null; setPanning(false); };
+    window.addEventListener('keydown', down); window.addEventListener('keyup', up); window.addEventListener('blur', blur);
+    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', blur); };
+  }, []);
+
+  const navigateSheet = (index: number) => {
+    const next = Math.max(0, Math.min(sheets.length - 1, index));
+    setActiveSheetIndex(next);
+    if (viewMode === 'continuous') {
+      viewportRef.current?.querySelector(`[data-sheet-index="${next}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+  const fitPage = () => {
+    const viewport = viewportRef.current;
+    const sheet = sheets[safeSheetIdx];
+    if (!viewport || !sheet) return;
+    setZoomPercent(fitPageZoom(viewport.clientWidth, viewport.clientHeight, sheet.widthMm, sheet.heightMm, showRulers));
+    setPan({ x: 0, y: 0 });
+  };
 
   const renderSingleSheet = (sheetSide: ComputedSheetSide, idxInList: number) => {
     const widthPx = Math.round(sheetSide.widthMm * basePxPerMm);
@@ -129,7 +191,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     return (
       <div
         key={`${sheetSide.sheetNumber}-${sheetSide.side}-${idxInList}`}
-        className="flex flex-col items-center gap-2"
+        data-sheet-index={sheetSide.sideIndex - 1}
+        className="flex shrink-0 flex-col items-center gap-2"
       >
         {/* Sheet Header Badge */}
         <div className="flex items-center gap-2 rounded-full border border-slate-700/80 bg-slate-900/90 px-3 py-1 text-[11px] font-semibold text-slate-300 shadow">
@@ -146,6 +209,11 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
             {sheetSide.side === 'front'
               ? tr.preview.frontSide
               : tr.preview.backSide}
+          </span>
+          <span>•</span>
+          <span className="text-slate-300" dir="auto">
+            {lang === 'fa' ? 'صفحات: ' : 'Pages: '}
+            {[...new Set(sheetSide.cells.map(cell => cell.page ? pageNumbers.get(cell.page.id) : undefined).filter((n): n is number => n !== undefined))].map(n => formatLocalizedNumber(n, lang)).join('، ') || '—'}
           </span>
           <span>•</span>
           <span className="font-mono text-[10px] text-slate-400">
@@ -301,31 +369,36 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
 
                     {/* Rendered Page Content inside Cell */}
                     {cell.page && (
-                      <div
-                        onClick={() => highlightPage(cell.page!.id)}
-                        style={{
-                          left: contentLeft,
-                          top: contentTop,
-                          width: contentW,
-                          height: contentH,
-                        }}
-                        className={`absolute overflow-hidden transition cursor-pointer ${
-                          cell.page.isHighlighted
-                            ? 'ring-2 ring-sky-500'
-                            : 'hover:ring-1 hover:ring-sky-400/60'
-                        }`}
-                      >
-                        {cell.page.thumbnailDataUrl && (
-                          <img
-                            src={cell.page.thumbnailDataUrl}
-                            alt={`Cell ${cell.cellIndex + 1}`}
-                            style={{
-                              filter: cssFilter,
-                              transform: `rotate(${cell.effectiveRotation}deg)`,
-                            }}
-                            className="h-full w-full object-fill select-none"
-                          />
-                        )}
+                      <div style={{ left: cellLeft, top: cellTop, width: cellW, height: cellH }} className="absolute overflow-hidden">
+                        <div
+                          onClick={() => highlightPage(cell.page!.id)}
+                          style={{
+                            left: contentLeft - cellLeft,
+                            top: contentTop - cellTop,
+                            width: contentW,
+                            height: contentH,
+                          }}
+                          className={`absolute overflow-hidden transition cursor-pointer ${
+                            cell.page.isHighlighted
+                              ? 'ring-2 ring-sky-500'
+                              : 'hover:ring-1 hover:ring-sky-400/60'
+                          }`}
+                        >
+                          {cell.page.thumbnailDataUrl && (
+                            <img
+                              src={cell.page.thumbnailDataUrl}
+                              alt={`Cell ${cell.cellIndex + 1}`}
+                              style={{
+                                filter: cssFilter,
+                                position: 'absolute', left: '50%', top: '50%',
+                                width: cell.effectiveRotation % 180 === 0 ? contentW : contentH,
+                                height: cell.effectiveRotation % 180 === 0 ? contentH : contentW,
+                                transform: `translate(-50%, -50%) rotate(${cell.effectiveRotation}deg)`,
+                              }}
+                              className="object-fill select-none"
+                            />
+                          )}
+                        </div>
                       </div>
                     )}
                   </React.Fragment>
@@ -451,13 +524,6 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
           void importFiles(droppedFiles);
         }
       }}
-      onWheel={(e) => {
-        if (e.ctrlKey || e.metaKey) {
-          e.preventDefault();
-          const delta = e.deltaY < 0 ? 10 : -10;
-          setZoomPercent(zoomPercent + delta);
-        }
-      }}
       className="relative flex flex-1 flex-col overflow-hidden bg-slate-950"
     >
       {/* Hidden File Input for Empty State */}
@@ -494,7 +560,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
             <button
               type="button"
               disabled={safeSheetIdx <= 0}
-              onClick={() => setActiveSheetIndex(safeSheetIdx - 1)}
+              onClick={() => navigateSheet(safeSheetIdx - 1)}
               className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-slate-200 hover:bg-slate-700 disabled:opacity-40 cursor-pointer"
             >
               <ChevronRight className="h-3.5 w-3.5" />
@@ -513,7 +579,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
             <button
               type="button"
               disabled={safeSheetIdx >= sheets.length - 1}
-              onClick={() => setActiveSheetIndex(safeSheetIdx + 1)}
+              onClick={() => navigateSheet(safeSheetIdx + 1)}
               className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-slate-200 hover:bg-slate-700 disabled:opacity-40 cursor-pointer"
             >
               <span>{lang === 'fa' ? 'شیت بعدی' : 'Next Sheet'}</span>
@@ -522,18 +588,63 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
           </div>
 
           <div className="flex items-center gap-2 text-[11px] text-slate-400">
-            <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-emerald-300">
-              <ShieldCheck className="h-3.5 w-3.5" />
-              {lang === 'fa'
-                ? 'پردازش ۱۰۰٪ آفلاین • WYSIWYG برداری'
-                : '100% Offline • Vector WYSIWYG'}
-            </span>
+            <button type="button" aria-expanded={showPreflight} onClick={() => setShowPreflight(!showPreflight)} className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-slate-100 hover:bg-slate-700">
+              {lang === 'fa' ? 'پیش‌بررسی' : 'Preflight'}{preflight.length > 0 ? ` (${preflight.length})` : ''}
+            </button>
+            <button type="button" onClick={fitPage} className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-slate-100 hover:bg-slate-700">
+              {lang === 'fa' ? 'جاگیری کامل' : 'Fit page'}
+            </button>
           </div>
         </div>
       )}
 
+      {showPreflight && (
+        <div role="status" className="border-b border-slate-700 bg-slate-900 px-4 py-2 text-xs text-slate-200">
+          {preflight.length === 0 ? (lang === 'fa' ? 'مشکل ظاهری در شیت‌ها یافت نشد.' : 'No sheet issues found.') : preflight.map(issue => {
+            const labels = lang === 'fa' ? {
+              'no-pages': 'صفحه‌ای انتخاب نشده', 'missing-source': 'فایل منبع موجود نیست', 'empty-page': 'صفحه سفید',
+              'out-of-bounds': 'خانه خارج از ابعاد کاغذ', 'effects-not-exported': 'بعضی افکت‌ها در PDF خروجی اعمال نمی‌شوند',
+            } : {
+              'no-pages': 'No pages selected', 'missing-source': 'Source file missing', 'empty-page': 'Blank page',
+              'out-of-bounds': 'Cell outside the paper', 'effects-not-exported': 'Some effects are not applied to PDF export',
+            };
+            return <div key={issue.code} className={issue.severity === 'error' ? 'text-rose-300' : 'text-amber-300'}>{labels[issue.code]}{issue.count > 0 ? ` (${issue.count})` : ''}</div>;
+          })}
+          <div className="mt-1 text-slate-400">{lang === 'fa' ? 'این بررسی اتصال یا قابلیت چاپگر را تأیید نمی‌کند.' : 'This check does not verify the printer or driver.'}</div>
+        </div>
+      )}
+
       {/* Main Sheet Preview Canvas Area */}
-      <div className="flex-1 overflow-auto p-6">
+      <div
+        ref={viewportRef}
+        className={`flex-1 overflow-auto p-6 ${spaceDown ? (panning ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
+        onPointerDown={(e) => {
+          if (!spaceDown || e.button !== 0) return;
+          e.preventDefault(); e.stopPropagation();
+          drag.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
+          suppressClick.current = true;
+          setPanning(true); e.currentTarget.setPointerCapture(e.pointerId);
+        }}
+        onPointerMove={(e) => {
+          if (!drag.current) return;
+          setPan({ x: drag.current.panX + e.clientX - drag.current.x, y: drag.current.panY + e.clientY - drag.current.y });
+        }}
+        onPointerUp={() => { drag.current = null; setPanning(false); setTimeout(() => { suppressClick.current = false; }, 0); }}
+        onPointerCancel={() => { drag.current = null; setPanning(false); suppressClick.current = false; }}
+        onClickCapture={(e) => { if (suppressClick.current) { suppressClick.current = false; e.preventDefault(); e.stopPropagation(); } }}
+        onScroll={(e) => {
+          if (viewMode !== 'continuous') return;
+          const viewport = e.currentTarget;
+          const mid = viewport.getBoundingClientRect().top + viewport.clientHeight / 2;
+          let closest = safeSheetIdx, distance = Infinity;
+          viewport.querySelectorAll<HTMLElement>('[data-sheet-index]').forEach(element => {
+            const rect = element.getBoundingClientRect();
+            const d = Math.abs((rect.top + rect.bottom) / 2 - mid);
+            if (d < distance) { distance = d; closest = Number(element.dataset.sheetIndex); }
+          });
+          if (closest !== safeSheetIdx) setActiveSheetIndex(closest);
+        }}
+      >
         {sheets.length === 0 ? (
           /* Empty State */
           <div className="flex h-full flex-col items-center justify-center">
@@ -567,8 +678,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
           </div>
         ) : (
           <div
-            className={`flex min-h-full items-center justify-center gap-8 ${
-              viewMode === 'grid' ? 'flex-wrap' : 'flex-col md:flex-row'
+            style={{ transform: `translate(${pan.x}px, ${pan.y}px)` }}
+            className={`flex min-h-full min-w-full items-center justify-center gap-8 ${
+              viewMode === 'grid' ? 'flex-wrap' : viewMode === 'continuous' ? 'flex-col' : 'flex-col md:flex-row'
             }`}
           >
             {visibleSheets.map((sheet, idx) => renderSingleSheet(sheet, idx))}
