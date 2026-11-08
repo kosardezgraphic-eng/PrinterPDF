@@ -5,6 +5,11 @@
 
 import {
   BlendMode,
+  clip,
+  endPath,
+  popGraphicsState,
+  pushGraphicsState,
+  rectangle,
   PDFDocument,
   StandardFonts,
   degrees,
@@ -244,6 +249,13 @@ export async function importFilesBatch(
         }
       } else {
         // Image import (A1 / C5)
+        const imageDoc = await PDFDocument.create();
+        const isPng = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+        const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
+        if (!isPng && !isJpeg) throw new Error('Image format not supported for PDF export: use PNG or JPEG');
+        const image = isPng ? await imageDoc.embedPng(bytes) : await imageDoc.embedJpg(bytes);
+        // Fit the source aspect ratio into an A4-sized page without distorting pixels.
+        const imageScale = Math.min(210 / image.width, 297 / image.height);
         const docId = `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const blobUrl = URL.createObjectURL(file);
         const pageId = `page-${docId}-1`;
@@ -254,7 +266,7 @@ export async function importFilesBatch(
           filePath: file.name,
           fileSize: file.size,
           fileType: 'image',
-          mimeType: file.type || 'image/png',
+          mimeType: isPng ? 'image/png' : 'image/jpeg',
           pageCount: 1,
           createdAt: new Date().toISOString(),
           rawBytes: bytes,
@@ -267,8 +279,8 @@ export async function importFilesBatch(
           documentId: docId,
           documentName: file.name,
           sourcePageNumber: 1,
-          widthMm: 210,
-          heightMm: 297,
+          widthMm: image.width * imageScale,
+          heightMm: image.height * imageScale,
           rotation: 0,
           selectedForPrint: true,
           isHighlighted: i === 0,
@@ -293,10 +305,10 @@ export async function importFilesBatch(
       const detail = err instanceof Error ? err.message : String(err);
       errors.push({
         fileName: file.name,
-        reasonFa: `فایل «${file.name}» خراب، ناقص یا دارای قفل رمزنگاری است (${detail}).`,
+        reasonFa: `ورود فایل «${file.name}» ناموفق بود (${detail}).`,
         solutionFa:
           'این فایل به‌صورت ایمن رد شد و سایر فایل‌ها بدون توقف بارگذاری شدند. لطفاً نسخه سالم فایل را بررسی کنید.',
-        reasonEn: `File "${file.name}" is corrupt, truncated, or password-protected (${detail}).`,
+        reasonEn: `Could not import "${file.name}" (${detail}).`,
         solutionEn:
           'This file was safely skipped so remaining files could load. Please verify the source file.',
       });
@@ -422,12 +434,14 @@ export async function createSamplePrintShopWorkspace(): Promise<{
     }
 
     const rawBytes = await pdfDoc.save();
+    const analyzed = await analyzePdfOffThread(rawBytes, spec.name);
+    if (analyzed.length !== spec.pageCount) throw new Error('Sample rendering returned an unexpected page count');
 
     documents.push({
       id: docId,
       name: spec.name,
-      filePath: `C:\\PrintShop\\Jobs\\${spec.name}`,
-      fileSize: rawBytes.byteLength * 18,
+      filePath: spec.name,
+      fileSize: rawBytes.byteLength,
       fileType: 'pdf',
       mimeType: 'application/pdf',
       pageCount: spec.pageCount,
@@ -437,21 +451,8 @@ export async function createSamplePrintShopWorkspace(): Promise<{
 
     for (let p = 1; p <= spec.pageCount; p++) {
       const pageId = `${docId}-page-${p}`;
-      const isColor = spec.colorPages.includes(p);
-      const colorProfile: PageItem['colorProfile'] = isColor ? 'color' : 'grayscale';
-
-      const thumb = buildCrispPageSvgDataUrl({
-        title: spec.name,
-        subtitle: spec.subtitle,
-        pageNumber: p,
-        totalPages: spec.pageCount,
-        widthMm: spec.widthMm,
-        heightMm: spec.heightMm,
-        colorProfile,
-        accentColor: spec.accent,
-        lines: spec.lines,
-      });
-
+      const info = analyzed[p - 1];
+      const thumb = info.thumbnailDataUrl;
       globalThumbnailCache.set(pageId, thumb);
 
       pages.push({
@@ -465,10 +466,10 @@ export async function createSamplePrintShopWorkspace(): Promise<{
         selectedForPrint: true,
         isHighlighted: dIdx === 0 && p === 1,
         isBlankPage: false,
-        colorProfile,
-        inkCoveragePercent: isColor ? 22.5 : 6.8,
+        colorProfile: info.colorProfile,
+        inkCoveragePercent: info.inkCoveragePercent,
         thumbnailDataUrl: thumb,
-        previewLines: spec.lines,
+        previewLines: info.extractedTextLines,
         previewAccentColor: spec.accent,
       });
 
@@ -526,10 +527,15 @@ export async function exportImposedPdf(params: {
 
   // Cache loaded source PDFDocuments by documentId
   const loadedSourceDocs = new Map<string, PDFDocument>();
+  const loadedImages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPng>>>();
   for (const doc of documents) {
     if (doc.fileType === 'pdf' && doc.rawBytes) {
       const src = await PDFDocument.load(doc.rawBytes, { ignoreEncryption: false });
       loadedSourceDocs.set(doc.id, src);
+    } else if (doc.fileType === 'image' && doc.rawBytes) {
+      if (doc.mimeType === 'image/png') loadedImages.set(doc.id, await outPdf.embedPng(doc.rawBytes));
+      else if (doc.mimeType === 'image/jpeg' || doc.mimeType === 'image/jpg') loadedImages.set(doc.id, await outPdf.embedJpg(doc.rawBytes));
+      else throw new Error(`Unsupported image format: ${doc.mimeType}`);
     }
   }
 
@@ -561,6 +567,18 @@ export async function exportImposedPdf(params: {
 
       // Embed source PDF page if available
       const srcPdf = loadedSourceDocs.get(cell.page.documentId);
+      const srcImage = loadedImages.get(cell.page.documentId);
+      const rotation = cell.effectiveRotation;
+      // Preview uses clockwise CSS rotation; PDF coordinates increase upwards.
+      const rotated = rotation === 90 || rotation === 270;
+      const drawPlacement = {
+        x: contentXPt + (rotation === 180 || rotation === 270 ? contentWPt : 0),
+        y: contentYPt + (rotation === 90 || rotation === 180 ? contentHPt : 0),
+        width: rotated ? contentHPt : contentWPt,
+        height: rotated ? contentWPt : contentHPt,
+        rotate: degrees(-rotation),
+      };
+      outPage.pushOperators(pushGraphicsState(), rectangle(cellXPt, cellYPt, cellWPt, cellHPt), clip(), endPath());
       if (srcPdf && cell.page.sourcePageNumber > 0) {
         const pageIdxZero = cell.page.sourcePageNumber - 1;
         if (pageIdxZero >= srcPdf.getPageCount()) {
@@ -570,16 +588,15 @@ export async function exportImposedPdf(params: {
         // pdf-lib cannot embed a page with no Contents; such a page is empty.
         if (sourcePage.node.Contents()) {
           const [embeddedPage] = await outPdf.embedPages([sourcePage]);
-          outPage.drawPage(embeddedPage, {
-            x: contentXPt,
-            y: contentYPt,
-            width: contentWPt,
-            height: contentHPt,
-          });
+          outPage.drawPage(embeddedPage, drawPlacement);
         }
+      } else if (srcImage && cell.page.sourcePageNumber > 0) {
+        outPage.drawImage(srcImage, drawPlacement);
       } else if (cell.page.sourcePageNumber > 0) {
         throw new Error(`Missing or unsupported source for ${cell.page.documentName}; re-import the original file`);
       }
+
+      outPage.pushOperators(popGraphicsState());
 
       // Draw optional cell border
       if (layout.showCellBorders) {
@@ -621,6 +638,7 @@ export async function exportImposedPdf(params: {
       // E1: Vector Invert via PDF BlendMode.Difference over the cell
       const { effectiveInvert } = shouldApplyEffectsToPage(cell.page, effects);
       if (effectiveInvert) {
+        outPage.pushOperators(pushGraphicsState(), rectangle(cellXPt, cellYPt, cellWPt, cellHPt), clip(), endPath());
         outPage.drawRectangle({
           x: contentXPt,
           y: contentYPt,
@@ -629,6 +647,7 @@ export async function exportImposedPdf(params: {
           color: rgb(1, 1, 1),
           blendMode: BlendMode.Difference,
         });
+        outPage.pushOperators(popGraphicsState());
       }
     }
 
