@@ -3,7 +3,7 @@ import { createCanvas } from '@napi-rs/canvas';
 import { PDFDict, PDFDocument, PDFName, PDFStream, rgb } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PageItem, SourceDocument } from '@shared/models';
-import { DEFAULT_EFFECTS, DEFAULT_LAYOUT } from '../store/useAppStore';
+import { DEFAULT_EFFECTS, DEFAULT_LAYOUT, useAppStore } from '../store/useAppStore';
 import { getDefaultPageNumberSettings, getDefaultWatermarkSettings } from './watermarkEngine';
 import { exportImposedPdf, importFilesBatch } from './pdfService';
 
@@ -95,6 +95,38 @@ describe('real output rendering', () => {
     const bitmap = await render(output);
     expect(pixel(bitmap, 25, 50)).toEqual([255, 0, 0]);
     expect(pixel(bitmap, 60, 50)).toEqual([255, 255, 255]);
+  });
+  it('keeps the paper orientation and exports a manually rotated page even with auto-fit enabled', async () => {
+    const source = await PDFDocument.create(); const p = source.addPage([60,100]);
+    p.drawRectangle({x:0,y:80,width:20,height:20,color:rgb(1,0,0)});
+    const doc = {id:'d',fileType:'pdf',rawBytes:await source.save()} as SourceDocument;
+    const portrait = {...layout,customWidthMm:100*ptToMm,customHeightMm:160*ptToMm,autoRotateToFit:true};
+    useAppStore.setState({pages:[page(0)],documents:[doc],layout:portrait});
+    useAppStore.getState().rotatePages(['p'],90);
+    const output = await exportImposedPdf({ documents:[doc],pages:useAppStore.getState().pages,layout:portrait,
+      effects:{...DEFAULT_EFFECTS,enabled:false}, watermark:{...getDefaultWatermarkSettings(),enabled:false},
+      pageNumbering:{...getDefaultPageNumberSettings(),enabled:false},userName:'test' });
+    const outputPdf = await PDFDocument.load(output);
+    expect(outputPdf.getPage(0).getWidth()).toBeCloseTo(100);
+    expect(outputPdf.getPage(0).getHeight()).toBeCloseTo(160);
+    const image = await render(output);
+    expect(pixel(image,90,60)).toEqual([255,0,0]);
+    expect(pixel(image,50,20)).toEqual([255,255,255]);
+  });
+  it('exports the adjusted margins and uniform gutter at the preview cell bounds', async () => {
+    const source = await PDFDocument.create();
+    source.addPage([100,100]).drawRectangle({x:0,y:0,width:100,height:100,color:rgb(1,0,0)});
+    const adjusted = {...layout, orientation:'landscape' as const, customWidthMm:200*ptToMm, customHeightMm:100*ptToMm,
+      marginsMm:{left:10*ptToMm,right:10*ptToMm,top:10*ptToMm,bottom:10*ptToMm}, horizontalGutterMm:20*ptToMm,
+      cols:2, placementMode:'step-and-repeat' as const};
+    const output = await exportImposedPdf({ documents:[{id:'d',fileType:'pdf',rawBytes:await source.save()} as SourceDocument],
+      pages:[{...page(0),widthMm:100*ptToMm}],layout:adjusted,effects:{...DEFAULT_EFFECTS,enabled:false},
+      watermark:{...getDefaultWatermarkSettings(),enabled:false},pageNumbering:{...getDefaultPageNumberSettings(),enabled:false},userName:'test' });
+    const image = await render(output);
+    expect(pixel(image,5,50)).toEqual([255,255,255]);
+    expect(pixel(image,40,50)).toEqual([255,0,0]);
+    expect(pixel(image,100,50)).toEqual([255,255,255]);
+    expect(pixel(image,160,50)).toEqual([255,0,0]);
   });
   it('embeds PNG as an image resource in exported PDF', async () => {
     const canvas = createCanvas(60,100); const ctx = canvas.getContext('2d');

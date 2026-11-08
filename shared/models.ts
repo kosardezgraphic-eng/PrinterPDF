@@ -66,6 +66,8 @@ export interface PagePerPageOverrides {
   invert?: boolean;
   grayscale?: boolean;
   threshold?: boolean;
+  /** Keep an explicitly chosen page rotation from being overridden by auto-fit. */
+  manualRotation?: boolean;
   cropBoxMm?: { top: number; right: number; bottom: number; left: number };
   /** Relative to the cell: offsets in cell fractions and independent size multipliers. */
   transform?: { x: number; y: number; scaleX: number; scaleY: number };

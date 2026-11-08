@@ -33,6 +33,7 @@ import {
   triggerBlobDownload,
 } from '../engine/pdfService';
 import { cropToMm, type Insets } from '../engine/pageGeometry';
+import { computeImpositionSheets } from '../engine/layoutEngine';
 import { ipcBridge, selectOptimalPrinter } from '../engine/ipcBridge';
 
 export type RibbonTabId =
@@ -257,6 +258,7 @@ interface AppState {
   updateLayout: (patch: Partial<LayoutSettings>, recordUndo?: boolean) => void;
   setNUpMatrix: (rows: number, cols: number, placementMode?: LayoutSettings['placementMode']) => void;
   updateMargins: (patch: Partial<LayoutSettings['marginsMm']>) => void;
+  commitLayoutGuides: (patch: Partial<Pick<LayoutSettings, 'marginsMm' | 'horizontalGutterMm' | 'verticalGutterMm'>>) => void;
   updateEffects: (patch: Partial<EffectsSettings>, recordUndo?: boolean) => void;
   toggleGlobalInvert: () => void;
   resetEffects: () => void;
@@ -722,14 +724,20 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     rotatePages: (pageIds, deltaDeg) => {
-      const before = captureSnapshot(get());
+      const state = get();
+      const before = captureSnapshot(state);
       const idSet = new Set(pageIds);
+      const displayed = new Map<string, PageRotation>();
+      for (const sheet of computeImpositionSheets(state.pages, state.layout)) {
+        for (const cell of sheet.cells) if (cell.page && idSet.has(cell.page.id) && !displayed.has(cell.page.id)) displayed.set(cell.page.id, cell.effectiveRotation);
+      }
       set((state) => ({
         pages: state.pages.map((p) =>
           idSet.has(p.id)
             ? {
                 ...p,
-                rotation: (((p.rotation + deltaDeg) % 360) as PageRotation),
+                rotation: ((((displayed.get(p.id) ?? p.rotation) + deltaDeg) % 360) as PageRotation),
+                overrides: { ...p.overrides, manualRotation: true },
               }
             : p
         ),
@@ -989,6 +997,12 @@ export const useAppStore = create<AppState>((set, get) => {
         before,
         captureSnapshot(get())
       );
+    },
+
+    commitLayoutGuides: (patch) => {
+      const before = captureSnapshot(get());
+      set(state => ({ layout: { ...state.layout, ...patch } }));
+      pushUndo('تغییر حاشیه و فاصله‌ها', 'Adjust margins and gutters', before, captureSnapshot(get()));
     },
 
     updateMargins: (patch) => {
