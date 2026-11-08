@@ -5,7 +5,7 @@ import { dragCrop, IDENTITY_TRANSFORM, pageCropFractions, resizeRect, type Handl
 import { PageContentImage } from './PageContentImage';
 import { useAppStore } from '../store/useAppStore';
 
-export type CanvasTool = 'select' | 'move' | 'crop';
+export type CanvasTool = 'select' | 'move' | 'crop' | 'layout' | 'measure';
 const HANDLES: { id: Handle; left: string; top: string; cursor: string }[] = [
   { id:'nw', left:'0%', top:'0%', cursor:'nwse-resize' }, { id:'n', left:'50%', top:'0%', cursor:'ns-resize' },
   { id:'ne', left:'100%', top:'0%', cursor:'nesw-resize' }, { id:'e', left:'100%', top:'50%', cursor:'ew-resize' },
@@ -24,7 +24,7 @@ export function PageCanvasCell({ cell, pxPerMm, tool, scope, spaceDown, onCurren
   const interaction = useRef<Gesture | null>(null);
   const [delta, setDelta] = useState({ x: 0, y: 0 });
   const [active, setActive] = useState(false);
-  const canEdit = tool !== 'select' && page.isHighlighted;
+  const canEdit = (tool === 'move' || tool === 'crop') && page.isHighlighted;
   const base: Rect = { x:(cell.contentXMm-cell.cellXMm)*pxPerMm, y:(cell.contentYMm-cell.cellYMm)*pxPerMm,
     width:cell.contentWidthMm*pxPerMm, height:cell.contentHeightMm*pxPerMm };
   const gesture = interaction.current;
@@ -69,7 +69,7 @@ export function PageCanvasCell({ cell, pxPerMm, tool, scope, spaceDown, onCurren
   };
   const pointerEvents = { onPointerMove:move, onPointerUp:(e: React.PointerEvent<HTMLElement>) => end(e), onPointerCancel:(e: React.PointerEvent<HTMLElement>) => end(e, true) };
   return <div data-canvas-page-id={page.id} style={{ left:cell.cellXMm*pxPerMm, top:cell.cellYMm*pxPerMm, width:cell.cellWidthMm*pxPerMm, height:cell.cellHeightMm*pxPerMm }} className="absolute overflow-hidden">
-    <div onClick={() => { if (tool === 'select' || !page.isHighlighted) onCurrentPage(page.id, false); }}
+    <div onClick={() => { if (tool === 'select' || ((tool === 'move' || tool === 'crop') && !page.isHighlighted)) onCurrentPage(page.id, false); }}
       onPointerDown={e => { if (tool === 'move') begin(e,'move'); }} {...pointerEvents}
       style={{ left:display.x, top:display.y, width:display.width, height:display.height, touchAction:canEdit ? 'none' : 'auto', cursor:canEdit && tool === 'move' ? 'move' : 'pointer' }}
       className={`absolute overflow-hidden ${page.isHighlighted ? 'ring-2 ring-inset ring-sky-500' : ''}`}>

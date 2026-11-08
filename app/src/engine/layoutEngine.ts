@@ -232,7 +232,7 @@ export function computeImpositionSheets(
       let pageH = isRotated90 ? croppedWidth : croppedHeight;
 
       // D3: Auto-rotate page to best fit the cell aspect ratio
-      if (layout.autoRotateToFit) {
+      if (layout.autoRotateToFit && !page.overrides?.manualRotation) {
         const cellIsLandscape = cellWidthMm > cellHeightMm;
         const pageIsLandscape = pageW > pageH;
         if (cellIsLandscape !== pageIsLandscape && Math.abs(cellWidthMm - cellHeightMm) > 2) {

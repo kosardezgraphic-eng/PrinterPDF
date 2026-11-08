@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useAppStore, type PageEditScope } from '../store/useAppStore';
 import { PageCanvasCell, type CanvasTool } from './PageCanvasCell';
+import { LayoutGuides, MeasurementTool } from './SheetTools';
 import { t } from '../i18n/translations';
 import {
   computeImpositionSheets,
@@ -29,7 +30,7 @@ import {
   resolveTextMacros,
 } from '../engine/watermarkEngine';
 import { formatLocalizedNumber } from '../i18n/shamsi';
-import type { ComputedSheetSide, PrinterInfo } from '@shared/models';
+import type { ComputedSheetSide, LayoutSettings, PrinterInfo } from '@shared/models';
 
 interface PreviewWorkspaceProps {
   onCursorMoveMm: (pos: { x: number; y: number } | null) => void;
@@ -41,7 +42,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const {
     pages,
     documents,
-    layout,
+    layout: savedLayout,
     effects,
     watermark,
     pageNumbering,
@@ -63,6 +64,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     importFiles,
     loadSampleWorkspace,
     applyPageGeometry,
+    commitLayoutGuides,
     selectPrinter,
     setDefaultPrinter,
     simulatePrinterStatusChange,
@@ -78,6 +80,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const suppressClick = useRef(false);
   const [spaceDown, setSpaceDown] = useState(false);
   const [canvasTool, setCanvasTool] = useState<CanvasTool>('select');
+  const [draftLayout, setDraftLayout] = useState<LayoutSettings | null>(null);
   const [editScope, setEditScope] = useState<PageEditScope>('selected');
   const [currentEditPageId, setCurrentEditPageId] = useState<string | null>(null);
   const [panning, setPanning] = useState(false);
@@ -89,6 +92,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     yPercent: number;
   } | null>(null);
 
+  const layout = draftLayout ?? savedLayout;
   const lang = settings.language;
   const tr = t(lang);
 
@@ -432,6 +436,10 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 </div>
               )}
 
+              {canvasTool === 'layout' && <LayoutGuides sheet={sheetSide} layout={layout} pxPerMm={basePxPerMm} spaceDown={spaceDown} language={lang}
+                onDraft={setDraftLayout} onCommit={next => commitLayoutGuides({ marginsMm:next.marginsMm, horizontalGutterMm:next.horizontalGutterMm, verticalGutterMm:next.verticalGutterMm })} />}
+              {canvasTool === 'measure' && <MeasurementTool sheet={sheetSide} unit={settings.unit} language={lang} spaceDown={spaceDown} />}
+
               {/* Precision Loupe Magnifier (J1 / F6) */}
               {loupeEnabled && loupeCoords && (
                 <div
@@ -575,9 +583,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
       )}
 
       {sheets.length > 0 && <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-200">
-        {(['select', 'move', 'crop'] as const).map(tool => <button key={tool} type="button" aria-pressed={canvasTool === tool}
-          onClick={() => setCanvasTool(tool)} className={`rounded-lg px-3 py-1.5 ${canvasTool === tool ? 'bg-sky-600 text-white' : 'bg-slate-800 hover:bg-slate-700'}`}>
-          {lang === 'fa' ? { select:'انتخاب', move:'جابجایی / اندازه', crop:'برش' }[tool] : { select:'Select', move:'Move / resize', crop:'Crop' }[tool]}
+        {(['select', 'move', 'crop', 'layout', 'measure'] as const).map(tool => <button key={tool} type="button" aria-pressed={canvasTool === tool}
+          onClick={() => { setDraftLayout(null); setCanvasTool(tool); }} className={`rounded-lg px-3 py-1.5 ${canvasTool === tool ? 'bg-sky-600 text-white' : 'bg-slate-800 hover:bg-slate-700'}`}>
+          {lang === 'fa' ? { select:'انتخاب', move:'جابجایی / اندازه', crop:'برش', layout:'حاشیه / فاصله', measure:'خط‌کش' }[tool] : { select:'Select', move:'Move / resize', crop:'Crop', layout:'Margins / gutters', measure:'Measure' }[tool]}
         </button>)}
         <label className="flex items-center gap-1">{lang === 'fa' ? 'اعمال روی:' : 'Apply to:'}
           <select value={editScope} onChange={e => setEditScope(e.target.value as PageEditScope)} className="rounded border border-slate-700 bg-slate-800 px-2 py-1">
@@ -590,7 +598,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
           const page = pages.find(item => item.id === currentEditPageId && item.isHighlighted) ?? pages.find(item => item.isHighlighted);
           if (page) applyPageGeometry(page.id, editScope, { kind:'reset' });
         }} className="rounded bg-slate-800 px-3 py-1.5 hover:bg-slate-700 disabled:opacity-50">{lang === 'fa' ? 'بازنشانی برش و اندازه' : 'Reset crop and size'}</button>
-        {canvasTool !== 'select' && <span className="text-slate-400">{lang === 'fa' ? 'ابتدا صفحه‌ها را از بندانگشتی‌ها انتخاب کنید؛ دستگیره‌ها را با موس یا لمس بکشید.' : 'Select thumbnails first, then drag the handles with mouse or touch.'}</span>}
+        {(canvasTool === 'move' || canvasTool === 'crop') && <span className="text-slate-400">{lang === 'fa' ? 'ابتدا صفحه‌ها را از بندانگشتی‌ها انتخاب کنید؛ دستگیره‌ها را با موس یا لمس بکشید.' : 'Select thumbnails first, then drag the handles with mouse or touch.'}</span>}
+        {canvasTool === 'layout' && <span className="text-slate-400">{lang === 'fa' ? 'سبز: حاشیه؛ بنفش: فاصلهٔ یکسان همهٔ ستون‌ها یا ردیف‌ها. با موس یا لمس بکشید.' : 'Drag green margin or purple uniform gutter handles with mouse or touch.'}</span>}
+        {canvasTool === 'measure' && <span className="text-slate-400">{lang === 'fa' ? 'برای اندازه‌گیری بکشید؛ Shift جهت افقی یا عمودی را قفل می‌کند.' : 'Drag to measure; hold Shift to lock horizontally or vertically.'}</span>}
       </div>}
 
       {showPreflight && (
