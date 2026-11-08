@@ -39,3 +39,12 @@ it('keeps printer lists empty and reports an initialization failure', async () =
   expect(useAppStore.getState().toasts.some(toast => toast.message?.includes('pipe unavailable'))).toBe(true);
   log.mockRestore();
 });
+
+it('does not report simulated batch jobs as printed', async () => {
+  const { useAppStore } = await import('../store/useAppStore');
+  useAppStore.setState({ batchQueue: [{ id: 'batch-1', status: 'queued', progressPercent: 0 } as never] });
+  await useAppStore.getState().runBatchQueue();
+  expect(useAppStore.getState().batchQueue[0].status).toBe('failed');
+  expect(useAppStore.getState().isBatchRunning).toBe(false);
+  expect(useAppStore.getState().toasts.at(-1)?.type).toBe('error');
+});

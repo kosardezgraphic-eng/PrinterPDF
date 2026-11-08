@@ -1292,46 +1292,18 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     runBatchQueue: async () => {
-      if (get().isBatchRunning) return;
-      set({ isBatchRunning: true });
-
-      const queue = get().batchQueue;
-      for (const item of queue) {
-        if (!get().isBatchRunning) break;
-        if (item.status === 'completed') continue;
-
-        set((s) => ({
-          batchQueue: s.batchQueue.map((b) =>
-            b.id === item.id
-              ? { ...b, status: 'processing', progressPercent: 45 }
-              : b
-          ),
-        }));
-
-        await new Promise((r) => setTimeout(r, 450));
-
-        set((s) => ({
-          batchQueue: s.batchQueue.map((b) =>
-            b.id === item.id
-              ? {
-                  ...b,
-                  status: 'completed',
-                  progressPercent: 100,
-                  completedAt: new Date().toISOString(),
-                }
-              : b
-          ),
-        }));
-      }
-
-      set({ isBatchRunning: false });
-      get().addToast({
-        type: 'success',
-        title:
-          get().settings.language === 'fa'
-            ? 'پردازش صف چاپ دسته‌ای (Batch) با موفقیت به پایان رسید'
-            : 'Batch print queue completed successfully',
-      });
+      // Batch items contain only metadata, not a snapshot of the document bytes.
+      // Marking them complete would falsely report that a job was printed.
+      const message = get().settings.language === 'fa'
+        ? 'چاپ دسته‌ای هنوز به ارسال واقعی اسناد متصل نیست؛ هیچ کاری چاپ نشد.'
+        : 'Batch printing is not connected to document submission; no jobs were printed.';
+      set(state => ({
+        isBatchRunning: false,
+        batchQueue: state.batchQueue.map(item => item.status === 'queued'
+          ? { ...item, status: 'failed', progressPercent: 0 }
+          : item),
+      }));
+      get().addToast({ type: 'error', title: message });
     },
 
     pauseBatchQueue: () => {
