@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   FileText,
   Bookmark,
@@ -18,7 +18,9 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { t } from '../i18n/translations';
-import { buildCssFilterForPage } from '../engine/effectsPipeline';
+import { computeImpositionSheets } from '../engine/layoutEngine';
+import { PageThumbnail } from './PageThumbnail';
+import type { ComputedCellPlacement } from '@shared/models';
 import { formatLocalizedNumber } from '../i18n/shamsi';
 
 interface ContextMenuState {
@@ -33,6 +35,8 @@ export const SidebarPages: React.FC = () => {
     pages,
     bookmarks,
     effects,
+    layout,
+    sidebarReveal,
     settings,
     sidebarTab,
     setSidebarTab,
@@ -56,6 +60,32 @@ export const SidebarPages: React.FC = () => {
 
   const [dragFromIdx, setDragFromIdx] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+
+  const listRef = useRef<HTMLDivElement>(null);
+  const thumbnailRefs = useRef(new Map<string, HTMLDivElement>());
+  const placements = useMemo(() => {
+    const byPage = new Map<string, ComputedCellPlacement>();
+    const add = (sheetPages: typeof pages) => {
+      for (const sheet of computeImpositionSheets(sheetPages, layout)) {
+        for (const cell of sheet.cells) if (cell.page && !byPage.has(cell.page.id)) byPage.set(cell.page.id, cell);
+      }
+    };
+    add(pages);
+    // Excluded pages have no real placement; preview them using the same layout rules.
+    const excluded = pages.filter(page => !page.selectedForPrint);
+    if (excluded.length) add(excluded.map(page => ({ ...page, selectedForPrint: true })));
+    return byPage;
+  }, [pages, layout]);
+
+  useLayoutEffect(() => {
+    if (!sidebarReveal || sidebarTab !== 'pages') return;
+    const list = listRef.current, item = thumbnailRefs.current.get(sidebarReveal.pageId);
+    if (!list || !item) return;
+    // Scroll only the sidebar, never the main preview viewport.
+    const bounds = list.getBoundingClientRect(), itemBounds = item.getBoundingClientRect();
+    if (itemBounds.top < bounds.top) list.scrollTop += itemBounds.top - bounds.top;
+    else if (itemBounds.bottom > bounds.bottom) list.scrollTop += itemBounds.bottom - bounds.bottom;
+  }, [sidebarReveal, sidebarTab]);
 
   const lang = settings.language;
   const tr = t(lang);
@@ -204,7 +234,7 @@ export const SidebarPages: React.FC = () => {
           </div>
 
           {/* Grouped File & Page Thumbnail List */}
-          <div className="flex-1 overflow-y-auto p-2 space-y-2.5">
+          <div ref={listRef} data-thumbnail-list className="flex-1 overflow-y-auto p-2 space-y-2.5">
             {documents.map((doc) => {
               const docPages = pages
                 .map((page, globalIdx) => ({ page, globalIdx }))
@@ -258,10 +288,13 @@ export const SidebarPages: React.FC = () => {
                   {!doc.collapsed && (
                     <div className="grid grid-cols-2 gap-2 p-2">
                       {docPages.map(({ page, globalIdx }) => {
-                        const cssFilter = buildCssFilterForPage(page, effects);
+                        const cell = placements.get(page.id);
                         return (
                           <div
                             key={page.id}
+                            ref={element => { if (element) thumbnailRefs.current.set(page.id, element); else thumbnailRefs.current.delete(page.id); }}
+                            data-page-id={page.id}
+                            aria-label={`${lang === 'fa' ? 'صفحه' : 'Page'} ${globalIdx + 1}`}
                             draggable
                             onDragStart={() => setDragFromIdx(globalIdx)}
                             onDragOver={(e) => e.preventDefault()}
@@ -333,20 +366,8 @@ export const SidebarPages: React.FC = () => {
                               </div>
                             </div>
 
-                            {/* Thumbnail Image */}
-                            <div className="relative flex h-28 items-center justify-center overflow-hidden rounded-lg bg-slate-950">
-                              {page.thumbnailDataUrl && (
-                                <img
-                                  src={page.thumbnailDataUrl}
-                                  alt={`Page ${globalIdx + 1}`}
-                                  style={{
-                                    filter: cssFilter,
-                                    transform: `rotate(${page.rotation}deg)`,
-                                  }}
-                                  className="max-h-full max-w-full object-contain transition duration-150"
-                                />
-                              )}
-                            </div>
+                            {/* Thumbnail mirrors the actual cell placement, crop, rotation and effects. */}
+                            {cell && <PageThumbnail page={page} cell={cell} effects={effects} />}
 
                             {/* Bottom Info */}
                             <div className="mt-1 flex items-center justify-between text-[10px] text-slate-400">

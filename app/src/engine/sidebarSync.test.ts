@@ -1,0 +1,116 @@
+// @vitest-environment jsdom
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PageItem, SourceDocument } from '@shared/models';
+import { DEFAULT_LAYOUT, DEFAULT_SETTINGS, useAppStore } from '../store/useAppStore';
+import { PreviewWorkspace } from '../components/PreviewWorkspace';
+import { SidebarPages } from '../components/SidebarPages';
+import { pageImageStyle } from '../components/PageContentImage';
+
+const makePage = (id: string, doc: string, highlighted = false): PageItem => ({
+  id, documentId:doc, documentName:doc, sourcePageNumber:1, widthMm:100, heightMm:200, rotation:0,
+  selectedForPrint:true, isHighlighted:highlighted, isBlankPage:false, colorProfile:'color', inkCoveragePercent:10,
+  thumbnailDataUrl:'data:image/png;base64,AA==',
+});
+const doc = (id: string, collapsed = false): SourceDocument => ({ id, name:id, filePath:'', fileSize:100,
+  fileType:'pdf', mimeType:'application/pdf', pageCount:1, createdAt:'', collapsed });
+const highlights = () => useAppStore.getState().pages.filter(p => p.isHighlighted).map(p => p.id);
+let container: HTMLDivElement;
+let root: Root;
+beforeEach(() => {
+  (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  useAppStore.setState({ documents:[doc('d1'),doc('d2',true)], pages:[makePage('p1','d1',true),makePage('p2','d2')],
+    layout:{...DEFAULT_LAYOUT, rows:1,cols:1,duplexMode:'none',autoRotateToFit:false}, settings:{...DEFAULT_SETTINGS,language:'en'},
+    activeSheetIndex:0, viewMode:'single', sidebarTab:'pages', sidebarReveal:null });
+  container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+  act(() => root.render(React.createElement(React.Fragment, null,
+    React.createElement(SidebarPages), React.createElement(PreviewWorkspace, {onCursorMoveMm:()=>{}}))));
+});
+afterEach(() => { act(() => root.unmount()); container.remove(); });
+
+describe('preview and thumbnails', () => {
+  it('selects and reveals the corresponding thumbnail on mouse wheel navigation', () => {
+    expect(container.querySelector('[data-page-id="p2"]')).toBeNull();
+    const viewport = container.querySelector('[data-preview-viewport]')!;
+    act(() => viewport.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:120})));
+    expect(useAppStore.getState().activeSheetIndex).toBe(1);
+    expect(highlights()).toEqual(['p2']);
+    expect(useAppStore.getState().documents[1].collapsed).toBe(false);
+    expect(container.querySelector('[data-page-id="p2"]')?.className).toContain('border-sky-500');
+    const button = Array.from(container.querySelectorAll('button')).find(b => b.textContent?.includes('Prev Sheet'))!;
+    act(() => button.click());
+    expect(highlights()).toEqual(['p1']);
+  });
+  it('scrolls only the thumbnail list when a preview page is outside it', () => {
+    const rect = (top: number, bottom: number) => ({top,bottom,left:0,right:100,width:100,height:bottom-top,x:0,y:top,toJSON:()=>({})});
+    const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.hasAttribute('data-thumbnail-list')) return rect(0,200);
+      if (this.dataset.pageId === 'p2') return rect(300,400);
+      return rect(0,100);
+    });
+    const viewport = container.querySelector('[data-preview-viewport]') as HTMLElement;
+    act(() => viewport.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:120})));
+    expect((container.querySelector('[data-thumbnail-list]') as HTMLElement).scrollTop).toBe(200);
+    expect(viewport.scrollTop).toBe(0);
+    measure.mockRestore();
+  });
+  it('follows scrolling in continuous view and clears selection for a blank duplex side', () => {
+    act(() => useAppStore.setState({ viewMode:'continuous', layout:{...useAppStore.getState().layout,duplexMode:'long-edge'}, pages:[makePage('p1','d1',true)] }));
+    const viewport = container.querySelector('[data-preview-viewport]') as HTMLElement;
+    Object.defineProperty(viewport,'clientHeight',{value:100,configurable:true});
+    vi.spyOn(viewport,'getBoundingClientRect').mockReturnValue({top:0,bottom:100,left:0,right:100,width:100,height:100,x:0,y:0,toJSON:()=>({})});
+    const sides = container.querySelectorAll<HTMLElement>('[data-sheet-index]');
+    vi.spyOn(sides[0],'getBoundingClientRect').mockReturnValue({top:-200,bottom:-100,left:0,right:100,width:100,height:100,x:0,y:-200,toJSON:()=>({})});
+    vi.spyOn(sides[1],'getBoundingClientRect').mockReturnValue({top:0,bottom:100,left:0,right:100,width:100,height:100,x:0,y:0,toJSON:()=>({})});
+    act(() => viewport.dispatchEvent(new Event('scroll',{bubbles:true})));
+    expect(useAppStore.getState().activeSheetIndex).toBe(1);
+    expect(highlights()).toEqual([]);
+  });
+  it('follows the nearest sheet while scrolling in grid view', () => {
+    act(() => useAppStore.setState({viewMode:'grid'}));
+    const viewport = container.querySelector('[data-preview-viewport]') as HTMLElement;
+    Object.defineProperties(viewport,{clientHeight:{value:100,configurable:true},clientWidth:{value:100,configurable:true}});
+    const rect = (left: number, top: number) => ({top,bottom:top+100,left,right:left+100,width:100,height:100,x:left,y:top,toJSON:()=>({})});
+    vi.spyOn(viewport,'getBoundingClientRect').mockReturnValue(rect(0,0));
+    const sides = container.querySelectorAll<HTMLElement>('[data-sheet-index]');
+    vi.spyOn(sides[0],'getBoundingClientRect').mockReturnValue(rect(-200,0));
+    vi.spyOn(sides[1],'getBoundingClientRect').mockReturnValue(rect(0,0));
+    act(() => viewport.dispatchEvent(new Event('scroll',{bubbles:true})));
+    expect(useAppStore.getState().activeSheetIndex).toBe(1);
+    expect(highlights()).toEqual(['p2']);
+  });
+  it('keeps a sidebar multiselection during edits and mirrors crop, rotation, move and effects', () => {
+    act(() => useAppStore.getState().highlightPage('p2',true));
+    act(() => useAppStore.getState().focusPageFromPreview('p1',true));
+    expect(highlights()).toEqual(['p1','p2']);
+    const card = () => container.querySelector('[data-page-id="p1"]')!;
+    const content = () => card().querySelector('[data-thumbnail-content]') as HTMLElement;
+    const image = () => card().querySelector('img') as HTMLImageElement;
+    const beforeWidth = content().style.width;
+    act(() => useAppStore.getState().applyPageGeometry('p1','current', {kind:'transform',transform:{x:.2,y:0,scaleX:.5,scaleY:1}}));
+    expect(content().style.width).not.toBe(beforeWidth);
+    expect(highlights()).toEqual(['p1','p2']);
+    act(() => useAppStore.getState().applyPageGeometry('p1','current', {kind:'crop',crop:{top:0,right:0,bottom:0,left:.25}}));
+    expect(parseFloat(image().style.width)).toBeCloseTo(100 / .75);
+    act(() => useAppStore.getState().rotatePages(['p1'],90));
+    expect(image().style.transform).toContain('rotate(90deg)');
+    act(() => useAppStore.getState().togglePageInvertOverride('p1'));
+    expect(image().style.filter).toContain('invert');
+    act(() => useAppStore.getState().undo());
+    expect(image().style.filter).not.toContain('invert');
+  });
+  it('uses the clicked cell in an N-up sheet and does not change print selection', () => {
+    act(() => useAppStore.setState({ layout:{...useAppStore.getState().layout,cols:2}, viewMode:'grid' }));
+    const content = container.querySelector('[data-canvas-page-id="p2"] > div') as HTMLElement;
+    act(() => content.click());
+    expect(highlights()).toEqual(['p2']);
+    expect(useAppStore.getState().pages.every(p => p.selectedForPrint)).toBe(true);
+  });
+  it('uses the same rotated crop mapping for a non-square image', () => {
+    const p = {...makePage('p','d'),overrides:{cropBoxMm:{top:0,right:0,bottom:0,left:25}}};
+    const style = pageImageStyle(p,90,200,75);
+    expect(parseFloat(style.top as string)).toBeCloseTo(100 / 3);
+    expect(style.transform).toContain('90deg');
+  });
+});

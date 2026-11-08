@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   UploadCloud,
   ChevronRight,
@@ -58,6 +58,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     spoolerJobs,
     batchQueue,
     setActiveSheetIndex,
+    focusPageFromPreview,
     setZoomPercent,
     importFiles,
     loadSampleWorkspace,
@@ -109,6 +110,16 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
 
   const basePxPerMm = PREVIEW_PX_PER_MM * (zoomPercent / 100);
 
+  const activateSheet = useCallback((index: number) => {
+    if (!sheets.length) return;
+    const next = Math.max(0, Math.min(sheets.length - 1, index));
+    if (next === safeSheetIdx) return;
+    setActiveSheetIndex(next);
+    const page = sheets[next].cells.find(cell => cell.page)?.page;
+    focusPageFromPreview(page?.id ?? null);
+    setCurrentEditPageId(page?.id ?? null);
+  }, [sheets, safeSheetIdx, setActiveSheetIndex, focusPageFromPreview]);
+
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
@@ -122,13 +133,13 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
         const step = wheelSheetStep(event.deltaY, now, lastWheelStep.current);
         if (step) {
           lastWheelStep.current = now;
-          setActiveSheetIndex(Math.max(0, Math.min(sheets.length - 1, safeSheetIdx + step)));
+          activateSheet(safeSheetIdx + step);
         }
       }
     };
     viewport.addEventListener('wheel', onWheel, { passive: false });
     return () => viewport.removeEventListener('wheel', onWheel);
-  }, [viewMode, sheets.length, safeSheetIdx, setZoomPercent, setActiveSheetIndex]);
+  }, [viewMode, sheets.length, safeSheetIdx, setZoomPercent, activateSheet]);
 
   useEffect(() => {
     const editable = (target: EventTarget | null) => target instanceof HTMLElement &&
@@ -146,7 +157,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
 
   const navigateSheet = (index: number) => {
     const next = Math.max(0, Math.min(sheets.length - 1, index));
-    setActiveSheetIndex(next);
+    activateSheet(next);
     if (viewMode === 'continuous') {
       viewportRef.current?.querySelector(`[data-sheet-index="${next}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
@@ -361,7 +372,11 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                       )}
                     </div>
 
-                    {cell.page && <PageCanvasCell cell={cell} pxPerMm={basePxPerMm} tool={canvasTool} scope={editScope} spaceDown={spaceDown} onCurrentPage={setCurrentEditPageId} />}
+                    {cell.page && <PageCanvasCell cell={cell} pxPerMm={basePxPerMm} tool={canvasTool} scope={editScope} spaceDown={spaceDown} onCurrentPage={(id, preserveSelection) => {
+                      setCurrentEditPageId(id);
+                      setActiveSheetIndex(sheetSide.sideIndex - 1);
+                      focusPageFromPreview(id, preserveSelection);
+                    }} />}
                   </React.Fragment>
                 );
               })}
@@ -597,6 +612,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
       {/* Main Sheet Preview Canvas Area */}
       <div
         ref={viewportRef}
+        data-preview-viewport
         className={`flex-1 overflow-auto p-6 ${spaceDown ? (panning ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
         onPointerDown={(e) => {
           if (!spaceDown || e.button !== 0) return;
@@ -613,16 +629,20 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
         onPointerCancel={() => { drag.current = null; setPanning(false); suppressClick.current = false; }}
         onClickCapture={(e) => { if (suppressClick.current) { suppressClick.current = false; e.preventDefault(); e.stopPropagation(); } }}
         onScroll={(e) => {
-          if (viewMode !== 'continuous') return;
+          if (viewMode !== 'continuous' && viewMode !== 'grid') return;
           const viewport = e.currentTarget;
-          const mid = viewport.getBoundingClientRect().top + viewport.clientHeight / 2;
+          const bounds = viewport.getBoundingClientRect();
+          const midY = bounds.top + viewport.clientHeight / 2;
+          const midX = bounds.left + viewport.clientWidth / 2;
           let closest = safeSheetIdx, distance = Infinity;
           viewport.querySelectorAll<HTMLElement>('[data-sheet-index]').forEach(element => {
             const rect = element.getBoundingClientRect();
-            const d = Math.abs((rect.top + rect.bottom) / 2 - mid);
+            const dy = (rect.top + rect.bottom) / 2 - midY;
+            const dx = viewMode === 'grid' ? (rect.left + rect.right) / 2 - midX : 0;
+            const d = dx * dx + dy * dy;
             if (d < distance) { distance = d; closest = Number(element.dataset.sheetIndex); }
           });
-          if (closest !== safeSheetIdx) setActiveSheetIndex(closest);
+          if (closest !== safeSheetIdx) activateSheet(closest);
         }}
       >
         {sheets.length === 0 ? (
