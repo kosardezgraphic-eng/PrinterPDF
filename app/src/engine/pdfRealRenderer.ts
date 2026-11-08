@@ -40,6 +40,39 @@ export function analyzeRgbaPixels(rgba: Uint8ClampedArray): {
   };
 }
 
+// Bundle PDF.js' standard fonts with the worker so it does not rely on network access.
+const standardFonts = import.meta.glob<string>('../../../node_modules/pdfjs-dist/standard_fonts/*.{ttf,pfb}', {
+  eager: true, query: '?url&inline', import: 'default',
+});
+class BundledStandardFontFactory {
+  async fetch({ filename }: { filename: string }) {
+    const entry = Object.entries(standardFonts).find(([name]) => name.endsWith(`/${filename}`));
+    if (!entry) throw new Error(`PDF standard font unavailable: ${filename}`);
+    const response = await fetch(entry[1]);
+    if (!response.ok) throw new Error(`Failed to load PDF standard font: ${filename}`);
+    return new Uint8Array(await response.arrayBuffer());
+  }
+}
+
+/** PDF.js also creates temporary canvases for images and masks. Workers have no document. */
+class WorkerCanvasFactory {
+  create(width: number, height: number) {
+    if (width <= 0 || height <= 0) throw new Error('Invalid canvas size');
+    const canvas = new OffscreenCanvas(width, height);
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Could not create a temporary PDF canvas');
+    return { canvas, context };
+  }
+  reset(pair: { canvas: OffscreenCanvas }, width: number, height: number) {
+    if (width <= 0 || height <= 0) throw new Error('Invalid canvas size');
+    pair.canvas.width = width; pair.canvas.height = height;
+  }
+  destroy(pair: { canvas: OffscreenCanvas | null; context: OffscreenCanvasRenderingContext2D | null }) {
+    if (pair.canvas) { pair.canvas.width = 0; pair.canvas.height = 0; }
+    pair.canvas = null; pair.context = null;
+  }
+}
+
 export async function renderAndAnalyzePdfPages(
   pdfBytes: Uint8Array,
   _docName: string,
@@ -48,7 +81,7 @@ export async function renderAndAnalyzePdfPages(
   if (typeof OffscreenCanvas === 'undefined') {
     throw new Error('OffscreenCanvas is required for PDF rendering in the worker');
   }
-  const task = pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes), useSystemFonts: true, isEvalSupported: false });
+  const task = pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes), useSystemFonts: false, isEvalSupported: false, disableFontFace: true, CanvasFactory: WorkerCanvasFactory, StandardFontDataFactory: BundledStandardFontFactory });
   try {
     const pdf = await task.promise;
     const results: RealPdfPageAnalysis[] = [];

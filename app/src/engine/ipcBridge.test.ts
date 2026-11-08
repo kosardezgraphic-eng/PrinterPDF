@@ -32,6 +32,16 @@ it('keeps printer lists empty and reports an initialization failure', async () =
   vi.stubGlobal('window', { printStudioAPI: { isElectron: true,
     listPrinters: vi.fn().mockRejectedValue(new Error('pipe unavailable')),
     listSpoolerJobs: vi.fn().mockRejectedValue(new Error('pipe unavailable')) } });
+  vi.stubGlobal('Worker', class {
+    onmessage: (event: unknown) => void = () => {};
+    terminate() {}
+    async postMessage(payload: { id: string; pdfBytes: Uint8Array }) {
+      const { PDFDocument } = await import('pdf-lib');
+      const doc = await PDFDocument.load(payload.pdfBytes);
+      const pages = doc.getPages().map((_, i) => ({ pageNumber: i + 1, colorProfile: 'color', inkCoveragePercent: 1, thumbnailDataUrl: 'data:image/png;base64,test', extractedTextLines: [] }));
+      this.onmessage({ data: { id: payload.id, type: 'analyze-pdf-result', pages } });
+    }
+  });
   const log = vi.spyOn(console, 'error').mockImplementation(() => {});
   await useAppStore.getState().initializeWorkspace();
   expect(useAppStore.getState().printers).toEqual([]);

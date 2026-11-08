@@ -45,7 +45,7 @@ export type RibbonTabId =
   | 'printers'
   | 'view';
 
-export type PreviewViewMode = 'single' | 'double' | 'grid';
+export type PreviewViewMode = 'single' | 'double' | 'grid' | 'continuous';
 
 export interface ToastNotification {
   id: string;
@@ -233,6 +233,7 @@ interface AppState {
   highlightPage: (pageId: string, multiSelect?: boolean, rangeSelect?: boolean) => void;
   selectAllForPrint: (selected: boolean) => void;
   selectOddEvenForPrint: (mode: 'odd' | 'even') => void;
+  invertPrintSelection: () => void;
   reversePageOrder: () => void;
   reorderPage: (fromIndex: number, toIndex: number) => void;
   moveHighlightedPages: (direction: 'up' | 'down') => void;
@@ -384,11 +385,17 @@ export const useAppStore = create<AppState>((set, get) => {
     toasts: [],
 
     initializeWorkspace: async () => {
-      const [printerResult, jobResult, sample] = await Promise.all([
+      const [printerResult, jobResult, sampleResult] = await Promise.all([
         ipcBridge.listPrinters().then(value => ({ value, error: null as unknown })).catch(error => ({ value: [], error })),
         ipcBridge.listSpoolerJobs().then(value => ({ value, error: null as unknown })).catch(error => ({ value: [], error })),
-        createSamplePrintShopWorkspace(),
+        createSamplePrintShopWorkspace().then(value => ({ value, error: null as unknown })).catch(error => ({ value: null, error })),
       ]);
+      const sample = sampleResult.value;
+      if (sampleResult.error) {
+        console.error('Sample PDF rendering failed:', sampleResult.error);
+        get().addToast({ type: 'error', title: get().settings.language === 'fa' ? 'بارگذاری نمونه ناموفق بود' : 'Could not load sample',
+          message: sampleResult.error instanceof Error ? sampleResult.error.message : String(sampleResult.error) });
+      }
       const printers = printerResult.value;
       const spoolerJobs = jobResult.value;
       const error = printerResult.error ?? jobResult.error;
@@ -406,9 +413,9 @@ export const useAppStore = create<AppState>((set, get) => {
         printers,
         selectedPrinterName: defaultPrinter,
         spoolerJobs,
-        documents: sample.documents,
-        pages: sample.pages,
-        bookmarks: sample.bookmarks,
+        documents: sample?.documents ?? [],
+        pages: sample?.pages ?? [],
+        bookmarks: sample?.bookmarks ?? [],
       });
     },
 
@@ -618,6 +625,14 @@ export const useAppStore = create<AppState>((set, get) => {
         before,
         captureSnapshot(get())
       );
+    },
+
+    invertPrintSelection: () => {
+      const before = captureSnapshot(get());
+      set((state) => ({ pages: state.pages.map((page) => ({
+        ...page, selectedForPrint: !page.selectedForPrint, isHighlighted: !page.selectedForPrint,
+      })) }));
+      pushUndo('معکوس کردن انتخاب', 'Invert selection', before, captureSnapshot(get()));
     },
 
     reversePageOrder: () => {
@@ -931,6 +946,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     updateMargins: (patch) => {
+      const before = captureSnapshot(get());
       set((state) => ({
         layout: {
           ...state.layout,
@@ -940,6 +956,7 @@ export const useAppStore = create<AppState>((set, get) => {
           },
         },
       }));
+      pushUndo('تغییر حاشیه‌ها', 'Update margins', before, captureSnapshot(get()));
     },
 
     updateEffects: (patch, recordUndo = false) => {
@@ -1167,45 +1184,13 @@ export const useAppStore = create<AppState>((set, get) => {
       }
     },
 
-    submitPrintJob: async (request) => {
-      const state = get();
-      const printer = state.printers.find((p) => p.name === request.printerName);
-      if (
-        printer &&
-        (printer.status === 'Offline' ||
-          printer.status === 'PaperJam' ||
-          printer.status === 'OutOfPaper')
-      ) {
-        const isFa = state.settings.language === 'fa';
-        state.addToast({
-          type: 'error',
-          title: isFa
-            ? `پرینتر «${printer.name}» در وضعیت ${printer.status} قرار دارد`
-            : `Printer "${printer.name}" is in ${printer.status} state`,
-          message: isFa
-            ? 'لطفاً خطای پرینتر را رفع کنید یا از نوار بالا گزینه «انتخاب خودکار پرینتر» را بزنید.'
-            : 'Resolve the printer alert or use Auto-Select Printer in the Quick Bar.',
-        });
-        return;
-      }
-
-      const activePages = state.pages.filter((p) => p.selectedForPrint);
-      const cellsPerSide = Math.max(1, state.layout.rows * state.layout.cols);
-      const totalSheets = Math.max(1, Math.ceil(activePages.length / cellsPerSide));
-
-      await ipcBridge.submitPrintJob(request, totalSheets);
-      const [printers, spoolerJobs] = await Promise.all([
-        ipcBridge.listPrinters(),
-        ipcBridge.listSpoolerJobs(),
-      ]);
-
-      set({ printers, spoolerJobs, showPrintModal: false });
-      state.addToast({
-        type: 'success',
-        title:
-          state.settings.language === 'fa'
-            ? `دستور چاپ (${totalSheets} برگ × ${request.copies} نسخه) به صف «${request.printerName}» ارسال شد`
-            : `Sent print job (${totalSheets} sheets × ${request.copies}) to "${request.printerName}"`,
+    submitPrintJob: async (_request) => {
+      // The sidecar does not yet implement PDF submission. Do not claim that a
+      // browser simulator or a request without PDF bytes was physically printed.
+      get().addToast({
+        type: 'error',
+        title: get().settings.language === 'fa' ? 'چاپ مستقیم هنوز متصل نشده است' : 'Direct printing is not available yet',
+        message: get().settings.language === 'fa' ? 'هیچ کاری به چاپگر ارسال نشد. برای تهیه فایل از خروجی PDF استفاده کنید.' : 'No job was sent to a printer. Export a PDF instead.',
       });
     },
 
@@ -1342,7 +1327,7 @@ export const useAppStore = create<AppState>((set, get) => {
     setSidebarTab: (tab) => set({ sidebarTab: tab }),
     setActiveSheetIndex: (idx) => set({ activeSheetIndex: Math.max(0, idx) }),
     setZoomPercent: (zoom) =>
-      set({ zoomPercent: Math.max(25, Math.min(400, Math.round(zoom))) }),
+      set({ zoomPercent: Math.max(5, Math.min(400, Math.round(zoom))) }),
     setViewMode: (mode) => set({ viewMode: mode }),
     setShowRulers: (show) => set({ showRulers: show }),
     setLoupeEnabled: (enabled) => set({ loupeEnabled: enabled }),

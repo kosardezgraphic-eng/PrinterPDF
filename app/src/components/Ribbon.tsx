@@ -113,6 +113,7 @@ export const Ribbon: React.FC = () => {
     { label: '2-Up (۱×۲)', r: 1, c: 2 },
     { label: '4-Up (۲×۲)', r: 2, c: 2 },
     { label: '6-Up (۲×۳)', r: 2, c: 3 },
+    { label: '8-Up (۲×۴)', r: 2, c: 4 },
     { label: '9-Up (۳×۳)', r: 3, c: 3 },
     { label: '16-Up (۴×۴)', r: 4, c: 4 },
   ];
@@ -380,6 +381,14 @@ export const Ribbon: React.FC = () => {
                     ))}
                     <option value="Custom">Custom</option>
                   </select>
+                  {layout.paperSize === 'Custom' && (['customWidthMm', 'customHeightMm'] as const).map((field) => (
+                    <label key={field} className="flex items-center gap-1 text-slate-300">
+                      <span>{field === 'customWidthMm' ? (lang === 'fa' ? 'عرض' : 'W') : (lang === 'fa' ? 'ارتفاع' : 'H')} mm</span>
+                      <input type="number" min={10} max={2000} value={layout[field]}
+                        onChange={(e) => updateLayout({ [field]: Math.max(10, Math.min(2000, Number(e.target.value) || 10)) })}
+                        className="w-16 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-xs text-white" />
+                    </label>
+                  ))}
                   <button
                     type="button"
                     onClick={() =>
@@ -407,37 +416,22 @@ export const Ribbon: React.FC = () => {
                   {lang === 'fa' ? 'حاشیه، فاصله (Gutter) و مقیاس (D3)' : 'Margins, Gutter & Scale'}
                 </span>
                 <div className="flex items-center gap-1.5">
-                  <label className="flex items-center gap-1 text-slate-300">
-                    <span>{lang === 'fa' ? 'حاشیه:' : 'Margin:'}</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={60}
-                      value={layout.marginsMm.top}
-                      onChange={(e) => {
-                        const v = Math.max(0, Number(e.target.value));
-                        updateMargins({ top: v, right: v, bottom: v, left: v });
-                      }}
-                      className="w-12 rounded border border-slate-700 bg-slate-800 px-1.5 py-1 text-center text-xs text-white"
-                    />
-                  </label>
-                  <label className="flex items-center gap-1 text-slate-300">
-                    <span>{lang === 'fa' ? 'فاصله:' : 'Gutter:'}</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={40}
-                      value={layout.horizontalGutterMm}
-                      onChange={(e) => {
-                        const v = Math.max(0, Number(e.target.value));
-                        updateLayout(
-                          { horizontalGutterMm: v, verticalGutterMm: v },
-                          false
-                        );
-                      }}
-                      className="w-12 rounded border border-slate-700 bg-slate-800 px-1.5 py-1 text-center text-xs text-white"
-                    />
-                  </label>
+                  {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
+                    <label key={side} className="flex items-center gap-1 text-slate-300" title={lang === 'fa' ? `حاشیه ${ { top: 'بالا', right: 'راست', bottom: 'پایین', left: 'چپ' }[side] } (mm)` : `${side} margin (mm)`}>
+                      <span>{lang === 'fa' ? { top: 'بالا', right: 'راست', bottom: 'پایین', left: 'چپ' }[side] : side}</span>
+                      <input type="number" min={0} max={200} value={layout.marginsMm[side]}
+                        onChange={(e) => updateMargins({ [side]: Math.max(0, Math.min(200, Number(e.target.value) || 0)) })}
+                        className="w-12 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-center text-xs text-white" />
+                    </label>
+                  ))}
+                  {(['horizontalGutterMm', 'verticalGutterMm'] as const).map((field) => (
+                    <label key={field} className="flex items-center gap-1 text-slate-300">
+                      <span>{field === 'horizontalGutterMm' ? (lang === 'fa' ? 'افقی' : 'Gap X') : (lang === 'fa' ? 'عمودی' : 'Gap Y')}</span>
+                      <input type="number" min={0} max={200} value={layout[field]}
+                        onChange={(e) => updateLayout({ [field]: Math.max(0, Math.min(200, Number(e.target.value) || 0)) })}
+                        className="w-12 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-center text-xs text-white" />
+                    </label>
+                  ))}
                   <select
                     value={layout.scaleMode}
                     onChange={(e) =>
@@ -450,6 +444,13 @@ export const Ribbon: React.FC = () => {
                     <option value="original">{lang === 'fa' ? '100% واقعی' : 'Original 100%'}</option>
                     <option value="custom">{lang === 'fa' ? 'درصد دلخواه' : 'Custom %'}</option>
                   </select>
+                  {layout.scaleMode === 'custom' && (
+                    <label className="text-slate-300">%
+                      <input type="number" min={10} max={400} value={layout.customScalePercent}
+                        onChange={(e) => updateLayout({ customScalePercent: Math.max(10, Math.min(400, Number(e.target.value) || 10)) })}
+                        className="w-14 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-xs text-white" />
+                    </label>
+                  )}
                 </div>
               </div>
 
@@ -941,7 +942,7 @@ export const Ribbon: React.FC = () => {
           {activeRibbonTab === 'view' && (
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-950 p-1">
-                {(['single', 'double', 'grid'] as const).map((m) => (
+                {(['single', 'continuous', 'double', 'grid'] as const).map((m) => (
                   <button
                     key={m}
                     type="button"
@@ -956,7 +957,9 @@ export const Ribbon: React.FC = () => {
                       ? lang === 'fa'
                         ? 'تک‌برگ'
                         : 'Single'
-                      : m === 'double'
+                      : m === 'continuous'
+                        ? lang === 'fa' ? 'پیوسته' : 'Continuous'
+                        : m === 'double'
                         ? lang === 'fa'
                           ? 'دوبرگ کنار هم (رو/پشت)'
                           : 'Two-Sheet Spread'

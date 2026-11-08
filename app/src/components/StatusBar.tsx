@@ -139,8 +139,8 @@ export const StatusBar: React.FC<StatusBarProps> = ({ cursorPos }) => {
           </button>
           <input
             type="range"
-            min={35}
-            max={250}
+            min={5}
+            max={400}
             value={zoomPercent}
             onChange={(e) => setZoomPercent(Number(e.target.value))}
             className="w-20 accent-sky-500 cursor-pointer"
