@@ -80,7 +80,7 @@ export function getDefaultWatermarkSettings(): WatermarkSettings {
 
 export function getDefaultPageNumberSettings(): PageNumberSettings {
   return {
-    enabled: true,
+    enabled: false,
     target: 'sheet',
     format: 'persian',
     position: 'bottom-center',

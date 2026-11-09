@@ -24,6 +24,7 @@ import { useAppStore, type PageEditScope } from '../store/useAppStore';
 import { PageCanvasCell, type CanvasTool } from './PageCanvasCell';
 import { LayoutGuides, MeasurementTool } from './SheetTools';
 import { RulerGuideProvider, SheetRuler, GuidePaperRef, UserGuideLines } from './RulerGuides';
+import { TextOverlayLayer } from './TextOverlayLayer';
 import { AspectCropControls } from './AspectCropControls';
 import { t } from '../i18n/translations';
 import {
@@ -54,6 +55,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     effects,
     watermark,
     pageNumbering,
+    overlays,
+    selectedOverlayId,
+    selectOverlay,
     settings,
     activeSheetIndex,
     previewPageRequest,
@@ -126,6 +130,16 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     ? computeImpositionSheets([{ ...previewOnlyPage, selectedForPrint: true }], { ...layout, duplexMode:'none' })
     : outputSheets, [previewOnlyPage, layout, outputSheets]);
   const pageNumbers = useMemo(() => new Map(pages.map((page, index) => [page.id, index + 1])), [pages]);
+  const hasTextOverlays = useMemo(() => overlays.some(item => item.kind === 'text'), [overlays]);
+  useEffect(() => {
+    if (!selectedOverlayId) return;
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target?.closest('[data-overlay-id],[data-text-control-panel]')) selectOverlay(null);
+    };
+    document.addEventListener('pointerdown', dismiss, true);
+    return () => document.removeEventListener('pointerdown', dismiss, true);
+  }, [selectedOverlayId, selectOverlay]);
   const preflight = useMemo(() => checkPreflight(pages, documents, outputSheets, effects), [pages, documents, outputSheets, effects]);
   const safeSheetIdx = Math.min(
     Math.max(0, activeSheetIndex),
@@ -486,6 +500,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                   </React.Fragment>
                 );
               })}
+
+              {hasTextOverlays && <TextOverlayLayer sheet={sheetSide} totalSheets={outputSheets.length} pages={pages} pageIndices={pageNumbers} pxPerMm={basePxPerMm} enabled={!previewOnlyPage && canvasTool==='move' && !spaceDown}/>}
 
               {/* F1: Watermark Overlay (Single or Tiled) */}
               {watermark.enabled && resolvedWatermarkText && (

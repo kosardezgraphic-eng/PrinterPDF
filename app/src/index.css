@@ -62,3 +62,8 @@
 
 .ruler-guide[data-axis="x"][data-label-flip="true"] .ruler-guide-label, .ruler-guide-ghost[data-axis="x"][data-label-flip="true"] .ruler-guide-label { left:auto; right:10px; }
 .ruler-guide[data-axis="y"][data-label-flip="true"] .ruler-guide-label, .ruler-guide-ghost[data-axis="y"][data-label-flip="true"] .ruler-guide-label { top:auto; bottom:10px; }
+
+@font-face { font-family: "Shabnam"; src:url("shabnam-font/dist/Shabnam.woff2") format("woff2"); font-weight:400; font-display:swap; }
+@font-face { font-family: "Shabnam"; src:url("shabnam-font/dist/Shabnam-Bold.woff2") format("woff2"); font-weight:700; font-display:swap; }
+@font-face { font-family: "Sahel"; src:url("sahel-font/dist/Sahel.woff2") format("woff2"); font-weight:400; font-display:swap; }
+@font-face { font-family: "Sahel"; src:url("sahel-font/dist/Sahel-Bold.woff2") format("woff2"); font-weight:700; font-display:swap; }

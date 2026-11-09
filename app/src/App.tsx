@@ -7,10 +7,12 @@ import { SidebarPages } from './components/SidebarPages';
 import { PreviewWorkspace } from './components/PreviewWorkspace';
 import { StatusBar } from './components/StatusBar';
 import { ModalsAndToasts } from './components/Modals';
+import { TextControlPanel } from './components/TextControlPanel';
 
 export const App: React.FC = () => {
   const {
     settings,
+    activeRibbonTab,
     pages,
     zoomPercent,
     initializeWorkspace,
@@ -174,6 +176,7 @@ export const App: React.FC = () => {
         <div className="flex flex-1 overflow-hidden">
           <SidebarPages />
           <PreviewWorkspace onCursorMoveMm={setCursorPos} />
+          {activeRibbonTab === 'insert' && <TextControlPanel />}
         </div>
         <StatusBar cursorPos={cursorPos} />
         <ModalsAndToasts />
