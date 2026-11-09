@@ -32,7 +32,7 @@ import {
   convertMmToUnit,
 } from '../engine/layoutEngine';
 import { checkPreflight } from '../engine/preflight';
-import { fitPageZoom, PREVIEW_PX_PER_MM, wheelSheetStep } from '../engine/viewNavigation';
+import { fitPageZoom, isAtWheelEdge, PREVIEW_PX_PER_MM, wheelSheetStep } from '../engine/viewNavigation';
 import {
   formatPageNumberLabel,
   resolveTextMacros,
@@ -87,6 +87,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const lastWheelStep = useRef(-Infinity);
+  const pendingWheelEntry = useRef<{index:number; edge:'top'|'bottom'} | null>(null);
   const drag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const suppressClick = useRef(false);
   const handledPreviewRequest = useRef<typeof previewPageRequest>(null);
@@ -179,6 +180,16 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   }, [navigationTarget, safeSheetIdx, previewOnlyPage, sheets, viewMode]);
   useEffect(() => () => { if (scrollSuppressionTimer.current) clearTimeout(scrollSuppressionTimer.current); }, []);
 
+  // The new sheet must be laid out before its scroll range can be measured.
+  useLayoutEffect(() => {
+    const pending = pendingWheelEntry.current;
+    if (!pending) return;
+    pendingWheelEntry.current = null;
+    const viewport = viewportRef.current;
+    if (!viewport || pending.index !== safeSheetIdx || (viewMode !== 'single' && viewMode !== 'double')) return;
+    viewport.scrollTop = pending.edge === 'top' ? 0 : Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+  }, [safeSheetIdx, viewMode, sheets.length]);
+
   // Determine which sheets to render based on viewMode
   const visibleSheets: ComputedSheetSide[] =
     viewMode === 'grid' || viewMode === 'continuous'
@@ -232,13 +243,20 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault();
         if (event.deltaY !== 0) setZoomPercent(useAppStore.getState().zoomPercent + (event.deltaY < 0 ? 10 : -10));
-      } else if (viewMode === 'single' && sheets.length) {
+      } else if ((viewMode === 'single' || viewMode === 'double') && sheets.length && !event.shiftKey && !event.altKey &&
+        Math.abs(event.deltaY) > Math.abs(event.deltaX) && isAtWheelEdge(event.deltaY,viewport.scrollTop,viewport.scrollHeight,viewport.clientHeight)) {
+        const direction = event.deltaY > 0 ? 1 : -1;
+        const next = safeSheetIdx + direction;
+        if (next < 0 || next >= sheets.length) return;
+        // Keep the default wheel behavior inside a sheet; only consume it at an edge.
         event.preventDefault();
         const now = performance.now();
         const step = wheelSheetStep(event.deltaY, now, lastWheelStep.current);
         if (step) {
           lastWheelStep.current = now;
-          activateSheet(safeSheetIdx + step);
+          pendingWheelEntry.current = {index:next, edge:step > 0 ? 'top' : 'bottom'};
+          setPan({x:0,y:0});
+          activateSheet(next);
         }
       }
     };
@@ -757,7 +775,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
       <div
         ref={viewportRef}
         data-preview-viewport
-        className={`flex-1 overflow-auto p-6 ${spaceDown ? (panning ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
+        className={`min-h-0 min-w-0 flex-1 overflow-auto p-6 ${spaceDown ? (panning ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
         onPointerDown={(e) => {
           suppressNavigationScroll.current = false;
           if (!spaceDown || e.button !== 0) return;
@@ -824,8 +842,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
           </div>
         ) : (
           <div
-            style={{ transform: `translate(${pan.x}px, ${pan.y}px)` }}
-            className={`flex min-h-full min-w-full items-center justify-center gap-8 ${
+            data-preview-sheet-container
+            style={{ transform: `translate(${pan.x}px, ${pan.y}px)`, alignItems:'safe center', justifyContent:'safe center' }}
+            className={`flex min-h-full min-w-full gap-8 ${
               viewMode === 'grid' ? 'flex-wrap' : viewMode === 'continuous' ? 'flex-col' : 'flex-col md:flex-row'
             }`}
           >
