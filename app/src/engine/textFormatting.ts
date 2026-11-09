@@ -34,13 +34,19 @@ export interface TextTemplateContext {page:number;total:number;sheet:number;file
 export function resolveTextTemplate(text:string,ranges:TextScriptRange[]|undefined,context:TextTemplateContext):{text:string;ranges:TextScriptRange[];error?:string} {
   const original=scriptMap(text.length,ranges), parts:string[]=[],styles:(Script|null)[]=[];let cursor=0,error:string|undefined;
   const append=(value:string, style:(Script|null)[])=>{parts.push(value);styles.push(...style);};
-  const pattern=/\{(page|total|sheet|file|docPage|=([^{}]*))\}/gi;
+  const pattern=/\{([^{}]*)\}/g;
   for(const match of text.matchAll(pattern)){
     const start=match.index!,end=start+match[0].length;
+    const body=match[1].trim(),key=body.toLowerCase();
+    const field=['page','total','sheet','file','docpage'].includes(key);
+    // Unrecognized brace-delimited text remains literal for compatibility.
+    const formula=body.startsWith('=') || /^page\b/i.test(body) && key!=='page';
+    if(!field && !formula)continue;
     append(text.slice(cursor,start),original.slice(cursor,start));
-    const key=match[1].toLowerCase();let result:string;
-    if(key.startsWith('=')){
-      try{if(!match[2]?.trim())throw new Error('Empty formula');result=String(evaluateNumberScript(match[2],context.page));}
+    let result:string;
+    if(formula){
+      const expression=(body.startsWith('=')?body.slice(1):body).replace(/[۰-۹٠-٩]/g,d=>String(d.charCodeAt(0)-(d<='٩'?0x660:0x6f0)));
+      try{if(!expression.trim())throw new Error('Empty formula');result=String(evaluateNumberScript(expression,context.page));}
       catch{result=match[0];error='Invalid text formula';}
     } else result=String(key==='page'?context.page:key==='total'?context.total:key==='sheet'?context.sheet:key==='docpage'?context.docPage:context.file);
     append(result,Array<Script|null>(result.length).fill(original[start]??null));cursor=end;

@@ -4,6 +4,12 @@ export interface OverlayContext { pageIndex: number; total: number; pageId?: str
 export interface OverlayRect { x: number; y: number; width: number; height: number; pixelsPerPoint: number }
 
 const selectedIdSets = new WeakMap<string[], Set<string>>();
+const selectedSheetSets = new WeakMap<number[], Set<number>>();
+function containsSheet(indices: number[], index: number): boolean {
+  let set = selectedSheetSets.get(indices);
+  if (!set) { set = new Set(indices); selectedSheetSets.set(indices, set); }
+  return set.has(index);
+}
 function containsTarget(ids: string[], id: string): boolean {
   let set = selectedIdSets.get(ids);
   if (!set) { set = new Set(ids); selectedIdSets.set(ids, set); }
@@ -11,6 +17,13 @@ function containsTarget(ids: string[], id: string): boolean {
 }
 /** Current and selected are captured by stable page ID at the time of applying the scope. */
 export function matchesOverlayScope(overlay: PageOverlay, context: OverlayContext): boolean {
+  if (overlay.kind === 'text') {
+    if (overlay.coverageMode === 'all') return true;
+    if (overlay.coverageMode === 'selected') {
+      if (overlay.target === 'sheet' && overlay.coverageSheetIndices && containsSheet(overlay.coverageSheetIndices,context.sheetIndex)) return true;
+      if (overlay.target === 'page' && context.pageId && overlay.coveragePageIds && containsTarget(overlay.coveragePageIds,context.pageId)) return true;
+    }
+  }
   const n = overlay.target === 'sheet' ? context.sheetIndex : context.pageIndex;
   switch (overlay.targetScope) {
     case 'all': return true;

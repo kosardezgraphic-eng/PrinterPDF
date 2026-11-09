@@ -8,6 +8,8 @@ import {TextControlPanel} from '../components/TextControlPanel';
 import {Ribbon} from '../components/Ribbon';
 import {DEFAULT_LAYOUT,DEFAULT_SETTINGS,useAppStore} from '../store/useAppStore';
 import {getDefaultPageNumberSettings} from './watermarkEngine';
+import {computeImpositionSheets} from './layoutEngine';
+import {textPlacements} from './textOverlays';
 const page:PageItem={id:'p',documentId:'d',documentName:'d',sourcePageNumber:1,widthMm:200,heightMm:300,rotation:0,selectedForPrint:true,isHighlighted:true,isBlankPage:false,colorProfile:'color',inkCoveragePercent:0};
 let root:Root,host:HTMLDivElement,frames:Map<number,FrameRequestCallback>,seq:number;
 const click=(name:string)=>act(()=>[...host.querySelectorAll('button')].find(b=>b.textContent===name)!.click());
@@ -35,7 +37,7 @@ describe('text controls and preview',()=>{
   expect(checkbox.checked).toBe(false);act(()=>checkbox.click());expect(useAppStore.getState().pageNumbering.enabled).toBe(true);
  });
  it('adds multiple texts, edits content/style and deletes selected text',()=>{
-  click('+ Text');expect(text()).toMatchObject({text:'',fontSize:18,target:'page',targetScope:'document',targetDocumentIds:['d']});
+  click('+ Text');expect(text()).toMatchObject({text:'',fontSize:18,target:'page',targetScope:'current',targetPageIds:['p']});
   expect(document.activeElement).toBe(editor());setValue(editor(),'سلام جهان');expect(useAppStore.getState().textEdit?.text).toBe('سلام جهان');finish();expect(text().text).toBe('سلام جهان');
   act(()=>field('Bold').click());expect(text().bold).toBe(true);
   click('+ Text');expect(useAppStore.getState().overlays).toHaveLength(2);click('Delete text');expect(useAppStore.getState().overlays).toHaveLength(1);
@@ -46,8 +48,10 @@ describe('text controls and preview',()=>{
   act(()=>{scope.value='current';scope.dispatchEvent(new Event('change',{bubbles:true}));});
   expect(text().target).toBe('page');expect(text().targetPageIds).toEqual(['p']);
   const target=field('Text target') as HTMLSelectElement;act(()=>{target.value='sheet';target.dispatchEvent(new Event('change',{bubbles:true}));});expect(text().target).toBe('sheet');
-  click('Apply to all');expect(text().targetScope).toBe('all');
-  click('Apply to checked');expect(text().targetPageIds).toEqual(['p']);expect(useAppStore.getState().pages[0].selectedForPrint).toBe(true);
+  click('Apply to all');expect(text().coverageMode).toBe('all');expect(text().targetScope).toBe('current');
+  click('Apply to all');expect(text().coverageMode).toBeUndefined();expect(text().targetScope).toBe('current');
+  setValue(field('Chosen output sheet numbers') as HTMLInputElement,'1');click('Apply to chosen');
+  expect(text().coverageSheetIndices).toEqual([1]);expect(useAppStore.getState().pages[0].selectedForPrint).toBe(true);
  });
  it('moves text with an undoable gesture and Ctrl-drags a separate copy',()=>{
   click('+ Text');finish();let node=host.querySelector<HTMLElement>('[data-overlay-id]')!;
@@ -95,23 +99,73 @@ describe('text controls and preview',()=>{
   pointer(handle,'pointerdown',100,100);pointer(handle,'pointermove',139,100);pointer(handle,'pointerup',139,100);
   expect(text().widthPercent).toBeCloseTo(61.111111);act(()=>useAppStore.getState().undo());expect(text().widthPercent).toBe(50);
  });
- it('allows choosing a sheet even when document scope is initially active',()=>{
+ it('allows choosing a sheet from the default page scope',()=>{
   click('+ Text');finish();const target=field('Text target') as HTMLSelectElement;
   act(()=>{target.value='sheet';target.dispatchEvent(new Event('change',{bubbles:true}));});
   expect(text()).toMatchObject({target:'sheet',targetScope:'current'});
  });
  it('has an add text action in the Insert ribbon',()=>{
   act(()=>root.render(React.createElement(React.Fragment,null,React.createElement(Ribbon),React.createElement(PreviewWorkspace,{onCursorMoveMm:()=>{}}))));
-  act(()=>field('Add text').click());expect(text().targetScope).toBe('document');expect(document.activeElement).toBe(editor());
+  act(()=>field('Add text').click());expect(text().targetScope).toBe('current');expect(document.activeElement).toBe(editor());
  });
  it('targets the active document and captures highlighted document IDs without changing checked pages',()=>{
   const second={...page,id:'p2',documentId:'d2',documentName:'other',isHighlighted:true};
   act(()=>useAppStore.setState({pages:[page,second],activePageId:'p2'}));click('+ Text');finish();
-  expect(text().targetDocumentIds).toEqual(['d2']);click('Selected documents');
+  expect(text().targetPageIds).toEqual(['p2']);click('Active document');expect(text().targetDocumentIds).toEqual(['d2']);click('Selected documents');
   expect(text().targetDocumentIds).toEqual(['d','d2']);expect(useAppStore.getState().pages.every(p=>p.selectedForPrint)).toBe(true);
  });
  it('opens an unchecked active page for editing without enabling printing',()=>{
   act(()=>useAppStore.setState({pages:[{...page,selectedForPrint:false}],activePageId:'p'}));click('+ Text');
   expect(editor()).toBeTruthy();setValue(editor(),'draft');finish();expect(text().text).toBe('draft');expect(useAppStore.getState().pages[0].selectedForPrint).toBe(false);
+ });
+ it('toggles additional all/chosen pages and restores the original page scope',()=>{
+  const others=[{...page,id:'p2',documentId:'other',selectedForPrint:true,isHighlighted:false},{...page,id:'p3',documentId:'other',selectedForPrint:false,isHighlighted:false}];
+  act(()=>useAppStore.setState({pages:[page,...others],activePageId:'p'}));click('+ Text');finish();
+  expect(text()).toMatchObject({targetScope:'current',targetPageIds:['p']});
+  const all=[...host.querySelectorAll('button')].find(b=>b.textContent==='Apply to all')!;expect(all.getAttribute('aria-pressed')).toBe('false');click('Apply to all');
+  expect(all.getAttribute('aria-pressed')).toBe('true');expect(text().coverageMode).toBe('all');
+  click('Apply to all');expect(text().coverageMode).toBeUndefined();expect(text().targetPageIds).toEqual(['p']);
+  setValue(field('Chosen page numbers') as HTMLInputElement,'۲-۳');click('Apply to chosen');
+  expect(text().coveragePageIds).toEqual(['p2','p3']);expect(text().targetPageIds).toEqual(['p']);
+  expect(useAppStore.getState().pages.map(p=>p.selectedForPrint)).toEqual([true,true,false]);
+  setValue(field('Chosen page numbers') as HTMLInputElement,'2');click('Update selection');expect(text().coveragePageIds).toEqual(['p2']);
+  click('Apply to chosen');expect(text().coverageMode).toBeUndefined();expect(text().targetScope).toBe('current');
+  act(()=>useAppStore.getState().undo());expect(text().coverageMode).toBe('selected');
+ });
+ it('keeps the existing coverage when an invalid selection is entered',()=>{
+  click('+ Text');finish();click('Apply to all');
+  setValue(field('Chosen page numbers') as HTMLInputElement,'1-10000');click('Apply to chosen');
+  expect(text().coverageMode).toBe('all');expect(host.querySelector('[role="alert"]')?.textContent).toContain('valid numbers');
+ });
+ it('allows inserting a user-edited page formula into the inline editor',()=>{
+  click('+ Text');setValue(field('Editable formula') as HTMLInputElement,'page-1000');click('Insert formula');
+  expect(useAppStore.getState().textEdit?.text).toBe('{page-1000}');finish();expect(text().text).toBe('{page-1000}');
+ });
+ it('restores saved additional coverage and lets it return to its original page scope',async()=>{
+  const other={...page,id:'p2',documentId:'d2',isHighlighted:false};
+  act(()=>useAppStore.setState({pages:[page,other],activePageId:'p'}));click('+ Text');finish();
+  setValue(field('Chosen page numbers') as HTMLInputElement,'2');click('Apply to chosen');
+  const saved=JSON.parse(JSON.stringify({layout:DEFAULT_LAYOUT,pages:[page,other],documents:[],overlays:useAppStore.getState().overlays}));
+  await act(async()=>useAppStore.getState().openPspProjectFile({text:async()=>JSON.stringify(saved)} as File));
+  act(()=>useAppStore.getState().selectOverlay(saved.overlays[0].id));
+  expect((field('Chosen page numbers') as HTMLInputElement).value).toBe('2');
+  expect(text().coverageMode).toBe('selected');click('Apply to chosen');
+  expect(text()).toMatchObject({targetScope:'current',targetPageIds:['p']});expect(text().coverageMode).toBeUndefined();
+ });
+ it('limits a legacy document-wide text to the current page and disables all coverage',()=>{
+  const other={...page,id:'p2',sourcePageNumber:2,isHighlighted:false};
+  act(()=>useAppStore.setState({pages:[page,other],activePageId:'p'}));click('+ Text');finish();click('Active document');click('Apply to all');
+  expect(text().targetScope).toBe('document');expect(text().coverageMode).toBe('all');
+  click('Only this page');expect(text()).toMatchObject({targetScope:'current',target:'page',targetPageIds:['p']});expect(text().coverageMode).toBeUndefined();
+  act(()=>useAppStore.getState().undo());expect(text().targetScope).toBe('document');expect(text().coverageMode).toBe('all');
+ });
+ it('new text stays on the active page even when other pages belong to the same document',()=>{
+  const sameDocument=[page,{...page,id:'p2',sourcePageNumber:2,isHighlighted:false},{...page,id:'p3',sourcePageNumber:3,isHighlighted:false}];
+  act(()=>useAppStore.setState({pages:sameDocument,activePageId:'p2'}));click('+ Text');finish();
+  const placements=()=>{const state=useAppStore.getState(),sheets=computeImpositionSheets(state.pages,state.layout);return sheets.map(sheet=>textPlacements(sheet,sheets.length,state.pages,state.overlays).length);};
+  expect(text()).toMatchObject({targetScope:'current',targetPageIds:['p2']});expect(placements()).toEqual([0,1,0]);
+  click('Apply to all');expect(placements()).toEqual([1,1,1]);click('Apply to all');expect(placements()).toEqual([0,1,0]);
+  setValue(field('Chosen page numbers') as HTMLInputElement,'3');click('Apply to chosen');expect(placements()).toEqual([0,1,1]);
+  click('Apply to chosen');expect(placements()).toEqual([0,1,0]);
  });
 });

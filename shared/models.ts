@@ -525,6 +525,11 @@ export interface PageOverlayText extends OverlayBase {
   align: 'right' | 'center' | 'left'; syncGroupId?: string;
   /** Document scopes use stable document IDs; ranges use UTF-16 offsets. */
   targetDocumentIds?: string[];
+  /** Additional coverage is independent of the base scope and can be disabled. */
+  coverageMode?: 'all' | 'selected';
+  coveragePageIds?: string[];
+  /** One-based output side indices, for sheet-targeted text. */
+  coverageSheetIndices?: number[];
   scriptRanges?: TextScriptRange[];
   /** Line height multiplier and extra word/letter spacing in points. */
   lineHeight?: number; wordSpacingPt?: number; letterSpacingPt?: number;
