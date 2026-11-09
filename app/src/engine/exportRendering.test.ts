@@ -128,6 +128,47 @@ describe('real output rendering', () => {
     expect(pixel(image,100,50)).toEqual([255,255,255]);
     expect(pixel(image,160,50)).toEqual([255,0,0]);
   });
+  it('renders overlapping moved cells in the chosen layer order without cell clipping', async () => {
+    const source = await PDFDocument.create();
+    source.addPage([50,100]).drawRectangle({x:0,y:0,width:50,height:100,color:rgb(1,0,0)});
+    source.addPage([50,100]).drawRectangle({x:0,y:0,width:50,height:100,color:rgb(0,0,1)});
+    const doc = {id:'d',fileType:'pdf',rawBytes:await source.save()} as SourceDocument;
+    const pages = [{...page(0),id:'red',widthMm:50*ptToMm},{...page(0),id:'blue',sourcePageNumber:2,widthMm:50*ptToMm}];
+    const matrix = {...layout,cols:2,sheetOrder:'ltr' as const};
+    useAppStore.setState({pages,documents:[doc],layout:matrix});
+    const {computeImpositionSheets} = await import('./layoutEngine');
+    const red = computeImpositionSheets(pages,matrix)[0].cells[0];
+    useAppStore.getState().applyCellTransform('red',red.occurrenceKey!,{x:.6,y:0,scaleX:1,scaleY:1});
+    const generate = () => exportImposedPdf({documents:[doc],pages,layout:useAppStore.getState().layout,effects:{...DEFAULT_EFFECTS,enabled:false},
+      watermark:{...getDefaultWatermarkSettings(),enabled:false},pageNumbering:{...getDefaultPageNumberSettings(),enabled:false},userName:'test'});
+    let bitmap = await render(await generate());
+    expect(pixel(bitmap,35,50)).toEqual([255,0,0]);
+    expect(pixel(bitmap,65,50)).toEqual([0,0,255]);
+    useAppStore.getState().reorderCellLayer(0,red.occurrenceKey!,'front');
+    bitmap = await render(await generate());
+    expect(pixel(bitmap,65,50)).toEqual([255,0,0]);
+    expect(pixel(bitmap,90,50)).toEqual([0,0,255]);
+    useAppStore.getState().undo();
+    bitmap = await render(await generate());
+    expect(pixel(bitmap,65,50)).toEqual([0,0,255]);
+  });
+  it('renders an overlapping PDF page with the same white paper backing as its preview thumbnail', async () => {
+    const source = await PDFDocument.create();
+    source.addPage([50,100]).drawRectangle({x:0,y:0,width:50,height:100,color:rgb(1,0,0)});
+    source.addPage([50,100]).drawRectangle({x:0,y:0,width:10,height:10,color:rgb(0,0,1)});
+    const doc = {id:'d',fileType:'pdf',rawBytes:await source.save()} as SourceDocument;
+    const pages = [{...page(0),id:'red',widthMm:50*ptToMm},{...page(0),id:'blue',sourcePageNumber:2,widthMm:50*ptToMm}];
+    const matrix = {...layout,cols:2,sheetOrder:'ltr' as const};
+    useAppStore.setState({pages,documents:[doc],layout:matrix});
+    const {computeImpositionSheets} = await import('./layoutEngine');
+    const red = computeImpositionSheets(pages,matrix)[0].cells[0];
+    useAppStore.getState().applyCellTransform('red',red.occurrenceKey!,{x:.6,y:0,scaleX:1,scaleY:1});
+    const output = await exportImposedPdf({documents:[doc],pages,layout:useAppStore.getState().layout,effects:{...DEFAULT_EFFECTS,enabled:false},
+      watermark:{...getDefaultWatermarkSettings(),enabled:false},pageNumbering:{...getDefaultPageNumberSettings(),enabled:false},userName:'test'});
+    const image = await render(output);
+    expect(pixel(image,35,50)).toEqual([255,0,0]);
+    expect(pixel(image,65,50)).toEqual([255,255,255]);
+  });
   it('embeds PNG as an image resource in exported PDF', async () => {
     const canvas = createCanvas(60,100); const ctx = canvas.getContext('2d');
     ctx.fillStyle = 'white'; ctx.fillRect(0,0,60,100); ctx.fillStyle = 'red'; ctx.fillRect(0,0,20,20);

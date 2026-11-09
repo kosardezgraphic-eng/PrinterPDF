@@ -40,6 +40,18 @@ export function resizeRect(rect: Rect, handle: Handle, dx: number, dy: number, m
   if (handle.includes('n')) { height = Math.max(minimum, rect.height - dy); y = rect.y + rect.height - height; }
   return { x, y, width, height };
 }
+/** Corner handles scale proportionally around the opposite corner; edge handles remain one-dimensional. */
+export function resizeProportionally(rect: Rect, handle: Handle, dx: number, dy: number, minimum = 8): Rect {
+  if (handle.length === 1) return resizeRect(rect, handle, dx, dy, minimum);
+  const sx = handle.includes('e') ? 1 : -1;
+  const sy = handle.includes('s') ? 1 : -1;
+  const denominator = rect.width * rect.width + rect.height * rect.height;
+  const factor = Math.max(minimum / rect.width, minimum / rect.height,
+    1 + (sx * dx * rect.width + sy * dy * rect.height) / Math.max(1, denominator));
+  const width = rect.width * factor, height = rect.height * factor;
+  return { x: sx < 0 ? rect.x + rect.width - width : rect.x,
+    y: sy < 0 ? rect.y + rect.height - height : rect.y, width, height };
+}
 /** Adjust crop by dragging the visible boundary; outward movement reveals previously cropped pixels. */
 export function dragCrop(crop: Insets, rotation: PageRotation, handle: Handle, dx: number, dy: number, displayWidth: number, displayHeight: number): Insets {
   const c = rotateInsets(crop, rotation);
