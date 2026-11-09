@@ -41,6 +41,7 @@ export const SidebarPages: React.FC = () => {
     sidebarTab,
     setSidebarTab,
     togglePageSelectedForPrint,
+    invertHighlightedPrintSelection,
     highlightPage,
     requestPreviewPage,
     selectAllForPrint,
@@ -384,7 +385,7 @@ export const SidebarPages: React.FC = () => {
                             onContextMenu={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              highlightPage(page.id, false, false);
+                              if (!page.isHighlighted) highlightPage(page.id, false, false);
                               setContextMenu({
                                 x: e.clientX,
                                 y: e.clientY,
@@ -401,6 +402,10 @@ export const SidebarPages: React.FC = () => {
                             <div className="mb-1 flex items-center justify-between">
                               <button
                                 type="button"
+                                role="checkbox"
+                                aria-checked={page.selectedForPrint}
+                                aria-label={`${lang === 'fa' ? 'انتخاب برای چاپ صفحه' : 'Include in print, page'} ${formatLocalizedNumber(globalIdx + 1, lang)}`}
+                                title={lang === 'fa' ? 'تغییر وضعیت چاپ این صفحه و صفحات انتخاب‌شده' : 'Set print selection for this page and highlighted pages'}
                                 draggable={false}
                                 onDragStart={e => { e.preventDefault(); e.stopPropagation(); }}
                                 onClick={(e) => {
@@ -496,11 +501,20 @@ export const SidebarPages: React.FC = () => {
       {contextMenu && (
         <div
           style={{
-            top: Math.min(window.innerHeight - 280, contextMenu.y),
-            left: Math.min(window.innerWidth - 220, contextMenu.x),
+            top: Math.max(8, Math.min(window.innerHeight - 330, contextMenu.y)),
+            left: Math.max(8, Math.min(window.innerWidth - 232, contextMenu.x)),
+            maxHeight: 'calc(100vh - 16px)',
           }}
-          className="fixed z-50 w-56 rounded-xl border border-slate-700 bg-slate-900 p-1.5 text-xs text-slate-200 shadow-2xl"
+          className="fixed z-50 w-56 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-1.5 text-xs text-slate-200 shadow-2xl"
         >
+          <button
+            type="button"
+            onClick={() => { invertHighlightedPrintSelection(); setContextMenu(null); }}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 cursor-pointer"
+          >
+            <CheckSquare className="h-3.5 w-3.5 text-sky-400" aria-hidden="true" />
+            <span>{lang === 'fa' ? 'معکوس کردن وضعیت چاپ صفحات انتخاب‌شده' : 'Invert print selection of highlighted pages'}</span>
+          </button>
           <button
             type="button"
             onClick={() => {
