@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   FileText,
   Bookmark,
@@ -20,7 +20,7 @@ import { useAppStore } from '../store/useAppStore';
 import { t } from '../i18n/translations';
 import { computeImpositionSheets } from '../engine/layoutEngine';
 import { PageThumbnail } from './PageThumbnail';
-import type { ComputedCellPlacement } from '@shared/models';
+import type { ComputedCellPlacement, PageItem, SourceDocument } from '@shared/models';
 import { formatLocalizedNumber } from '../i18n/shamsi';
 
 interface ContextMenuState {
@@ -46,7 +46,7 @@ export const SidebarPages: React.FC = () => {
     selectAllForPrint,
     selectOddEvenForPrint,
     invertPrintSelection,
-    reorderPage,
+    reorderPages,
     moveHighlightedPages,
     rotatePages,
     duplicatePages,
@@ -59,8 +59,46 @@ export const SidebarPages: React.FC = () => {
     exportMergedOrImposedPdf,
   } = useAppStore();
 
-  const [dragFromIdx, setDragFromIdx] = useState<number | null>(null);
+  const dragIdsRef = useRef<{ids:string[]; set:Set<string>} | null>(null);
+  const suppressClickRef = useRef(false);
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [dragIds, setDragIds] = useState<string[]>([]);
+  const dropElementRef = useRef<HTMLElement | null>(null);
+  const clearDropTarget = () => {
+    if (dropElementRef.current) { delete dropElementRef.current.dataset.dropPosition; delete dropElementRef.current.dataset.dropEdge; }
+    dropElementRef.current = null;
+  };
+  const draggingSet = useMemo(() => new Set(dragIds), [dragIds]);
+  useEffect(() => () => { if (clickTimerRef.current) clearTimeout(clickTimerRef.current); }, []);
+  const endDrag = () => {
+    dragIdsRef.current = null; setDragIds([]); clearDropTarget();
+    // Prevent a synthesized release click from changing selection or navigating the preview.
+    suppressClickRef.current = true;
+    if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+    clickTimerRef.current = setTimeout(() => { suppressClickRef.current = false; }, 0);
+  };
+  const dropPosition = (event: React.DragEvent<HTMLElement>): 'before' | 'after' => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const isLeft = event.clientX < bounds.left + bounds.width/2;
+    return (settings.language === 'fa' ? !isLeft : isLeft) ? 'before' : 'after';
+  };
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+
+  // Split repeated document headers into consecutive runs so the visible order
+  // always matches the global output order, including cross-document moves.
+  const pageRuns = useMemo(() => {
+    const docs = new Map(documents.map(doc => [doc.id,doc]));
+    const runs: {documentId:string; doc:SourceDocument | undefined; name:string; items:{page:PageItem;globalIdx:number}[]}[] = [];
+    pages.forEach((page,globalIdx) => {
+      let run = runs.at(-1);
+      if (!run || run.documentId !== page.documentId) {
+        run = {documentId:page.documentId,doc:docs.get(page.documentId),name:page.documentName,items:[]};
+        runs.push(run);
+      }
+      run.items.push({page,globalIdx});
+    });
+    return runs;
+  }, [documents,pages]);
 
   const listRef = useRef<HTMLDivElement>(null);
   const thumbnailRefs = useRef(new Map<string, HTMLDivElement>());
@@ -215,7 +253,8 @@ export const SidebarPages: React.FC = () => {
               <button
                 type="button"
                 onClick={() => moveHighlightedPages('up')}
-                title="Move Up"
+                title={lang === 'fa' ? 'انتقال صفحات انتخاب‌شده به بالا' : 'Move selected pages up'}
+                aria-label={lang === 'fa' ? 'انتقال صفحات انتخاب‌شده به بالا' : 'Move selected pages up'}
                 className="rounded bg-slate-800 p-1 text-slate-300 hover:bg-slate-700 cursor-pointer"
               >
                 <ArrowUp className="h-3.5 w-3.5" />
@@ -223,7 +262,8 @@ export const SidebarPages: React.FC = () => {
               <button
                 type="button"
                 onClick={() => moveHighlightedPages('down')}
-                title="Move Down"
+                title={lang === 'fa' ? 'انتقال صفحات انتخاب‌شده به پایین' : 'Move selected pages down'}
+                aria-label={lang === 'fa' ? 'انتقال صفحات انتخاب‌شده به پایین' : 'Move selected pages down'}
                 className="rounded bg-slate-800 p-1 text-slate-300 hover:bg-slate-700 cursor-pointer"
               >
                 <ArrowDown className="h-3.5 w-3.5" />
@@ -239,50 +279,49 @@ export const SidebarPages: React.FC = () => {
             </div>
           </div>
 
+          <div className="border-b border-slate-800 px-3 py-1 text-[10px] text-slate-400" aria-live="polite">
+            {dragIds.length ? (lang === 'fa' ? `در حال جابه‌جایی ${formatLocalizedNumber(dragIds.length,lang)} صفحه؛ روی نیمهٔ قبل یا بعد مقصد رها کنید.` : `Moving ${dragIds.length} page(s); drop on the before or after half of a thumbnail.`)
+              : (lang === 'fa' ? 'برای جابه‌جایی بکشید؛ انتخاب چندتایی با Ctrl یا Shift.' : 'Drag to reorder; use Ctrl or Shift to select multiple pages.')}
+          </div>
+
           {/* Grouped File & Page Thumbnail List */}
           <div ref={listRef} data-thumbnail-list className="flex-1 overflow-y-auto p-2 space-y-2.5">
-            {documents.map((doc) => {
-              const docPages = pages
-                .map((page, globalIdx) => ({ page, globalIdx }))
-                .filter((item) => item.page.documentId === doc.id);
-
-              if (docPages.length === 0) return null;
-
+            {pageRuns.map(({doc, documentId, name, items:docPages}) => {
               return (
                 <div
-                  key={doc.id}
+                  key={`${documentId}:${docPages[0].page.id}`}
                   className="rounded-xl border border-slate-800 bg-slate-950/60 overflow-hidden"
                 >
                   {/* Collapsible Document Group Header */}
                   <div className="flex items-center justify-between bg-slate-900/90 px-2.5 py-2 border-b border-slate-800/80">
                     <button
                       type="button"
-                      onClick={() => toggleDocumentCollapse(doc.id)}
+                      onClick={() => { if (doc) toggleDocumentCollapse(doc.id); }}
+                      disabled={!doc}
                       className="flex items-center gap-1.5 text-start min-w-0 flex-1 cursor-pointer"
                     >
-                      {doc.collapsed ? (
+                      {doc?.collapsed ? (
                         <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
                       ) : (
                         <ChevronDown className="h-3.5 w-3.5 text-sky-400 shrink-0" />
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-xs font-bold text-slate-200">
-                          {doc.name}
+                          {doc?.name ?? name}
                         </div>
                         <div className="flex items-center gap-2 text-[10px] text-slate-400">
                           <span>
                             {formatLocalizedNumber(docPages.length, lang)}{' '}
                             {lang === 'fa' ? 'صفحه' : 'pages'}
                           </span>
-                          <span>•</span>
-                          <span>{formatBytes(doc.fileSize)}</span>
+                          {doc && <><span>•</span><span>{formatBytes(doc.fileSize)}</span></>}
                         </div>
                       </div>
                     </button>
 
                     <button
                       type="button"
-                      onClick={() => removeDocument(doc.id)}
+                      onClick={() => removeDocument(documentId)}
                       title={lang === 'fa' ? 'حذف این فایل از پروژه' : 'Remove file'}
                       className="rounded-lg p-1 text-slate-400 hover:bg-rose-500/20 hover:text-rose-400 cursor-pointer"
                     >
@@ -291,7 +330,7 @@ export const SidebarPages: React.FC = () => {
                   </div>
 
                   {/* Thumbnails inside Document Group */}
-                  {!doc.collapsed && (
+                  {!doc?.collapsed && (
                     <div className="grid grid-cols-2 gap-2 p-2">
                       {docPages.map(({ page, globalIdx }) => {
                         const placement = sidebarReveal?.pageId === page.id && sidebarReveal.occurrenceKey
@@ -304,16 +343,41 @@ export const SidebarPages: React.FC = () => {
                             data-page-id={page.id}
                             aria-label={`${lang === 'fa' ? 'صفحه' : 'Page'} ${globalIdx + 1}`}
                             draggable
-                            onDragStart={() => setDragFromIdx(globalIdx)}
-                            onDragOver={(e) => e.preventDefault()}
-                            onDrop={() => {
-                              if (dragFromIdx !== null && dragFromIdx !== globalIdx) {
-                                reorderPage(dragFromIdx, globalIdx);
-                              }
-                              setDragFromIdx(null);
+                            data-dragging={draggingSet.has(page.id) ? 'true' : undefined}
+                            onDragStart={e => {
+                              if (e.target instanceof Element && e.target.closest('button')) { e.preventDefault(); return; }
+                              const current = useAppStore.getState().pages;
+                              const source = current.find(item => item.id === page.id);
+                              if (!source) { e.preventDefault(); return; }
+                              const ids = source.isHighlighted ? current.filter(item => item.isHighlighted).map(item => item.id) : [page.id];
+                              dragIdsRef.current = {ids,set:new Set(ids)}; setDragIds(ids); clearDropTarget();
+                              e.dataTransfer.effectAllowed = 'move';
+                              e.dataTransfer.setData('text/plain', 'PrintStudio pages');
                             }}
+                            onDragOver={e => {
+                              if (!dragIdsRef.current) return;
+                              if (dragIdsRef.current.set.has(page.id)) { clearDropTarget(); return; }
+                              e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move';
+                              const position = dropPosition(e);
+                              if (dropElementRef.current !== e.currentTarget) clearDropTarget();
+                              dropElementRef.current = e.currentTarget;
+                              e.currentTarget.dataset.dropPosition = position;
+                              e.currentTarget.dataset.dropEdge = (position === 'before') === (lang !== 'fa') ? 'left' : 'right';
+                            }}
+                            onDragLeave={e => {
+                              if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return;
+                              if (dropElementRef.current === e.currentTarget) clearDropTarget();
+                            }}
+                            onDrop={e => {
+                              if (!dragIdsRef.current) return;
+                              e.preventDefault(); e.stopPropagation();
+                              reorderPages(dragIdsRef.current.ids, page.id, dropPosition(e));
+                              endDrag();
+                            }}
+                            onDragEnd={endDrag}
                             onClick={(e) => {
                               e.stopPropagation();
+                              if (suppressClickRef.current) { suppressClickRef.current = false; return; }
                               highlightPage(page.id, e.ctrlKey || e.metaKey, e.shiftKey);
                               requestPreviewPage(page.id);
                             }}
@@ -331,12 +395,14 @@ export const SidebarPages: React.FC = () => {
                               page.isHighlighted
                                 ? 'border-sky-500 bg-sky-500/10 ring-1 ring-sky-500/40'
                                 : 'border-slate-800 bg-slate-900/70 hover:border-slate-700'
-                            } ${!page.selectedForPrint ? 'opacity-45' : ''}`}
+                            } ${draggingSet.has(page.id) ? 'opacity-50' : !page.selectedForPrint ? 'opacity-45' : ''}`}
                           >
                             {/* Top Row: Checkbox + Global Page Index */}
                             <div className="mb-1 flex items-center justify-between">
                               <button
                                 type="button"
+                                draggable={false}
+                                onDragStart={e => { e.preventDefault(); e.stopPropagation(); }}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   togglePageSelectedForPrint(page.id);
