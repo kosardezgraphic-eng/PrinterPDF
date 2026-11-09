@@ -54,15 +54,24 @@ describe('sheet tool pointer interactions', () => {
     act(() => useAppStore.setState({settings:{...useAppStore.getState().settings,unit:'cm'}}));
     expect(value().textContent).toBe('1 cm');
   });
+  it('does not allow reset while the driver limits are unavailable', () => {
+    act(()=>useAppStore.setState({printerMargins:{status:'unavailable',reason:'driver did not report margins'}}));
+    const reset=Array.from(container.querySelectorAll('button')).find(b=>b.textContent==='Reset printer margins')!;
+    expect(reset.disabled).toBe(true);
+    expect(container.textContent).toContain('current values are unverified');
+    act(()=>useAppStore.setState({printerMargins:{status:'loading'}}));
+    expect(reset.disabled).toBe(true);expect(container.textContent).toContain('Loading printer margins');
+  });
   it('shades the configured margin as a preview-only guide and resets margins with undo', () => {
     const shading=container.querySelector('[data-layout-margin-shading]')!;
-    expect(shading.getAttribute('aria-label')).toContain('printer limits are unknown');
+    expect(shading.getAttribute('aria-label')).toContain('Configured layout margin');
+    act(()=>useAppStore.setState({printerMargins:{status:'available',source:'hardware',marginsMm:{left:4.2,right:4.1,top:3,bottom:5}}}));
     expect(shading.children).toHaveLength(5);
     act(() => useAppStore.getState().updateMargins({left:25}));
-    const reset=Array.from(container.querySelectorAll('button')).find(b=>b.textContent==='Reset margins (app default)')!;
-    expect(reset.title).toContain('actual printer margins are unavailable');
+    const reset=Array.from(container.querySelectorAll('button')).find(b=>b.textContent==='Reset printer margins')!;
+    expect(reset.title).toContain('selected printer margins');
     act(() => reset.click());
-    expect(useAppStore.getState().layout.marginsMm).toEqual(DEFAULT_LAYOUT.marginsMm);
+    expect(useAppStore.getState().layout.marginsMm).toEqual({left:4.2,right:4.1,top:3,bottom:5});
     expect(useAppStore.getState().layout.horizontalGutterMm).toBe(6);
     act(() => useAppStore.getState().undo());
     expect(useAppStore.getState().layout.marginsMm.left).toBe(25);

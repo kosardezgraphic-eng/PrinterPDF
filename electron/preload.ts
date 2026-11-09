@@ -6,6 +6,7 @@ import {
 import type {
   AppSettings,
   PrinterProfileSettings,
+  PrinterMarginRequest,
   PrintJobRequest,
   PspProjectFile,
 } from '../shared/models';
@@ -18,6 +19,7 @@ const api: PrintStudioElectronAPI = {
   isElectron: true,
 
   listPrinters: () => ipcRenderer.invoke(IPC_CHANNELS.PRINTER_LIST),
+  getPrinterMargins: (request: PrinterMarginRequest) => ipcRenderer.invoke(IPC_CHANNELS.PRINTER_GET_MARGINS, request),
 
   updatePrinterProfile: (printerName: string, profile: PrinterProfileSettings) =>
     ipcRenderer.invoke(IPC_CHANNELS.PRINTER_UPDATE_PROFILE, { printerName, profile }),

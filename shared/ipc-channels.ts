@@ -7,6 +7,8 @@ import type {
   AppSettings,
   BatchJobItem,
   PrinterInfo,
+  PrinterMarginRequest,
+  PrinterMarginResult,
   PrinterProfileSettings,
   PrintJobRequest,
   PspProjectFile,
@@ -25,6 +27,7 @@ export const IPC_CHANNELS = {
   // Printer Service Sidecar (Win32 Spooler / System.Printing via Named Pipe JSON-RPC)
   PRINTER_LIST: 'printer:list',
   PRINTER_GET_CAPABILITIES: 'printer:get-capabilities',
+  PRINTER_GET_MARGINS: 'printer:get-margins',
   PRINTER_UPDATE_PROFILE: 'printer:update-profile',
   PRINTER_SET_DEFAULT: 'printer:set-default',
   PRINTER_PRINT_JOB: 'printer:print-job',
@@ -66,6 +69,7 @@ export interface JsonRpcResponse<TResult = unknown> {
 export interface PrintStudioElectronAPI {
   isElectron: boolean;
   listPrinters(): Promise<PrinterInfo[]>;
+  getPrinterMargins(request: PrinterMarginRequest): Promise<PrinterMarginResult>;
   updatePrinterProfile(printerName: string, profile: PrinterProfileSettings): Promise<PrinterInfo>;
   setDefaultPrinter(printerName: string): Promise<boolean>;
   submitPrintJob(request: PrintJobRequest, pdfBytes?: Uint8Array): Promise<SpoolerJobInfo>;

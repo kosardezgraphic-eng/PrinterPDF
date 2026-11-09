@@ -57,9 +57,7 @@ public sealed class PrinterSpoolerService
                     PortName: port,
                     IsDefault: string.Equals(name, defaultQueueName, StringComparison.OrdinalIgnoreCase),
                     IsNetwork: name.StartsWith(@"\\", StringComparison.Ordinal) || port.StartsWith("IP_", StringComparison.OrdinalIgnoreCase),
-                    IsVirtual: name.Contains("PDF", StringComparison.OrdinalIgnoreCase) ||
-                               name.Contains("PrintStudio", StringComparison.OrdinalIgnoreCase) ||
-                               name.Contains("XPS", StringComparison.OrdinalIgnoreCase),
+                    IsVirtual: IsVirtualPrinter(name),
                     Status: status,
                     JobsInQueue: queue.NumberOfJobs,
                     TonerLevelPercent: null,
@@ -76,6 +74,75 @@ public sealed class PrinterSpoolerService
         }
 
         return result;
+    }
+
+    // The existing queue list uses this name-based classification. Virtual queues
+    // default to zero by product policy, rather than being reported as measured hardware.
+    private static bool IsVirtualPrinter(string name) =>
+        name.Contains("PDF", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("PrintStudio", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("XPS", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("Virtual", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("OneNote", StringComparison.OrdinalIgnoreCase);
+
+    public PrinterMarginResultDto GetPrinterMargins(PrinterMarginRequestDto request)
+    {
+        static PrinterMarginResultDto Unavailable(string reason) => new("unavailable", Reason: reason);
+        if (string.IsNullOrWhiteSpace(request.PrinterName) ||
+            !double.IsFinite(request.WidthMm) || !double.IsFinite(request.HeightMm) ||
+            request.WidthMm <= 0 || request.HeightMm <= 0 || request.WidthMm > 2000 || request.HeightMm > 2000 ||
+            (request.Orientation != "portrait" && request.Orientation != "landscape"))
+            return Unavailable("Invalid printer or paper dimensions");
+
+        try
+        {
+            using var server = new LocalPrintServer();
+            var queue = server.GetPrintQueues(new[] { EnumeratedPrintQueueTypes.Local, EnumeratedPrintQueueTypes.Connections })
+                .FirstOrDefault(q => string.Equals(q.FullName, request.PrinterName, StringComparison.OrdinalIgnoreCase));
+            if (queue == null) return Unavailable("Printer is not available");
+            using (queue)
+            {
+                if (IsVirtualPrinter(queue.FullName))
+                    return new PrinterMarginResultDto("available", "virtual", new PrinterMarginsDto(0,0,0,0));
+
+                const double dipPerMm = 96.0 / 25.4;
+                PageMediaSizeName? name = request.PaperSize switch
+                {
+                    "A0" => PageMediaSizeName.ISOA0, "A1" => PageMediaSizeName.ISOA1,
+                    "A2" => PageMediaSizeName.ISOA2, "A3" => PageMediaSizeName.ISOA3,
+                    "A4" => PageMediaSizeName.ISOA4, "A5" => PageMediaSizeName.ISOA5,
+                    "A6" => PageMediaSizeName.ISOA6, "B4" => PageMediaSizeName.JISB4,
+                    "B5" => PageMediaSizeName.JISB5, "Letter" => PageMediaSizeName.NorthAmericaLetter,
+                    "Legal" => PageMediaSizeName.NorthAmericaLegal, _ => null
+                };
+                if (name == null && request.PaperSize != "Custom") return Unavailable("Unsupported paper size");
+                var media = name.HasValue ? new PageMediaSize(name.Value) :
+                    new PageMediaSize(Math.Min(request.WidthMm,request.HeightMm)*dipPerMm, Math.Max(request.WidthMm,request.HeightMm)*dipPerMm);
+                var delta = new PrintTicket { PageMediaSize = media,
+                    PageOrientation = request.Orientation == "landscape" ? PageOrientation.Landscape : PageOrientation.Portrait };
+                var baseTicket = queue.UserPrintTicket ?? queue.DefaultPrintTicket ?? new PrintTicket();
+                var validated = queue.MergeAndValidatePrintTicket(baseTicket,delta).ValidatedPrintTicket;
+                var caps = queue.GetPrintCapabilities(validated);
+                var area = caps.PageImageableArea;
+                var width = caps.OrientedPageMediaWidth;
+                var height = caps.OrientedPageMediaHeight;
+                if (area == null || !width.HasValue || !height.HasValue ||
+                    !double.IsFinite(width.Value) || !double.IsFinite(height.Value) ||
+                    Math.Abs(width.Value/dipPerMm - request.WidthMm) > 1 || Math.Abs(height.Value/dipPerMm - request.HeightMm) > 1)
+                    return Unavailable("Driver did not report the requested paper size and imageable area");
+                double left = area.OriginWidth, top = area.OriginHeight;
+                double right = width.Value-left-area.ExtentWidth, bottom = height.Value-top-area.ExtentHeight;
+                if (!double.IsFinite(left) || !double.IsFinite(top) || !double.IsFinite(right) || !double.IsFinite(bottom) ||
+                    area.ExtentWidth <= 0 || area.ExtentHeight <= 0 || Math.Min(Math.Min(left,right),Math.Min(top,bottom)) < -0.5)
+                    return Unavailable("Driver reported an invalid imageable area");
+                double Mm(double dip) => Math.Round(Math.Max(0,dip)/dipPerMm,3);
+                return new PrinterMarginResultDto("available", "hardware", new PrinterMarginsDto(Mm(top),Mm(right),Mm(bottom),Mm(left)));
+            }
+        }
+        catch (Exception ex)
+        {
+            return Unavailable($"Cannot query printer imageable area: {ex.Message}");
+        }
     }
 
     public PrinterCapabilitiesDto QueryCapabilities(string printerName, string portName, PrintQueue queue)

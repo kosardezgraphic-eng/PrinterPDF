@@ -26,16 +26,35 @@ public static class Program
 
         while (!cts.Token.IsCancellationRequested)
         {
-            await using var server = new NamedPipeServerStream(
+            var server = new NamedPipeServerStream(
                 PipeName,
                 PipeDirection.InOut,
                 NamedPipeServerStream.MaxAllowedServerInstances,
                 PipeTransmissionMode.Byte,
                 PipeOptions.Asynchronous
             );
+            try
+            {
+                await server.WaitForConnectionAsync(cts.Token);
+                // The handler owns the connected pipe; the accept loop must not dispose it.
+                _ = HandleOwnedConnectionAsync(server, cts.Token);
+            }
+            catch
+            {
+                await server.DisposeAsync();
+                if (cts.IsCancellationRequested) break;
+                throw;
+            }
+        }
+    }
 
-            await server.WaitForConnectionAsync(cts.Token);
-            _ = HandleClientConnectionAsync(server, cts.Token);
+    private static async Task HandleOwnedConnectionAsync(NamedPipeServerStream pipe, CancellationToken ct)
+    {
+        await using (pipe)
+        {
+            try { await HandleClientConnectionAsync(pipe, ct); }
+            catch (IOException) { /* Client disconnected. */ }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         }
     }
 
@@ -67,6 +86,7 @@ public static class Program
                 object? result = req.Method switch
                 {
                     "printer:list" => Spooler.ListPrinters(),
+                    "printer:get-margins" => Spooler.GetPrinterMargins(req.Params.Deserialize<PrinterMarginRequestDto>()!),
                     "printer:update-profile" => Spooler.UpdateProfile(
                         req.Params.Deserialize<PrinterProfileDto>()!
                     ),
