@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createCanvas } from '@napi-rs/canvas';
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, PDFStream, decodePDFRawStream, rgb } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
@@ -286,6 +286,41 @@ describe('real output rendering', () => {
     const outputWith=await render(await exportImposedPdf({...params,layout:{...layout,rulerGuides:[{id:'x',axis:'x',positionMm:10},{id:'y',axis:'y',positionMm:10}]}}));
     expect(outputWith.width).toEqual(outputWithout.width);expect(outputWith.height).toEqual(outputWithout.height);
     expect(outputWith.data).toEqual(outputWithout.data);
+  });
+
+  it('embeds text overlay raster images into the PDF at the matching sheet location', async () => {
+    const source=await PDFDocument.create();source.addPage([100,100]);
+    const original={id:'d',fileType:'pdf',rawBytes:await source.save()} as SourceDocument;
+    const overlay={id:'t',kind:'text' as const,target:'sheet' as const,targetScope:'all' as const,targetPageIds:[],targetSheetIndex:1,xPercent:25,yPercent:25,widthPercent:50,heightPercent:50,opacity:1,rotation:0,text:'hello',fontSize:18,fontFamily:'Arial',color:'#000000',backgroundColor:'#ff0000',bold:false,italic:false,underline:false,align:'left' as const};
+    const ctx={clearRect:vi.fn(),fillRect:vi.fn(),fillText:vi.fn(),measureText:()=>({width:0})};
+    const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRfoAAAAASUVORK5CYII=';
+    const fakeDocument={createElement:(name:string)=>{if(name!=='canvas')throw new Error('Unexpected element');return {width:1,height:1,getContext:()=>ctx,toDataURL:()=>png};}};
+    vi.stubGlobal('document',fakeDocument);
+    try {
+      const bytes=await exportImposedPdf({documents:[original],pages:[{...page(0),widthMm:100*ptToMm}],layout,effects:{...DEFAULT_EFFECTS,enabled:false},watermark:{...getDefaultWatermarkSettings(),enabled:false},pageNumbering:getDefaultPageNumberSettings(),overlays:[overlay],userName:'test'});
+      const pdf=await PDFDocument.load(bytes);const pageOut=pdf.getPage(0);const objects=pageOut.node.Resources()?.lookup(PDFName.of('XObject'),PDFDict);
+      expect(objects?.keys().length).toBe(1);expect(ctx.fillText).toHaveBeenCalledWith('hello',0,0,expect.any(Number));
+      const contents=pageOut.node.Contents() as PDFArray;
+      const decoded=Array.from({length:contents.size()},(_,i)=>new TextDecoder().decode(decodePDFRawStream(pdf.context.lookup(contents.get(i)) as PDFRawStream).decode())).join('\n');
+      expect(decoded).toMatch(/1 0 0 1 24\.\d+ 24\.\d+ cm/);expect(decoded).toMatch(/49\.\d+ 0 0 49\.\d+/);
+    } finally {vi.unstubAllGlobals();}
+  });
+
+  it('uses original page ordering for page-targeted text scopes in PDF export',async()=>{
+    const src=await PDFDocument.create();src.addPage([100,100]);src.addPage([100,100]);src.addPage([100,100]);
+    const pages=[1,2,3].map(n=>({...page(0),id:`p${n}`,sourcePageNumber:n,widthMm:100*ptToMm,selectedForPrint:n!==1}));
+    const text={id:'t',kind:'text' as const,target:'page' as const,targetScope:'even' as const,targetPageIds:[],targetSheetIndex:1,xPercent:25,yPercent:25,widthPercent:50,heightPercent:50,opacity:1,rotation:0,text:'abc',fontSize:18,fontFamily:'Arial',color:'#000000',bold:false,italic:false,underline:false,align:'left' as const};
+    const ctx={clearRect:vi.fn(),fillRect:vi.fn(),fillText:vi.fn(),measureText:()=>({width:0})};
+    const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRfoAAAAASUVORK5CYII=';
+    const fonts={load:vi.fn().mockResolvedValue([])};
+    vi.stubGlobal('document',{fonts,createElement:()=>({width:1,height:1,getContext:()=>ctx,toDataURL:()=>png})});
+    try{
+      const bytes=await exportImposedPdf({documents:[{id:'d',fileType:'pdf',rawBytes:await src.save()} as SourceDocument],pages,allPages:pages,layout,effects:{...DEFAULT_EFFECTS,enabled:false},watermark:{...getDefaultWatermarkSettings(),enabled:false},pageNumbering:getDefaultPageNumberSettings(),overlays:[text],userName:'test'});
+      const pdf=await PDFDocument.load(bytes);expect(pdf.getPageCount()).toBe(2);
+      expect(pdf.getPage(0).node.Resources()?.lookup(PDFName.of('XObject'),PDFDict)?.keys().length).toBe(1);
+      expect(pdf.getPage(1).node.Resources()?.lookup(PDFName.of('XObject'),PDFDict)?.keys().length??0).toBe(0);
+      expect(fonts.load).toHaveBeenCalledWith(expect.stringContaining('Arial'),'abc');
+    }finally{vi.unstubAllGlobals();}
   });
 
 });

@@ -21,10 +21,12 @@ import type {
   EffectsSettings,
   LayoutSettings,
   PageItem,
+  PageOverlay,
   PageNumberSettings,
   SourceDocument,
   WatermarkSettings,
 } from '@shared/models';
+import { drawOverlayText, textPlacements } from './textOverlays';
 import { computeImpositionSheets, sortCellsByLayer } from './layoutEngine';
 import { normalizeAngle, pageCropFractions, rotateInsets } from './pageGeometry';
 import { shouldApplyEffectsToPage } from './effectsPipeline';
@@ -504,6 +506,9 @@ export async function exportImposedPdf(params: {
   effects: EffectsSettings;
   watermark: WatermarkSettings;
   pageNumbering: PageNumberSettings;
+  overlays?: PageOverlay[];
+  /** Source order, including pages excluded from output, for stable page scopes. */
+  allPages?: PageItem[];
   userName: string;
   onProgress?: (percent: number) => void;
 }): Promise<Uint8Array> {
@@ -514,6 +519,8 @@ export async function exportImposedPdf(params: {
     effects,
     watermark,
     pageNumbering,
+    overlays = [],
+    allPages = pages,
     userName,
     onProgress,
   } = params;
@@ -543,6 +550,12 @@ export async function exportImposedPdf(params: {
 
   const sheets = computeImpositionSheets(pages, layout);
   const totalSides = Math.max(1, sheets.length);
+  const pageIndices = new Map(allPages.map((page,index)=>[page.id,index+1]));
+  const textImages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPng>>>();
+  const textItems = overlays.filter(item=>item.kind==='text');
+  if (textItems.length && typeof document !== 'undefined' && document.fonts) {
+    await Promise.all(textItems.map(item=>document.fonts.load(`${item.italic?'italic ':''}${item.bold?'bold':'normal'} 18px "${item.fontFamily.replace(/["\\]/g,'')}"`,item.text)));
+  }
 
   for (let sIdx = 0; sIdx < sheets.length; sIdx++) {
     const sheetSide = sheets[sIdx];
@@ -725,6 +738,29 @@ export async function exportImposedPdf(params: {
         font,
         color: rgb(0.25, 0.3, 0.38),
       });
+    }
+
+    for (const placement of textPlacements(sheetSide,totalSides,allPages,overlays,pageIndices)) {
+      if (!Number.isFinite(placement.width) || !Number.isFinite(placement.height) || placement.width <= 0 || placement.height <= 0) continue;
+      if (typeof document === 'undefined') throw new Error('Text overlay export requires a Canvas 2D renderer');
+      const item=placement.text, w=placement.width*MM_TO_PT, h=placement.height*MM_TO_PT;
+      const scale=Math.min(200/72,4096/w,4096/h);
+      const key=JSON.stringify([item.text,item.fontFamily,item.fontSize,item.color,item.backgroundColor,item.bold,item.italic,item.underline,item.align,w,h]);
+      let image=textImages.get(key);
+      if(!image){
+        const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.ceil(w*scale));canvas.height=Math.max(1,Math.ceil(h*scale));
+        const ctx=canvas.getContext('2d');if(!ctx)throw new Error('Text overlay Canvas 2D is unavailable');
+        drawOverlayText(ctx,item,canvas.width,canvas.height,canvas.width/w);
+        image=await outPdf.embedPng(canvas.toDataURL('image/png'));textImages.set(key,image);
+      }
+      outPage.pushOperators(pushGraphicsState());
+      if(placement.clip){const r=placement.clip;outPage.pushOperators(rectangle(r.x*MM_TO_PT,sheetHeightPt-(r.y+r.height)*MM_TO_PT,r.width*MM_TO_PT,r.height*MM_TO_PT),clip(),endPath());}
+      const parentAngle=-placement.parentRotation*Math.PI/180,pcx=(placement.parentX+placement.parentWidth/2)*MM_TO_PT,pcy=sheetHeightPt-(placement.parentY+placement.parentHeight/2)*MM_TO_PT;
+      if(parentAngle){const c=Math.cos(parentAngle),s=Math.sin(parentAngle);outPage.pushOperators(concatTransformationMatrix(c,s,-s,c,pcx-c*pcx+s*pcy,pcy-s*pcx-c*pcy));}
+      const cx=(placement.x+placement.width/2)*MM_TO_PT,cy=sheetHeightPt-(placement.y+placement.height/2)*MM_TO_PT;
+      const angle=-item.rotation*Math.PI/180,c=Math.cos(angle),s=Math.sin(angle);
+      outPage.drawImage(image,{x:cx-c*w/2+s*h/2,y:cy-s*w/2-c*h/2,width:w,height:h,rotate:degrees(-item.rotation),opacity:Math.max(.1,Math.min(1,item.opacity))});
+      outPage.pushOperators(popGraphicsState());
     }
 
     onProgress?.(Math.round(((sIdx + 1) / totalSides) * 100));

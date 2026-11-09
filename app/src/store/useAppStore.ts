@@ -1336,6 +1336,8 @@ export const useAppStore = create<AppState>((set, get) => {
           effects: state.effects,
           watermark: state.watermark,
           pageNumbering: state.pageNumbering,
+          overlays: state.overlays,
+          allPages: state.pages,
           userName: state.settings.userName,
           onProgress: (percent) => set({ exportProgress: percent }),
         });
