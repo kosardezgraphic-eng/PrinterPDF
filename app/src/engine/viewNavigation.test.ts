@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fitPageZoom, wheelSheetStep } from './viewNavigation';
+import { fitPageZoom, isAtWheelEdge, wheelSheetStep } from './viewNavigation';
 import { useAppStore } from '../store/useAppStore';
 import type { PageItem } from '@shared/models';
 
@@ -9,6 +9,16 @@ describe('sheet navigation', () => {
     expect(wheelSheetStep(-2, 1179, 1000)).toBe(0);
     expect(wheelSheetStep(-2, 1180, 1000)).toBe(-1);
     expect(wheelSheetStep(0, 1200, 1000)).toBe(0);
+  });
+  it('recognizes only the relevant vertical edge, including subpixel scroll positions', () => {
+    expect(isAtWheelEdge(120,100,1000,400)).toBe(false);
+    expect(isAtWheelEdge(-120,100,1000,400)).toBe(false);
+    expect(isAtWheelEdge(120,599.5,1000,400)).toBe(true);
+    expect(isAtWheelEdge(-120,.5,1000,400)).toBe(true);
+    expect(isAtWheelEdge(120,0,300,400)).toBe(true);
+    expect(isAtWheelEdge(-120,0,300,400)).toBe(true);
+    expect(isAtWheelEdge(0,0,300,400)).toBe(false);
+    expect(isAtWheelEdge(Infinity,0,300,400)).toBe(false);
   });
   it('fits a portrait or landscape page within the available viewport', () => {
     const zoom = fitPageZoom(600, 700, 210, 297, true);

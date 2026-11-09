@@ -1,0 +1,7 @@
+# Reordering page thumbnails
+
+On a desktop browser, drag a thumbnail onto the before/after half of another thumbnail; the blue line marks the insertion edge, taking RTL/LTR direction into account. Dragging a highlighted thumbnail moves all highlighted pages as one block, in their existing global order. Dragging an unhighlighted thumbnail moves only that page and leaves the existing selection alone. Ctrl/Command-click or Shift-click selects multiple thumbnails. Dropping on a member of the dragged group, canceling, or returning a block to its original place does not change the page order. A successful drop is one undo/redo step; print checkboxes and page identities stay unchanged.
+
+Pages from different source files can be interleaved. The sidebar displays consecutive runs in global page order, so the same file header may appear more than once. Collapsing a source file affects all its runs. The order is the order used for imposition and PDF export; excluded pages remain in the workspace but are skipped in output. The up/down toolbar buttons move every highlighted page by one position and provide an alternative to dragging.
+
+This implementation uses native HTML drag-and-drop for pointer/desktop use. Automated coverage uses simulated drag events; real browser, touch-based drag-and-drop, Electron GUI, 60 fps and 10,000-page performance have not been verified. Touch browsers may not support native drag; the toolbar arrows are an alternative for already-selected pages.

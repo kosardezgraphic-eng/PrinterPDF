@@ -84,6 +84,20 @@ describe('real output rendering', () => {
     if (angle === 0) expect(pixel(image,10,50)).toEqual([255,255,255]);
     else expect(pixel(image,50,10)).toEqual([255,255,255]);
   });
+  it('exports reordered multi-page selections in the new global sequence', async () => {
+    const source=await PDFDocument.create();
+    for (const color of [rgb(1,0,0),rgb(0,1,0),rgb(0,0,1)]) source.addPage([100,100]).drawRectangle({x:0,y:0,width:100,height:100,color});
+    const doc={id:'d',fileType:'pdf',rawBytes:await source.save()} as SourceDocument;
+    const pages=[1,2,3].map((n)=>({...page(0),id:`p${n}`,sourcePageNumber:n,widthMm:100*ptToMm,isHighlighted:n!==2}));
+    useAppStore.setState({pages,documents:[doc],layout});
+    useAppStore.getState().reorderPages(['p1','p3'],'p2','after');
+    const ordered=useAppStore.getState().pages;
+    expect(ordered.map(p=>p.sourcePageNumber)).toEqual([2,1,3]);
+    const output=await exportImposedPdf({documents:[doc],pages:ordered,layout,effects:{...DEFAULT_EFFECTS,enabled:false},
+      watermark:{...getDefaultWatermarkSettings(),enabled:false},pageNumbering:{...getDefaultPageNumberSettings(),enabled:false},userName:'test'});
+    expect((await PDFDocument.load(output)).getPageCount()).toBe(3);
+    expect(pixel(await render(output),50,50)).toEqual([0,255,0]);
+  });
   it('exports a ratio crop of the source rather than merely changing its preview', async () => {
     const source = await PDFDocument.create(); const p=source.addPage([200,100]);
     p.drawRectangle({x:0,y:0,width:50,height:100,color:rgb(1,0,0)});

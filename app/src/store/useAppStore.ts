@@ -245,6 +245,7 @@ interface AppState {
   invertPrintSelection: () => void;
   reversePageOrder: () => void;
   reorderPage: (fromIndex: number, toIndex: number) => void;
+  reorderPages: (pageIds: string[], targetPageId: string, position: 'before' | 'after') => void;
   moveHighlightedPages: (direction: 'up' | 'down') => void;
   rotatePages: (pageIds: string[], deltaDeg: 90 | 180 | 270) => void;
   applyAspectRatioCrop: (pageId: string, scope: PageEditScope, ratio: number) => boolean;
@@ -715,12 +716,40 @@ export const useAppStore = create<AppState>((set, get) => {
       pushUndo('جابجایی ترتیب صفحه', 'Reorder page', before, captureSnapshot(get()));
     },
 
+    // Move a stable ID-based selection as one block. A drop on the selection is a no-op.
+    reorderPages: (pageIds, targetPageId, position) => {
+      const state = get();
+      const ids = new Set(pageIds);
+      if (!ids.size || ids.size !== pageIds.length || ids.has(targetPageId) || (position !== 'before' && position !== 'after')) return;
+      const moving = state.pages.filter(page => ids.has(page.id));
+      if (moving.length !== ids.size) return; // A source disappeared while dragging.
+      const remaining = state.pages.filter(page => !ids.has(page.id));
+      const targetIndex = remaining.findIndex(page => page.id === targetPageId);
+      if (targetIndex < 0) return;
+      const insertion = targetIndex + (position === 'after' ? 1 : 0);
+      const next = [...remaining.slice(0,insertion), ...moving, ...remaining.slice(insertion)];
+      if (next.every((page,index) => page === state.pages[index])) return;
+      const before = captureSnapshot(state);
+      set({pages:next});
+      pushUndo('جابجایی ترتیب صفحات', 'Reorder pages', before, captureSnapshot(get()));
+    },
+
     moveHighlightedPages: (direction) => {
       const state = get();
-      const idx = state.pages.findIndex((p) => p.isHighlighted);
-      if (idx === -1) return;
-      const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
-      get().reorderPage(idx, targetIdx);
+      const next = state.pages.slice();
+      if (direction === 'up') {
+        for (let i=1; i<next.length; i++) if (next[i].isHighlighted && !next[i-1].isHighlighted) {
+          [next[i-1],next[i]] = [next[i],next[i-1]];
+        }
+      } else {
+        for (let i=next.length-2; i>=0; i--) if (next[i].isHighlighted && !next[i+1].isHighlighted) {
+          [next[i],next[i+1]] = [next[i+1],next[i]];
+        }
+      }
+      if (next.every((page,index) => page === state.pages[index])) return;
+      const before = captureSnapshot(state);
+      set({pages:next});
+      pushUndo('جابجایی صفحات انتخاب‌شده', 'Move selected pages', before, captureSnapshot(get()));
     },
 
     applyAspectRatioCrop: (pageId, scope, ratio) => {

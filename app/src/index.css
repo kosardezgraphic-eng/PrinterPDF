@@ -33,3 +33,16 @@
 .theme-light [data-color-accurate] {
   filter: invert(1) hue-rotate(180deg);
 }
+
+/* Keep the insertion marker outside React's rendering path during dragover. */
+[data-page-id][data-drop-position]::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; width: 4px;
+  border-radius: 9999px;
+  background: #38bdf8;
+  z-index: 10;
+  pointer-events: none;
+}
+[data-page-id][data-drop-edge="left"]::after { left: -4px; }
+[data-page-id][data-drop-edge="right"]::after { right: -4px; }

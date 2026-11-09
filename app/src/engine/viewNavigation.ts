@@ -7,6 +7,14 @@ export function wheelSheetStep(deltaY: number, now: number, lastStep: number): n
   return deltaY > 0 ? 1 : -1;
 }
 
+/** Switch sheets only after the viewport has reached the requested vertical edge. */
+export function isAtWheelEdge(deltaY: number, scrollTop: number, scrollHeight: number, clientHeight: number): boolean {
+  if (!Number.isFinite(deltaY) || deltaY === 0 || !Number.isFinite(scrollTop) || !Number.isFinite(scrollHeight) || !Number.isFinite(clientHeight)) return false;
+  const max = Math.max(0, scrollHeight - clientHeight);
+  // Browsers can report subpixel scroll positions and rounded dimensions.
+  return deltaY > 0 ? scrollTop >= max - 1 : scrollTop <= 1;
+}
+
 export function fitPageZoom(viewWidth: number, viewHeight: number, paperWidthMm: number, paperHeightMm: number, rulers: boolean): number {
   if (paperWidthMm <= 0 || paperHeightMm <= 0) return 100;
   // Workspace padding on both sides, the sheet badge, ruler and the gap.
