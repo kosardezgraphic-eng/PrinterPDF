@@ -81,7 +81,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const drag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const suppressClick = useRef(false);
   const [spaceDown, setSpaceDown] = useState(false);
-  const [canvasTool, setCanvasTool] = useState<CanvasTool>('select');
+  const [canvasTool, setCanvasTool] = useState<CanvasTool>('move');
   const [draftLayout, setDraftLayout] = useState<LayoutSettings | null>(null);
   const [editScope, setEditScope] = useState<PageEditScope>('current');
   const [currentEditPageId, setCurrentEditPageId] = useState<string | null>(null);
@@ -127,6 +127,19 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     setCurrentEditPageId(page?.id ?? null);
     setCurrentOccurrenceKey(null);
   }, [sheets, safeSheetIdx, setActiveSheetIndex, focusPageFromPreview]);
+
+  useEffect(() => {
+    if (!currentOccurrenceKey) return;
+    // Dismiss only the canvas handles; thumbnail multi-selection remains intact.
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const cell = target?.closest<HTMLElement>('[data-occurrence-key]');
+      if (cell?.dataset.occurrenceKey === currentOccurrenceKey || target?.closest('[data-layer-menu]')) return;
+      setCurrentOccurrenceKey(null);
+    };
+    document.addEventListener('pointerdown', dismiss, true);
+    return () => document.removeEventListener('pointerdown', dismiss, true);
+  }, [currentOccurrenceKey]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -380,7 +393,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                       )}
                     </div>
 
-                    {cell.page && <PageCanvasCell cell={cell} sheetIndex={sheetSide.sideIndex - 1} pxPerMm={basePxPerMm} tool={canvasTool} scope={editScope} spaceDown={spaceDown} onCurrentPage={(id, preserveSelection, occurrenceKey) => {
+                    {cell.page && <PageCanvasCell cell={cell} sheetIndex={sheetSide.sideIndex - 1} isActive={currentOccurrenceKey === cell.occurrenceKey} pxPerMm={basePxPerMm} tool={canvasTool} scope={editScope} spaceDown={spaceDown} onCurrentPage={(id, preserveSelection, occurrenceKey) => {
                       setCurrentEditPageId(id);
                       setCurrentOccurrenceKey(occurrenceKey);
                       setActiveSheetIndex(sheetSide.sideIndex - 1);
@@ -588,9 +601,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
       )}
 
       {sheets.length > 0 && <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-200">
-        {(['select', 'move', 'crop', 'layout', 'measure'] as const).map(tool => <button key={tool} type="button" aria-pressed={canvasTool === tool}
+        {(['move', 'crop', 'layout', 'measure'] as const).map(tool => <button key={tool} type="button" aria-pressed={canvasTool === tool}
           onClick={() => { setDraftLayout(null); setCanvasTool(tool); }} className={`rounded-lg px-3 py-1.5 ${canvasTool === tool ? 'bg-sky-600 text-white' : 'bg-slate-800 hover:bg-slate-700'}`}>
-          {lang === 'fa' ? { select:'انتخاب', move:'جابجایی / اندازه', crop:'برش', layout:'حاشیه / فاصله', measure:'خط‌کش' }[tool] : { select:'Select', move:'Move / resize', crop:'Crop', layout:'Margins / gutters', measure:'Measure' }[tool]}
+          {lang === 'fa' ? { move:'انتخاب / جابه‌جایی / اندازه', crop:'برش', layout:'حاشیه / فاصله', measure:'خط‌کش' }[tool] : { move:'Select / move / resize', crop:'Crop', layout:'Margins / gutters', measure:'Measure' }[tool]}
         </button>)}
         <label className="flex items-center gap-1">{lang === 'fa' ? 'اعمال روی:' : 'Apply to:'}
           <select value={editScope} onChange={e => setEditScope(e.target.value as PageEditScope)} className="rounded border border-slate-700 bg-slate-800 px-2 py-1">
@@ -608,7 +621,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
             if (cell?.occurrenceKey) resetCellGeometry(page.id, cell.occurrenceKey);
           } else applyPageGeometry(page.id, editScope, { kind:'reset' });
         }} className="rounded bg-slate-800 px-3 py-1.5 hover:bg-slate-700 disabled:opacity-50">{lang === 'fa' ? 'بازنشانی برش و اندازه' : 'Reset crop and size'}</button>
-        {canvasTool === 'move' && <span className="text-slate-400">{lang === 'fa' ? 'گوشه‌ها متناسب، لبه‌ها مستقل؛ برای ترتیب لایه راست‌کلیک یا ⋮ را انتخاب کنید.' : 'Corners preserve proportions; edges resize one axis. Right-click or ⋮ for layer order.'}</span>}
+        {canvasTool === 'move' && <span className="text-slate-400">{lang === 'fa' ? 'روی تصویر کلیک کنید؛ برای ترتیب لایه راست‌کلیک کنید یا انگشت را نگه دارید.' : 'Click an image to edit it. Right-click or touch and hold for layer order.'}</span>}
         {canvasTool === 'crop' && <span className="text-slate-400">{lang === 'fa' ? 'برش صفحه روی همه تکرارهای آن اعمال و اندازه‌های اختصاصی آن صفحه بازنشانی می‌شود.' : 'Cropping a page affects all repeats and resets their individual sizes.'}</span>}
         {canvasTool === 'layout' && <span className="text-slate-400">{lang === 'fa' ? 'سبز: حاشیه؛ بنفش: فاصلهٔ یکسان همهٔ ستون‌ها یا ردیف‌ها. با موس یا لمس بکشید.' : 'Drag green margin or purple uniform gutter handles with mouse or touch.'}</span>}
         {canvasTool === 'measure' && <span className="text-slate-400">{lang === 'fa' ? 'برای اندازه‌گیری بکشید؛ Shift جهت افقی یا عمودی را قفل می‌کند.' : 'Drag to measure; hold Shift to lock horizontally or vertically.'}</span>}
@@ -649,6 +662,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
         onPointerUp={() => { drag.current = null; setPanning(false); setTimeout(() => { suppressClick.current = false; }, 0); }}
         onPointerCancel={() => { drag.current = null; setPanning(false); suppressClick.current = false; }}
         onClickCapture={(e) => { if (suppressClick.current) { suppressClick.current = false; e.preventDefault(); e.stopPropagation(); } }}
+        onClick={() => setCurrentOccurrenceKey(null)}
         onScroll={(e) => {
           if (viewMode !== 'continuous' && viewMode !== 'grid') return;
           const viewport = e.currentTarget;
