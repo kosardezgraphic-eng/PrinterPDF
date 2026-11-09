@@ -23,6 +23,7 @@ import {
 import { useAppStore, type PageEditScope } from '../store/useAppStore';
 import { PageCanvasCell, type CanvasTool } from './PageCanvasCell';
 import { LayoutGuides, MeasurementTool } from './SheetTools';
+import { RulerGuideProvider, SheetRuler, GuidePaperRef, UserGuideLines } from './RulerGuides';
 import { AspectCropControls } from './AspectCropControls';
 import { t } from '../i18n/translations';
 import {
@@ -69,6 +70,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     spoolerJobs,
     batchQueue,
     setActiveSheetIndex,
+    setShowRulers,
     focusPageFromPreview,
     setZoomPercent,
     importFiles,
@@ -77,6 +79,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     applyAspectRatioCrop,
     resetCellGeometry,
     commitLayoutGuides,
+    updateSettings,
     selectPrinter,
     setDefaultPrinter,
     simulatePrinterStatusChange,
@@ -360,43 +363,13 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
           </span>
         </div>
 
-        {/* Physical Paper Sheet Container with optional Rulers */}
-        <div className="relative flex flex-col">
-          {/* Horizontal Top Ruler */}
-          {showRulers && viewMode !== 'grid' && (
-            <div
-              style={{ width: widthPx }}
-              className="mb-1 flex h-5 items-end justify-between border-b border-slate-700 bg-slate-900/90 px-1 font-mono text-[9px] text-slate-400"
-            >
-              {Array.from({ length: 6 }, (_, tickIdx) => {
-                const mmVal = Math.round((sheetSide.widthMm / 5) * tickIdx);
-                return (
-                  <span key={tickIdx}>
-                    {convertMmToUnit(mmVal, settings.unit)}
-                  </span>
-                );
-              })}
-            </div>
-          )}
-
+        {/* Rulers use a left/top origin even in RTL, matching the sheet coordinates. */}
+        <RulerGuideProvider widthMm={sheetSide.widthMm} heightMm={sheetSide.heightMm} widthPx={widthPx} heightPx={heightPx}
+          unit={settings.unit} language={lang} rulersVisible={showRulers && viewMode !== 'grid'} spaceDown={spaceDown} disabled={!!previewOnlyPage}>
+          <SheetRuler axis="x" />
           <div className="flex items-start">
-            {/* Vertical Side Ruler */}
-            {showRulers && viewMode !== 'grid' && (
-              <div
-                style={{ height: heightPx }}
-                className="me-1 flex w-6 flex-col justify-between border-e border-slate-700 bg-slate-900/90 py-1 text-center font-mono text-[9px] text-slate-400"
-              >
-                {Array.from({ length: 6 }, (_, tickIdx) => {
-                  const mmVal = Math.round((sheetSide.heightMm / 5) * tickIdx);
-                  return (
-                    <span key={tickIdx}>
-                      {convertMmToUnit(mmVal, settings.unit)}
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-
+            <SheetRuler axis="y" />
+            <GuidePaperRef>
             {/* Actual Sheet Canvas */}
             <div
               data-sheet-canvas-index={sheetSide.sideIndex - 1}
@@ -568,6 +541,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
               {(canvasTool === 'layout' || canvasTool === 'move') && activeGuideSheet === sheetSide.sideIndex - 1 && !previewOnlyPage && <LayoutGuides sheet={sheetSide} layout={layout} pxPerMm={basePxPerMm} spaceDown={spaceDown} language={lang} unit={settings.unit}
                 onDraft={setDraftLayout} onCommit={next => commitLayoutGuides({ marginsMm:next.marginsMm, horizontalGutterMm:next.horizontalGutterMm, verticalGutterMm:next.verticalGutterMm })} />}
               {canvasTool === 'measure' && <MeasurementTool sheet={sheetSide} unit={settings.unit} language={lang} spaceDown={spaceDown} />}
+              <UserGuideLines />
 
               {/* Precision Loupe Magnifier (J1 / F6) */}
               {loupeEnabled && loupeCoords && (
@@ -583,8 +557,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 </div>
               )}
             </div>
+            </GuidePaperRef>
           </div>
-        </div>
+        </RulerGuideProvider>
       </div>
     );
   };
@@ -722,6 +697,17 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
             <Icon className="h-4 w-4" aria-hidden="true" /><span className="sr-only">{label}</span>
           </button>;
         })}
+        <button type="button" aria-pressed={showRulers} aria-label={lang === 'fa' ? 'نمایش خط‌کش‌ها' : 'Show rulers'}
+          title={lang === 'fa' ? 'نمایش یا پنهان کردن خط‌کش‌ها' : 'Show or hide rulers'} onClick={()=>setShowRulers(!showRulers)}
+          className={`rounded border px-2 py-1 ${showRulers?'border-sky-500 text-sky-300':'border-slate-700 text-slate-300'}`}>
+          {lang === 'fa' ? 'خط‌کش' : 'Rulers'}
+        </button>
+        <label title={lang === 'fa' ? 'واحد اندازه‌گیری کل برنامه را تغییر می‌دهد' : 'Changes the measurement unit throughout the app'} className="flex items-center gap-1">{lang === 'fa' ? 'واحد خط‌کش:' : 'Ruler unit:'}
+          <select aria-label={lang === 'fa' ? 'واحد خط‌کش' : 'Ruler unit'} value={settings.unit} onChange={e=>updateSettings({unit:e.target.value as typeof settings.unit})} className="rounded bg-slate-800 px-1 py-1 text-slate-100">
+            <option value="mm">mm</option><option value="cm">cm</option><option value="inch">inch</option>
+          </select>
+        </label>
+        <span className="text-[10px] text-slate-400">{viewMode === 'grid' ? (lang === 'fa' ? 'خط‌کش در نمای شبکه مخفی است' : 'Rulers hidden in grid view') : !showRulers ? (lang === 'fa' ? 'برای افزودن راهنما خط‌کش را روشن کنید' : 'Show rulers to add guides') : (lang === 'fa' ? 'راهنما: از خط‌کش به برگه بکشید' : 'Guides: drag from a ruler onto the sheet')}</span>
         <label className="flex items-center gap-1">{lang === 'fa' ? 'اعمال روی:' : 'Apply to:'}
           <select value={editScope} onChange={e => setEditScope(e.target.value as PageEditScope)} className="rounded border border-slate-700 bg-slate-800 px-2 py-1">
             <option value="current">{canvasTool === 'crop' ? (lang === 'fa' ? 'این صفحه (همه تکرارها)' : 'This page (all repeats)') : (lang === 'fa' ? 'فقط این خانه' : 'This cell')}</option>

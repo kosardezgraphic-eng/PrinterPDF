@@ -143,6 +143,9 @@ export interface MarginsMm {
   left: number;
 }
 
+/** Non-printing ruler guides measured from the left or top edge of the output sheet. */
+export interface RulerGuide { id: string; axis: 'x' | 'y'; positionMm: number }
+
 export interface LayoutSettings {
   paperSize: PaperSizeId;
   customWidthMm: number;
@@ -158,6 +161,8 @@ export interface LayoutSettings {
   uniqueScale: boolean;
   /** D3: Outer sheet margins in mm */
   marginsMm: MarginsMm;
+  /** Shared workspace guides; positions are in millimetres and never affect output. */
+  rulerGuides?: RulerGuide[];
   /** Printer defaults follow the selected printer/paper; custom margins are preserved. */
   marginMode?: 'printer' | 'custom';
   /** D3: Horizontal spacing between cells in mm */

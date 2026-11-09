@@ -1,0 +1,9 @@
+# Sheet rulers and guides
+
+The top and left rulers use the sheet's left/top edge as zero, including in the Persian RTL interface. Drag from the top ruler into the sheet to create a vertical guide; drag from the left ruler into the sheet to create a horizontal guide. Drag an existing guide back onto its corresponding ruler to delete it. Releasing elsewhere outside the sheet cancels the move. Escape, pointer cancellation and loss of capture cancel the current gesture. When hovering a line with the mouse, focusing it, or touching/dragging it, its distance from the left or top sheet edge is shown. Pointer interaction uses capture and batches visual changes with `requestAnimationFrame`; one undoable edit is committed on release.
+
+The unit selector in the preview changes the application's measurement unit (mm, cm, or the existing inch option), without changing guide positions. Major ruler marks are spaced according to zoom and minor ticks are shown where there is room. Guides are stored in millimetres as part of the project layout and shared across output sheets; they are non-printing and do not change the imposed PDF or margins. Guides outside a smaller sheet are hidden but retained if the sheet size is later increased. Undo/redo applies to adding, moving and deleting a guide. The existing grid view hides rulers; switch to another view to drag new guides from a ruler. Existing guides remain visible even when rulers are hidden.
+
+For keyboard use, focus a ruler and press Enter or Space to add a guide at the sheet midpoint. Focus a guide and use the matching arrow keys to move it by 1 mm (Shift: 10 mm), or Delete/Backspace to remove it. When the Space key is held for panning, creating or dragging guides is disabled.
+
+Automated tests simulate pointer and touch events in jsdom and check exported PDF pixels with/without guides. They do not measure real-world frame rate or verify actual mouse, touch or stylus interaction in a browser/Electron.
