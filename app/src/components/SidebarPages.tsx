@@ -42,6 +42,7 @@ export const SidebarPages: React.FC = () => {
     setSidebarTab,
     togglePageSelectedForPrint,
     highlightPage,
+    requestPreviewPage,
     selectAllForPrint,
     selectOddEvenForPrint,
     invertPrintSelection,
@@ -314,6 +315,7 @@ export const SidebarPages: React.FC = () => {
                             onClick={(e) => {
                               e.stopPropagation();
                               highlightPage(page.id, e.ctrlKey || e.metaKey, e.shiftKey);
+                              requestPreviewPage(page.id);
                             }}
                             onContextMenu={(e) => {
                               e.preventDefault();

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   UploadCloud,
   ChevronRight,
@@ -14,6 +14,11 @@ import {
   AlertTriangle,
   WifiOff,
   FileWarning,
+  MousePointer2,
+  Crop,
+  PanelsTopLeft,
+  Ruler,
+  Maximize2,
 } from 'lucide-react';
 import { useAppStore, type PageEditScope } from '../store/useAppStore';
 import { PageCanvasCell, type CanvasTool } from './PageCanvasCell';
@@ -49,6 +54,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     pageNumbering,
     settings,
     activeSheetIndex,
+    previewPageRequest,
     zoomPercent,
     viewMode,
     showRulers,
@@ -80,12 +86,19 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const lastWheelStep = useRef(-Infinity);
   const drag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const suppressClick = useRef(false);
+  const handledPreviewRequest = useRef<typeof previewPageRequest>(null);
+  const suppressNavigationScroll = useRef(false);
+  const scrollSuppressionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const returnSheetIndex = useRef(0);
   const [spaceDown, setSpaceDown] = useState(false);
   const [canvasTool, setCanvasTool] = useState<CanvasTool>('move');
   const [draftLayout, setDraftLayout] = useState<LayoutSettings | null>(null);
   const [editScope, setEditScope] = useState<PageEditScope>('current');
   const [currentEditPageId, setCurrentEditPageId] = useState<string | null>(null);
   const [currentOccurrenceKey, setCurrentOccurrenceKey] = useState<string | null>(null);
+  const [activeGuideSheet, setActiveGuideSheet] = useState<number | null>(null);
+  const [previewOnlyPageId, setPreviewOnlyPageId] = useState<string | null>(null);
+  const [navigationTarget, setNavigationTarget] = useState<{pageId: string; sheetIndex: number; previewOnly: boolean} | null>(null);
   const [panning, setPanning] = useState(false);
   const [showPreflight, setShowPreflight] = useState(false);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -99,13 +112,69 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const lang = settings.language;
   const tr = t(lang);
 
-  const sheets = useMemo(() => computeImpositionSheets(pages, layout), [pages, layout]);
+  const outputSheets = useMemo(() => computeImpositionSheets(pages, layout), [pages, layout]);
+  const previewOnlyPage = pages.find(page => page.id === previewOnlyPageId && !page.selectedForPrint);
+  const sheets = useMemo(() => previewOnlyPage
+    ? computeImpositionSheets([{ ...previewOnlyPage, selectedForPrint: true }], { ...layout, duplexMode:'none' })
+    : outputSheets, [previewOnlyPage, layout, outputSheets]);
   const pageNumbers = useMemo(() => new Map(pages.map((page, index) => [page.id, index + 1])), [pages]);
-  const preflight = useMemo(() => checkPreflight(pages, documents, sheets, effects), [pages, documents, sheets, effects]);
+  const preflight = useMemo(() => checkPreflight(pages, documents, outputSheets, effects), [pages, documents, outputSheets, effects]);
   const safeSheetIdx = Math.min(
     Math.max(0, activeSheetIndex),
     Math.max(0, sheets.length - 1)
   );
+
+  // Sidebar navigation is separate from highlighting and print selection.
+  useEffect(() => {
+    if (!previewPageRequest || handledPreviewRequest.current === previewPageRequest) return;
+    handledPreviewRequest.current = previewPageRequest;
+    useAppStore.setState(state => state.previewPageRequest === previewPageRequest ? {previewPageRequest:null} : state);
+    const page = pages.find(item => item.id === previewPageRequest.pageId);
+    if (!page) return;
+    const only = !page.selectedForPrint;
+    const index = only ? 0 : outputSheets.findIndex(sheet => sheet.cells.some(cell => cell.page?.id === page.id));
+    if (index < 0) return;
+    if (only && !previewOnlyPageId) returnSheetIndex.current = activeSheetIndex;
+    setPreviewOnlyPageId(only ? page.id : null);
+    setActiveSheetIndex(index);
+    setCurrentEditPageId(page.id);
+    setCurrentOccurrenceKey(null);
+    setActiveGuideSheet(null);
+    setPan({x:0,y:0});
+    setNavigationTarget({pageId:page.id,sheetIndex:index,previewOnly:only});
+  }, [previewPageRequest, pages, outputSheets, activeSheetIndex, previewOnlyPageId, setActiveSheetIndex]);
+
+  // If a preview-only page is subsequently enabled for printing, navigate to its real sheet.
+  useEffect(() => {
+    if (!previewOnlyPageId) return;
+    const page = pages.find(item => item.id === previewOnlyPageId);
+    if (!page) { setPreviewOnlyPageId(null); return; }
+    if (!page.selectedForPrint) return;
+    const index = outputSheets.findIndex(sheet => sheet.cells.some(cell => cell.page?.id === page.id));
+    if (index < 0) return;
+    setPreviewOnlyPageId(null); setActiveSheetIndex(index);
+    setNavigationTarget({pageId:page.id,sheetIndex:index,previewOnly:false});
+  }, [previewOnlyPageId, pages, outputSheets, setActiveSheetIndex]);
+
+  useLayoutEffect(() => {
+    if (!navigationTarget || navigationTarget.previewOnly !== !!previewOnlyPage || safeSheetIdx !== navigationTarget.sheetIndex) return;
+    const viewport = viewportRef.current;
+    const sheet = viewport?.querySelector<HTMLElement>(`[data-sheet-index="${navigationTarget.sheetIndex}"]`);
+    const cell = Array.from(sheet?.querySelectorAll<HTMLElement>('[data-canvas-page-id]') ?? [])
+      .find(element => element.dataset.canvasPageId === navigationTarget.pageId);
+    const target = cell?.querySelector<HTMLElement>('[data-page-content]') ?? sheet;
+    if (!viewport || !target) return;
+    const viewRect = viewport.getBoundingClientRect(), targetRect = target.getBoundingClientRect();
+    if (viewRect.width && viewRect.height && targetRect.width && targetRect.height) {
+      suppressNavigationScroll.current = true;
+      if (scrollSuppressionTimer.current) clearTimeout(scrollSuppressionTimer.current);
+      scrollSuppressionTimer.current = setTimeout(() => { suppressNavigationScroll.current = false; }, 200);
+      viewport.scrollTop += targetRect.top + targetRect.height / 2 - (viewRect.top + viewport.clientHeight / 2);
+      viewport.scrollLeft += targetRect.left + targetRect.width / 2 - (viewRect.left + viewport.clientWidth / 2);
+    }
+    setNavigationTarget(null);
+  }, [navigationTarget, safeSheetIdx, previewOnlyPage, sheets, viewMode]);
+  useEffect(() => () => { if (scrollSuppressionTimer.current) clearTimeout(scrollSuppressionTimer.current); }, []);
 
   // Determine which sheets to render based on viewMode
   const visibleSheets: ComputedSheetSide[] =
@@ -126,6 +195,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     focusPageFromPreview(page?.id ?? null);
     setCurrentEditPageId(page?.id ?? null);
     setCurrentOccurrenceKey(null);
+    setActiveGuideSheet(null);
   }, [sheets, safeSheetIdx, setActiveSheetIndex, focusPageFromPreview]);
 
   useEffect(() => {
@@ -142,9 +212,20 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   }, [currentOccurrenceKey]);
 
   useEffect(() => {
+    if (activeGuideSheet === null) return;
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target?.closest('[data-sheet-canvas-index]') && !target?.closest('[data-layer-menu]')) setActiveGuideSheet(null);
+    };
+    document.addEventListener('pointerdown', dismiss, true);
+    return () => document.removeEventListener('pointerdown', dismiss, true);
+  }, [activeGuideSheet]);
+
+  useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     const onWheel = (event: WheelEvent) => {
+      suppressNavigationScroll.current = false;
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault();
         if (event.deltaY !== 0) setZoomPercent(useAppStore.getState().zoomPercent + (event.deltaY < 0 ? 10 : -10));
@@ -296,6 +377,12 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
 
             {/* Actual Sheet Canvas */}
             <div
+              data-sheet-canvas-index={sheetSide.sideIndex - 1}
+              onClick={e => {
+                if ((canvasTool === 'move' || canvasTool === 'layout') && !previewOnlyPage) {
+                  e.stopPropagation(); setActiveGuideSheet(sheetSide.sideIndex - 1); setCurrentOccurrenceKey(null);
+                }
+              }}
               onMouseMove={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const relX = Math.max(0, e.clientX - rect.left);
@@ -393,9 +480,10 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                       )}
                     </div>
 
-                    {cell.page && <PageCanvasCell cell={cell} sheetIndex={sheetSide.sideIndex - 1} isActive={currentOccurrenceKey === cell.occurrenceKey} pxPerMm={basePxPerMm} tool={canvasTool} scope={editScope} spaceDown={spaceDown} onCurrentPage={(id, preserveSelection, occurrenceKey) => {
+                    {cell.page && <PageCanvasCell cell={cell} sheetIndex={sheetSide.sideIndex - 1} readOnly={!!previewOnlyPage} isActive={currentOccurrenceKey === cell.occurrenceKey} pxPerMm={basePxPerMm} tool={canvasTool} scope={editScope} spaceDown={spaceDown} onCurrentPage={(id, preserveSelection, occurrenceKey) => {
                       setCurrentEditPageId(id);
                       setCurrentOccurrenceKey(occurrenceKey);
+                      if (canvasTool === 'move' && !previewOnlyPage) setActiveGuideSheet(sheetSide.sideIndex - 1);
                       setActiveSheetIndex(sheetSide.sideIndex - 1);
                       focusPageFromPreview(id, preserveSelection, occurrenceKey);
                     }} />}
@@ -454,7 +542,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 </div>
               )}
 
-              {canvasTool === 'layout' && <LayoutGuides sheet={sheetSide} layout={layout} pxPerMm={basePxPerMm} spaceDown={spaceDown} language={lang}
+              {(canvasTool === 'layout' || canvasTool === 'move') && activeGuideSheet === sheetSide.sideIndex - 1 && !previewOnlyPage && <LayoutGuides sheet={sheetSide} layout={layout} pxPerMm={basePxPerMm} spaceDown={spaceDown} language={lang}
                 onDraft={setDraftLayout} onCommit={next => commitLayoutGuides({ marginsMm:next.marginsMm, horizontalGutterMm:next.horizontalGutterMm, verticalGutterMm:next.verticalGutterMm })} />}
               {canvasTool === 'measure' && <MeasurementTool sheet={sheetSide} unit={settings.unit} language={lang} spaceDown={spaceDown} />}
 
@@ -562,11 +650,12 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
             <button
               type="button"
               disabled={safeSheetIdx <= 0}
+              aria-label={lang === 'fa' ? 'شیت قبلی' : 'Prev Sheet'} title={lang === 'fa' ? 'شیت قبلی' : 'Prev Sheet'}
               onClick={() => navigateSheet(safeSheetIdx - 1)}
               className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-slate-200 hover:bg-slate-700 disabled:opacity-40 cursor-pointer"
             >
               <ChevronRight className="h-3.5 w-3.5" />
-              <span>{lang === 'fa' ? 'شیت قبلی' : 'Prev Sheet'}</span>
+              <span className="sr-only">{lang === 'fa' ? 'شیت قبلی' : 'Prev Sheet'}</span>
             </button>
 
             <span className="font-bold text-slate-200">
@@ -581,30 +670,35 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
             <button
               type="button"
               disabled={safeSheetIdx >= sheets.length - 1}
+              aria-label={lang === 'fa' ? 'شیت بعدی' : 'Next Sheet'} title={lang === 'fa' ? 'شیت بعدی' : 'Next Sheet'}
               onClick={() => navigateSheet(safeSheetIdx + 1)}
               className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-slate-200 hover:bg-slate-700 disabled:opacity-40 cursor-pointer"
             >
-              <span>{lang === 'fa' ? 'شیت بعدی' : 'Next Sheet'}</span>
+              <span className="sr-only">{lang === 'fa' ? 'شیت بعدی' : 'Next Sheet'}</span>
               <ChevronLeft className="h-3.5 w-3.5" />
             </button>
           </div>
 
           <div className="flex items-center gap-2 text-[11px] text-slate-400">
-            <button type="button" aria-expanded={showPreflight} onClick={() => setShowPreflight(!showPreflight)} className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-slate-100 hover:bg-slate-700">
-              {lang === 'fa' ? 'پیش‌بررسی' : 'Preflight'}{preflight.length > 0 ? ` (${preflight.length})` : ''}
+            <button type="button" aria-expanded={showPreflight} aria-label={lang === 'fa' ? 'پیش‌بررسی' : 'Preflight'} title={lang === 'fa' ? 'پیش‌بررسی' : 'Preflight'} onClick={() => setShowPreflight(!showPreflight)} className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-slate-100 hover:bg-slate-700">
+              <FileWarning className="h-4 w-4" aria-hidden="true" />{preflight.length > 0 && <span aria-hidden="true">{preflight.length}</span>}
             </button>
-            <button type="button" onClick={fitPage} className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-slate-100 hover:bg-slate-700">
-              {lang === 'fa' ? 'جاگیری کامل' : 'Fit page'}
+            <button type="button" aria-label={lang === 'fa' ? 'جاگیری کامل' : 'Fit page'} title={lang === 'fa' ? 'جاگیری کامل' : 'Fit page'} onClick={fitPage} className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-slate-100 hover:bg-slate-700">
+              <Maximize2 className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
         </div>
       )}
 
       {sheets.length > 0 && <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-200">
-        {(['move', 'crop', 'layout', 'measure'] as const).map(tool => <button key={tool} type="button" aria-pressed={canvasTool === tool}
-          onClick={() => { setDraftLayout(null); setCanvasTool(tool); }} className={`rounded-lg px-3 py-1.5 ${canvasTool === tool ? 'bg-sky-600 text-white' : 'bg-slate-800 hover:bg-slate-700'}`}>
-          {lang === 'fa' ? { move:'انتخاب / جابه‌جایی / اندازه', crop:'برش', layout:'حاشیه / فاصله', measure:'خط‌کش' }[tool] : { move:'Select / move / resize', crop:'Crop', layout:'Margins / gutters', measure:'Measure' }[tool]}
-        </button>)}
+        {(['move', 'crop', 'layout', 'measure'] as const).map(tool => {
+          const label = lang === 'fa' ? { move:'انتخاب / جابه‌جایی / اندازه', crop:'برش', layout:'حاشیه / فاصله', measure:'خط‌کش' }[tool] : { move:'Select / move / resize', crop:'Crop', layout:'Margins / gutters', measure:'Measure' }[tool];
+          const Icon = {move:MousePointer2, crop:Crop, layout:PanelsTopLeft, measure:Ruler}[tool];
+          return <button key={tool} type="button" aria-label={label} title={label} aria-pressed={canvasTool === tool} disabled={!!previewOnlyPage}
+            onClick={() => { setDraftLayout(null); setCanvasTool(tool); }} className={`rounded-lg px-3 py-1.5 disabled:opacity-40 ${canvasTool === tool ? 'bg-sky-600 text-white' : 'bg-slate-800 hover:bg-slate-700'}`}>
+            <Icon className="h-4 w-4" aria-hidden="true" /><span className="sr-only">{label}</span>
+          </button>;
+        })}
         <label className="flex items-center gap-1">{lang === 'fa' ? 'اعمال روی:' : 'Apply to:'}
           <select value={editScope} onChange={e => setEditScope(e.target.value as PageEditScope)} className="rounded border border-slate-700 bg-slate-800 px-2 py-1">
             <option value="current">{canvasTool === 'crop' ? (lang === 'fa' ? 'این صفحه (همه تکرارها)' : 'This page (all repeats)') : (lang === 'fa' ? 'فقط این خانه' : 'This cell')}</option>
@@ -612,7 +706,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
             <option value="all">{lang === 'fa' ? 'همه صفحات' : 'All pages'}</option>
           </select>
         </label>
-        <button type="button" disabled={!pages.some(page => page.isHighlighted)} onClick={() => {
+        <button type="button" aria-label={lang === 'fa' ? 'بازنشانی برش و اندازه' : 'Reset crop and size'} title={lang === 'fa' ? 'بازنشانی برش و اندازه' : 'Reset crop and size'} disabled={!!previewOnlyPage || !pages.some(page => page.isHighlighted)} onClick={() => {
           const page = pages.find(item => item.id === currentEditPageId && item.isHighlighted) ?? pages.find(item => item.isHighlighted);
           if (!page) return;
           if (editScope === 'current') {
@@ -620,11 +714,16 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
               ?? sheets[safeSheetIdx]?.cells.find(item => item.page?.id === page.id);
             if (cell?.occurrenceKey) resetCellGeometry(page.id, cell.occurrenceKey);
           } else applyPageGeometry(page.id, editScope, { kind:'reset' });
-        }} className="rounded bg-slate-800 px-3 py-1.5 hover:bg-slate-700 disabled:opacity-50">{lang === 'fa' ? 'بازنشانی برش و اندازه' : 'Reset crop and size'}</button>
-        {canvasTool === 'move' && <span className="text-slate-400">{lang === 'fa' ? 'روی تصویر کلیک کنید؛ برای ترتیب لایه راست‌کلیک کنید یا انگشت را نگه دارید.' : 'Click an image to edit it. Right-click or touch and hold for layer order.'}</span>}
-        {canvasTool === 'crop' && <span className="text-slate-400">{lang === 'fa' ? 'برش صفحه روی همه تکرارهای آن اعمال و اندازه‌های اختصاصی آن صفحه بازنشانی می‌شود.' : 'Cropping a page affects all repeats and resets their individual sizes.'}</span>}
-        {canvasTool === 'layout' && <span className="text-slate-400">{lang === 'fa' ? 'سبز: حاشیه؛ بنفش: فاصلهٔ یکسان همهٔ ستون‌ها یا ردیف‌ها. با موس یا لمس بکشید.' : 'Drag green margin or purple uniform gutter handles with mouse or touch.'}</span>}
-        {canvasTool === 'measure' && <span className="text-slate-400">{lang === 'fa' ? 'برای اندازه‌گیری بکشید؛ Shift جهت افقی یا عمودی را قفل می‌کند.' : 'Drag to measure; hold Shift to lock horizontally or vertically.'}</span>}
+        }} className="rounded bg-slate-800 px-3 py-1.5 hover:bg-slate-700 disabled:opacity-50"><RotateCcw className="h-4 w-4" aria-hidden="true" /></button>
+        {canvasTool === 'move' && <span className="sr-only">{lang === 'fa' ? 'روی تصویر کلیک کنید؛ برای ترتیب لایه راست‌کلیک کنید یا انگشت را نگه دارید.' : 'Click an image to edit it. Right-click or touch and hold for layer order.'}</span>}
+        {canvasTool === 'crop' && <span className="sr-only">{lang === 'fa' ? 'برش صفحه روی همه تکرارهای آن اعمال و اندازه‌های اختصاصی آن صفحه بازنشانی می‌شود.' : 'Cropping a page affects all repeats and resets their individual sizes.'}</span>}
+        {canvasTool === 'layout' && <span className="sr-only">{lang === 'fa' ? 'سبز: حاشیه؛ بنفش: فاصلهٔ یکسان همهٔ ستون‌ها یا ردیف‌ها. با موس یا لمس بکشید.' : 'Drag green margin or purple uniform gutter handles with mouse or touch.'}</span>}
+        {canvasTool === 'measure' && <span className="sr-only">{lang === 'fa' ? 'برای اندازه‌گیری بکشید؛ Shift جهت افقی یا عمودی را قفل می‌کند.' : 'Drag to measure; hold Shift to lock horizontally or vertically.'}</span>}
+      </div>}
+
+      {previewOnlyPage && <div role="status" className="flex items-center gap-3 border-b border-amber-700 bg-amber-950 px-4 py-2 text-xs text-amber-100">
+        <span>{lang === 'fa' ? 'این صفحه برای چاپ انتخاب نشده است؛ نمایش موقت و فقط‌خواندنی است و خروجی چاپ را تغییر نمی‌دهد.' : 'This page is excluded from printing. This is a temporary read-only preview and does not change output.'}</span>
+        <button type="button" onClick={() => { setPreviewOnlyPageId(null); setActiveSheetIndex(returnSheetIndex.current); setNavigationTarget(null); }} className="rounded border border-amber-600 px-2 py-1">{lang === 'fa' ? 'بازگشت به پیش‌نمایش چاپ' : 'Return to print preview'}</button>
       </div>}
 
       {showPreflight && (
@@ -649,6 +748,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
         data-preview-viewport
         className={`flex-1 overflow-auto p-6 ${spaceDown ? (panning ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
         onPointerDown={(e) => {
+          suppressNavigationScroll.current = false;
           if (!spaceDown || e.button !== 0) return;
           e.preventDefault(); e.stopPropagation();
           drag.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
@@ -662,9 +762,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
         onPointerUp={() => { drag.current = null; setPanning(false); setTimeout(() => { suppressClick.current = false; }, 0); }}
         onPointerCancel={() => { drag.current = null; setPanning(false); suppressClick.current = false; }}
         onClickCapture={(e) => { if (suppressClick.current) { suppressClick.current = false; e.preventDefault(); e.stopPropagation(); } }}
-        onClick={() => setCurrentOccurrenceKey(null)}
+        onClick={() => { setCurrentOccurrenceKey(null); setActiveGuideSheet(null); }}
         onScroll={(e) => {
-          if (viewMode !== 'continuous' && viewMode !== 'grid') return;
+          if (suppressNavigationScroll.current || (viewMode !== 'continuous' && viewMode !== 'grid')) return;
           const viewport = e.currentTarget;
           const bounds = viewport.getBoundingClientRect();
           const midY = bounds.top + viewport.clientHeight / 2;

@@ -15,7 +15,7 @@ function pointer(el: Element, type:string, x:number, y:number, pointerType:'mous
   act(() => el.dispatchEvent(ev));
 }
 function clickTool(name:string) {
-  const btn = Array.from(container.querySelectorAll('button')).find(b => b.textContent?.trim() === name)!;
+  const btn = container.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`)!;
   act(() => btn.click());
 }
 beforeEach(() => {
@@ -29,8 +29,27 @@ beforeEach(() => {
 });
 afterEach(() => {act(() => root.unmount());container.remove();vi.restoreAllMocks();});
 describe('sheet tool pointer interactions', () => {
+  it('shows guides only on the clicked sheet in default mode and dismisses them outside', () => {
+    expect(container.querySelector('[data-layout-guides]')).toBeNull();
+    act(() => (container.querySelector('[data-canvas-page-id="p"] > div') as HTMLElement).click());
+    expect(container.querySelectorAll('[data-layout-guides]')).toHaveLength(1);
+    expect(container.querySelectorAll('[aria-label^="move "]')).toHaveLength(8);
+    pointer(container.querySelector('[data-preview-viewport]')!, 'pointerdown', 0, 0);
+    expect(container.querySelector('[data-layout-guides]')).toBeNull();
+    expect(container.querySelectorAll('[aria-label^="move "]')).toHaveLength(0);
+  });
+  it('moves guides between clicked sheets and does not activate resize handles on paper', () => {
+    act(() => useAppStore.setState({pages:[page,{...page,id:'p2'}],layout:{...useAppStore.getState().layout,rows:1,cols:1},viewMode:'continuous'}));
+    const sheets=container.querySelectorAll<HTMLElement>('[data-sheet-canvas-index]');
+    act(() => sheets[0].click());
+    expect(sheets[0].querySelector('[data-layout-guides]')).not.toBeNull();
+    act(() => sheets[1].click());
+    expect(sheets[0].querySelector('[data-layout-guides]')).toBeNull();
+    expect(sheets[1].querySelector('[data-layout-guides]')).not.toBeNull();
+    expect(container.querySelectorAll('[aria-label^="move "]')).toHaveLength(0);
+  });
   it.each(['mouse','touch'] as const)('previews and commits a margin drag using %s, with undo', pointerType => {
-    clickTool('Margins / gutters');
+    act(() => (container.querySelector('[data-sheet-canvas-index]') as HTMLElement).click());
     const overlay=container.querySelector('[data-layout-guides]') as HTMLElement;
     vi.spyOn(overlay,'getBoundingClientRect').mockReturnValue(rect);
     const handle=container.querySelector('[aria-label="Left margin"]')!;
@@ -45,7 +64,7 @@ describe('sheet tool pointer interactions', () => {
   });
   it.each([['Column gutter 1 (all columns)','horizontalGutterMm',100,100,110,100], ['Row gutter 1 (all rows)','verticalGutterMm',100,100,100,110]] as const)(
     'commits %s with touch and can undo it', (label,key,x,y,endX,endY) => {
-      clickTool('Margins / gutters');
+      act(() => (container.querySelector('[data-sheet-canvas-index]') as HTMLElement).click());
       const overlay=container.querySelector('[data-layout-guides]') as HTMLElement;
       vi.spyOn(overlay,'getBoundingClientRect').mockReturnValue(rect);
       const handle=container.querySelector(`[aria-label="${label}"]`)!;
@@ -55,7 +74,7 @@ describe('sheet tool pointer interactions', () => {
       expect(useAppStore.getState().layout[key]).toBe(6);
     });
   it('discards a canceled touch gutter drag', () => {
-    clickTool('Margins / gutters');
+    act(() => (container.querySelector('[data-sheet-canvas-index]') as HTMLElement).click());
     const overlay=container.querySelector('[data-layout-guides]') as HTMLElement;
     vi.spyOn(overlay,'getBoundingClientRect').mockReturnValue(rect);
     const handle=container.querySelector('[aria-label="Column gutter 1 (all columns)"]')!;

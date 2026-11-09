@@ -22,7 +22,7 @@ beforeEach(() => {
   (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   useAppStore.setState({ documents:[doc('d1'),doc('d2',true)], pages:[makePage('p1','d1',true),makePage('p2','d2')],
     layout:{...DEFAULT_LAYOUT, rows:1,cols:1,duplexMode:'none',autoRotateToFit:false}, settings:{...DEFAULT_SETTINGS,language:'en'},
-    activeSheetIndex:0, viewMode:'single', sidebarTab:'pages', sidebarReveal:null });
+    activeSheetIndex:0, viewMode:'single', sidebarTab:'pages', sidebarReveal:null, previewPageRequest:null });
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   act(() => root.render(React.createElement(React.Fragment, null,
     React.createElement(SidebarPages), React.createElement(PreviewWorkspace, {onCursorMoveMm:()=>{}}))));
@@ -38,7 +38,7 @@ describe('preview and thumbnails', () => {
     expect(highlights()).toEqual(['p2']);
     expect(useAppStore.getState().documents[1].collapsed).toBe(false);
     expect(container.querySelector('[data-page-id="p2"]')?.className).toContain('border-sky-500');
-    const button = Array.from(container.querySelectorAll('button')).find(b => b.textContent?.includes('Prev Sheet'))!;
+    const button = container.querySelector<HTMLButtonElement>('[aria-label="Prev Sheet"]')!;
     act(() => button.click());
     expect(highlights()).toEqual(['p1']);
   });
@@ -106,6 +106,76 @@ describe('preview and thumbnails', () => {
     act(() => content.click());
     expect(highlights()).toEqual(['p2']);
     expect(useAppStore.getState().pages.every(p => p.selectedForPrint)).toBe(true);
+  });
+  it.each([
+    ['single','sequential',1,1,'none',1],
+    ['double','sequential',1,1,'long-edge',1],
+    ['continuous','sequential',1,1,'none',1],
+    ['grid','sequential',1,2,'none',0],
+    ['single','step-and-repeat',2,2,'long-edge',1],
+  ] as const)('navigates a thumbnail in %s / %s without altering print or multiselection', (viewMode,placementMode,rows,cols,duplexMode,expected) => {
+    act(() => useAppStore.setState({documents:[doc('d1'),doc('d2')],viewMode,layout:{...useAppStore.getState().layout,placementMode,rows,cols,duplexMode}}));
+    const card=container.querySelector('[data-page-id="p2"]')!;
+    act(() => card.dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true})));
+    expect(useAppStore.getState().activeSheetIndex).toBe(expected);
+    expect(container.querySelector(`[data-sheet-index="${expected}"] [data-canvas-page-id="p2"]`)).not.toBeNull();
+    expect(highlights()).toEqual(['p1','p2']);
+    expect(useAppStore.getState().pages.every(p=>p.selectedForPrint)).toBe(true);
+  });
+  it('centers the requested cell in the preview viewport on every click without scrolling the sidebar', () => {
+    act(() => useAppStore.setState({documents:[doc('d1'),doc('d2')],viewMode:'grid'}));
+    const rect=(left:number,top:number,width:number,height:number) => ({left,top,width,height,right:left+width,bottom:top+height,x:left,y:top,toJSON:()=>({})});
+    const viewport=container.querySelector('[data-preview-viewport]') as HTMLElement;
+    const list=container.querySelector('[data-thumbnail-list]') as HTMLElement;
+    Object.defineProperties(viewport,{clientWidth:{value:100,configurable:true},clientHeight:{value:100,configurable:true}});
+    vi.spyOn(viewport,'getBoundingClientRect').mockReturnValue(rect(0,0,100,100));
+    const content=container.querySelector('[data-canvas-page-id="p2"] [data-page-content]') as HTMLElement;
+    vi.spyOn(content,'getBoundingClientRect').mockReturnValue(rect(200,300,40,40));
+    const card=container.querySelector('[data-page-id="p2"]')!;
+    act(() => card.dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true})));
+    expect(viewport.scrollTop).toBe(270); expect(viewport.scrollLeft).toBe(170); expect(list.scrollTop).toBe(0);
+    act(() => viewport.dispatchEvent(new Event('scroll',{bubbles:true})));
+    expect(highlights()).toEqual(['p1','p2']);
+    viewport.scrollTop=0; viewport.scrollLeft=0;
+    act(() => card.dispatchEvent(new MouseEvent('click',{bubbles:true})));
+    expect(viewport.scrollTop).toBe(270); expect(viewport.scrollLeft).toBe(170);
+  });
+  it('previews an excluded page read-only without changing output selection or preflight, then returns', () => {
+    act(() => useAppStore.setState({documents:[doc('d1'),doc('d2')],pages:[makePage('p1','d1',true),{...makePage('p2','d2'),selectedForPrint:false}]}));
+    act(() => (container.querySelector('[aria-label="Preflight"]') as HTMLElement).click());
+    const preflight=container.querySelector('[role=status]')?.textContent;
+    act(() => (container.querySelector('[data-page-id="p2"]') as HTMLElement).click());
+    expect(container.textContent).toContain('temporary read-only preview');
+    expect(container.querySelector('[data-canvas-page-id="p2"]')).not.toBeNull();
+    expect((container.querySelector('[data-canvas-page-id="p2"] [data-page-content]') as HTMLElement).style.pointerEvents).toBe('none');
+    expect(container.querySelector('[data-layout-guides]')).toBeNull();
+    expect(useAppStore.getState().pages.map(p=>p.selectedForPrint)).toEqual([true,false]);
+    expect(Array.from(container.querySelectorAll('[role=status]')).some(el=>el.textContent===preflight)).toBe(true);
+    act(() => (Array.from(container.querySelectorAll('button')).find(b=>b.textContent==='Return to print preview') as HTMLElement).click());
+    expect(container.querySelector('[data-canvas-page-id="p1"]')).not.toBeNull();
+    expect(useAppStore.getState().pages.map(p=>p.selectedForPrint)).toEqual([true,false]);
+  });
+  it('switches to the real sheet when a preview-only page is enabled for printing', () => {
+    act(() => useAppStore.setState({documents:[doc('d1'),doc('d2')],pages:[makePage('p1','d1'),{...makePage('p2','d2'),selectedForPrint:false}]}));
+    act(() => (container.querySelector('[data-page-id="p2"]') as HTMLElement).click());
+    act(() => (container.querySelector('[data-page-id="p2"] button') as HTMLElement).click());
+    expect(container.textContent).not.toContain('temporary read-only preview');
+    expect(useAppStore.getState().activeSheetIndex).toBe(1);
+    expect(container.querySelector('[data-sheet-index="1"] [data-canvas-page-id="p2"]')).not.toBeNull();
+  });
+  it('can preview an excluded page even when there are no printable pages', () => {
+    act(() => useAppStore.setState({documents:[doc('d1')],pages:[{...makePage('p1','d1'),selectedForPrint:false}]}));
+    act(() => (container.querySelector('[data-page-id="p1"]') as HTMLElement).click());
+    expect(container.querySelector('[data-canvas-page-id="p1"]')).not.toBeNull();
+    expect(container.textContent).toContain('temporary read-only preview');
+    expect(useAppStore.getState().pages[0].selectedForPrint).toBe(false);
+  });
+  it('does not navigate when a thumbnail print checkbox is clicked', () => {
+    act(() => useAppStore.setState({documents:[doc('d1'),doc('d2')]}));
+    act(() => (container.querySelector('[data-page-id="p2"] button') as HTMLElement).click());
+    expect(useAppStore.getState().activeSheetIndex).toBe(0);
+    expect(container.textContent).not.toContain('temporary read-only preview');
+    expect(useAppStore.getState().pages[1].selectedForPrint).toBe(false);
   });
   it('uses the same rotated crop mapping for a non-square image', () => {
     const p = {...makePage('p','d'),overrides:{cropBoxMm:{top:0,right:0,bottom:0,left:25}}};

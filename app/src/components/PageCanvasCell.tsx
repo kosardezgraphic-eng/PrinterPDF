@@ -15,7 +15,7 @@ const HANDLES: { id: Handle; left: string; top: string; cursor: string }[] = [
 ];
 
 type Gesture = { x: number; y: number; pointerId: number; handle: Handle | 'move'; rect: Rect; transform: PageTransform };
-interface Props { cell: ComputedCellPlacement; sheetIndex: number; isActive: boolean; pxPerMm: number; tool: CanvasTool; scope: PageEditScope; spaceDown: boolean; onCurrentPage: (id: string, preserveSelection: boolean, occurrenceKey: string) => void }
+interface Props { cell: ComputedCellPlacement; sheetIndex: number; isActive: boolean; readOnly?: boolean; pxPerMm: number; tool: CanvasTool; scope: PageEditScope; spaceDown: boolean; onCurrentPage: (id: string, preserveSelection: boolean, occurrenceKey: string) => void }
 
 /** Limit resize preview to exactly the same scale range as the stored transform. */
 function resizeForMove(rect: Rect, handle: Handle, dx: number, dy: number, transform: PageTransform): Rect {
@@ -33,7 +33,7 @@ function resizeForMove(rect: Rect, handle: Handle, dx: number, dy: number, trans
     y:handle.includes('n') ? rect.y+rect.height-height : rect.y, width, height };
 }
 
-export function PageCanvasCell({ cell, sheetIndex, isActive, pxPerMm, tool, scope, spaceDown, onCurrentPage }: Props) {
+export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, pxPerMm, tool, scope, spaceDown, onCurrentPage }: Props) {
   const effects = useAppStore(state => state.effects);
   const language = useAppStore(state => state.settings.language);
   const applyPageGeometry = useAppStore(state => state.applyPageGeometry);
@@ -62,7 +62,7 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, pxPerMm, tool, scop
     const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenu(null); };
     window.addEventListener('keydown',close); return () => window.removeEventListener('keydown',close);
   }, [menu]);
-  const canEdit = tool === 'move' ? isActive && page.isHighlighted : tool === 'crop' && page.isHighlighted;
+  const canEdit = !readOnly && (tool === 'move' ? isActive && page.isHighlighted : tool === 'crop' && page.isHighlighted);
   // Sheet coordinates rather than cell coordinates let a layer move anywhere on the sheet.
   const base: Rect = { x:cell.contentXMm*pxPerMm, y:cell.contentYMm*pxPerMm,
     width:cell.contentWidthMm*pxPerMm, height:cell.contentHeightMm*pxPerMm };
@@ -171,6 +171,7 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, pxPerMm, tool, scop
   return <div data-canvas-page-id={page.id} data-occurrence-key={occurrenceKey} className="pointer-events-none absolute inset-0"
     onContextMenu={e => {
       e.preventDefault(); e.stopPropagation();
+      if (readOnly) return;
       const press = longPress.current;
       if (press?.fired) return;
       if (press) {
@@ -180,13 +181,15 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, pxPerMm, tool, scop
       }
       openMenu(press ? press.x+16 : e.clientX,press ? press.y+16 : e.clientY);
     }}>
-    <div onClick={e => {
+    <div data-page-content onClick={e => {
+      if (tool === 'layout') return;
       e.stopPropagation();
+      if (readOnly) return;
       if (consumeTouchClick(e)) { e.preventDefault(); return; }
       if (tool === 'move' || tool === 'crop') onCurrentPage(page.id,page.isHighlighted,occurrenceKey);
     }}
-      onPointerDown={e => { startTouchHold(e); if (tool === 'move') begin(e,'move'); }} {...pointerEvents}
-      style={{ left:display.x, top:display.y, width:display.width, height:display.height, clipPath:inset, touchAction:canEdit ? 'none' : 'auto', WebkitTouchCallout:'none', userSelect:'none', cursor:canEdit && tool === 'move' ? 'move' : 'pointer' }}
+      onPointerDown={e => { if (readOnly) return; startTouchHold(e); if (tool === 'move') begin(e,'move'); }} {...pointerEvents}
+      style={{ left:display.x, top:display.y, width:display.width, height:display.height, clipPath:inset, pointerEvents:readOnly ? 'none' : 'auto', touchAction:canEdit ? 'none' : 'auto', WebkitTouchCallout:'none', userSelect:'none', cursor:canEdit && tool === 'move' ? 'move' : 'pointer' }}
       className={`pointer-events-auto absolute overflow-hidden ${(tool === 'move' ? isActive && page.isHighlighted : page.isHighlighted) ? 'ring-2 ring-inset ring-sky-500' : ''}`}>
       <PageContentImage page={page} effects={effects} rotation={cell.effectiveRotation} width={display.width} height={display.height} />
     </div>

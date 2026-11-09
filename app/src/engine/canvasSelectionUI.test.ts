@@ -33,7 +33,7 @@ afterEach(() => {act(() => root.unmount());container.remove();vi.useRealTimers()
 
 describe('combined selection and layer context menu', () => {
   it('starts in combined mode without handles, selects only a clicked cell and hides handles on empty space', () => {
-    const combined=Array.from(container.querySelectorAll('button')).find(b => b.textContent?.trim()==='Select / move / resize');
+    const combined=container.querySelector('[aria-label="Select / move / resize"]');
     expect(combined?.getAttribute('aria-pressed')).toBe('true');
     expect(Array.from(container.querySelectorAll('button')).some(b => b.textContent?.trim()==='Select')).toBe(false);
     expect(handles('red')).toHaveLength(0); expect(handles('blue')).toHaveLength(0);
@@ -109,7 +109,7 @@ describe('combined selection and layer context menu', () => {
   });
   it('cancels a pending hold if the tool changes', () => {
     vi.useFakeTimers(); const red=image('red');pointer(red,'pointerdown',40,40);
-    const crop=Array.from(container.querySelectorAll('button')).find(b=>b.textContent?.trim()==='Crop')!;
+    const crop=container.querySelector('[aria-label="Crop"]')!;
     click(crop);act(() => vi.advanceTimersByTime(700));
     expect(document.querySelector('[role=menu]')).toBeNull();
   });
