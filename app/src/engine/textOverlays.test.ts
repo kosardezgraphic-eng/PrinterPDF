@@ -40,4 +40,22 @@ describe('text overlay placement and numbering defaults',()=>{
   expect(ctx.fillText).toHaveBeenCalledWith('end',100,36,100);
   expect(ctx.letterSpacing).toBe('1px');expect(ctx.wordSpacing).toBe('3px');
  });
+ it('extends a captured document to all or chosen pages without changing its base scope',()=>{
+  const docs=[{...page('a'),documentId:'one'}, {...page('b'),documentId:'two'}, {...page('c'),documentId:'three'}];
+  const sides=computeImpositionSheets(docs,{...DEFAULT_LAYOUT,rows:1,cols:1,duplexMode:'none'});
+  const base={...text,targetScope:'document' as const,targetDocumentIds:['one']};
+  const counts=(item:PageOverlayText)=>sides.map(s=>textPlacements(s,3,docs,[item]).length);
+  expect(counts(base)).toEqual([1,0,0]);
+  expect(counts({...base,coverageMode:'all'})).toEqual([1,1,1]);
+  expect(counts({...base,coverageMode:'selected',coveragePageIds:['c']})).toEqual([1,0,1]);
+  expect(counts({...base,coverageMode:undefined,coveragePageIds:['c']})).toEqual([1,0,0]);
+  const reordered=[docs[2],docs[1],docs[0]];
+  const reorderedSides=computeImpositionSheets(reordered,{...DEFAULT_LAYOUT,rows:1,cols:1,duplexMode:'none'});
+  expect(reorderedSides.map(side=>textPlacements(side,3,reordered,[{...base,coverageMode:'selected',coveragePageIds:['c']}]).length)).toEqual([1,0,1]);
+ });
+ it('extends a sheet scope by output-side index, not by its source pages',()=>{
+  const item={...text,target:'sheet' as const,targetScope:'current' as const,targetSheetIndex:1,coverageMode:'selected' as const,coverageSheetIndices:[2]};
+  expect(sheets.map(sheet=>textPlacements(sheet,2,pages,[item]).length)).toEqual([1,1]);
+  expect(sheets.map(sheet=>textPlacements(sheet,2,pages,[{...item,coverageMode:undefined}]).length)).toEqual([1,0]);
+ });
 });
