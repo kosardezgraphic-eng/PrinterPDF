@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PageItem, PageRotation } from '@shared/models';
-import { cropToMm, dragCrop, pageCropFractions, resizeRect, rotateInsets } from './pageGeometry';
+import { centeredAspectCrop, cropToMm, dragCrop, pageCropFractions, resizeRect, rotateInsets } from './pageGeometry';
 import { computeImpositionSheets } from './layoutEngine';
 import { DEFAULT_LAYOUT, useAppStore } from '../store/useAppStore';
 
@@ -21,6 +21,36 @@ describe('graphical page editing', () => {
       expect(rotateInsets(rotateInsets(crop, angle), ((360-angle)%360) as PageRotation)).toEqual(crop);
     }
     expect(dragCrop(zero,0,'w',999,0,100,100).left).toBeCloseTo(.98);
+  });
+  it('computes centered source ratios within existing asymmetric crops', () => {
+    const original = {...makePage('one'),overrides:{cropBoxMm:{left:10,right:20,top:20,bottom:40}}};
+    const crop = centeredAspectCrop(original, 1)!;
+    const width = 100 * (1-crop.left-crop.right), height=200*(1-crop.top-crop.bottom);
+    expect(width/height).toBeCloseTo(1);
+    expect(crop.left).toBeCloseTo(.1); expect(crop.right).toBeCloseTo(.2);
+    expect(crop.top).toBeCloseTo(.275); expect(crop.bottom).toBeCloseTo(.375);
+    expect(centeredAspectCrop(original,0)).toBeNull();
+    expect(centeredAspectCrop(original,Infinity)).toBeNull();
+    expect(centeredAspectCrop(original,10000)).toBeNull();
+  });
+  it('applies each page aspect independently, resets its transforms, and undoes atomically', () => {
+    const one=makePage('one'), two={...makePage('two'),widthMm:200,heightMm:100};
+    useAppStore.setState({pages:[one,two,makePage('three',false)], layout:{...DEFAULT_LAYOUT,cellOverrides:{
+      one:{pageId:'one',transform:{x:1,y:0,scaleX:2,scaleY:2},allowOverflow:true},
+      other:{pageId:'three',transform:{x:1,y:0,scaleX:2,scaleY:2},allowOverflow:true}}}});
+    expect(useAppStore.getState().applyAspectRatioCrop('one','selected',1)).toBe(true);
+    const result=useAppStore.getState();
+    for (const p of result.pages.slice(0,2)) {
+      const c=pageCropFractions(p); expect(p.widthMm*(1-c.left-c.right)/(p.heightMm*(1-c.top-c.bottom))).toBeCloseTo(1);
+    }
+    expect(result.pages[2].overrides).toBeUndefined();
+    expect(result.layout.cellOverrides?.one.transform).toBeUndefined();
+    expect(result.layout.cellOverrides?.other.transform).toBeDefined();
+    useAppStore.getState().undo();
+    expect(useAppStore.getState().pages[0].overrides).toBeUndefined();
+    expect(useAppStore.getState().layout.cellOverrides?.one.transform).toBeDefined();
+    expect(useAppStore.getState().applyAspectRatioCrop('one','all',10000)).toBe(false);
+    expect(useAppStore.getState().pages.every(p=>!p.overrides)).toBe(true);
   });
   it('fits cropped dimensions and applies per-page relative transforms', () => {
     const one = { ...makePage('one'), overrides:{ cropBoxMm:cropToMm(makePage('one'), { top:0, right:0, bottom:0, left:.5 }) } };

@@ -63,3 +63,19 @@ export function dragCrop(crop: Insets, rotation: PageRotation, handle: Handle, d
   if (handle.includes('s')) c.bottom = Math.max(0, Math.min(0.98 - c.top, c.bottom - fy));
   return normalizeInsets(rotateInsets(c, ((360 - rotation) % 360) as PageRotation));
 }
+
+/** Largest centered rectangle of the requested source-width/source-height ratio inside the existing crop.
+ * Returns null when it cannot be represented with the engine's 2% minimum remaining size. */
+export function centeredAspectCrop(page: PageItem, ratio: number): Insets | null {
+  if (!Number.isFinite(ratio) || ratio <= 0 || !Number.isFinite(page.widthMm) || !Number.isFinite(page.heightMm) || page.widthMm <= 0 || page.heightMm <= 0) return null;
+  const crop = pageCropFractions(page);
+  const width = page.widthMm * (1 - crop.left - crop.right);
+  const height = page.heightMm * (1 - crop.top - crop.bottom);
+  const newWidth = Math.min(width, height * ratio);
+  const newHeight = Math.min(height, width / ratio);
+  if (newWidth < page.widthMm * 0.02 - 1e-8 || newHeight < page.heightMm * 0.02 - 1e-8) return null;
+  const horizontalInset = (width - newWidth) / (2 * page.widthMm);
+  const verticalInset = (height - newHeight) / (2 * page.heightMm);
+  return normalizeInsets({left:crop.left + horizontalInset, right:crop.right + horizontalInset,
+    top:crop.top + verticalInset, bottom:crop.bottom + verticalInset});
+}

@@ -33,7 +33,7 @@ import {
   importFilesBatch,
   triggerBlobDownload,
 } from '../engine/pdfService';
-import { cropToMm, IDENTITY_TRANSFORM, type Insets } from '../engine/pageGeometry';
+import { centeredAspectCrop, cropToMm, IDENTITY_TRANSFORM, type Insets } from '../engine/pageGeometry';
 import { computeImpositionSheets, sortCellsByLayer } from '../engine/layoutEngine';
 import { ipcBridge, selectOptimalPrinter } from '../engine/ipcBridge';
 
@@ -247,6 +247,7 @@ interface AppState {
   reorderPage: (fromIndex: number, toIndex: number) => void;
   moveHighlightedPages: (direction: 'up' | 'down') => void;
   rotatePages: (pageIds: string[], deltaDeg: 90 | 180 | 270) => void;
+  applyAspectRatioCrop: (pageId: string, scope: PageEditScope, ratio: number) => boolean;
   applyPageGeometry: (pageId: string, scope: PageEditScope, edit: { kind: 'crop'; crop: Insets } | { kind: 'transform'; transform: NonNullable<PageItem['overrides']>['transform'] } | { kind: 'reset' }) => void;
   applyCellTransform: (pageId: string, occurrenceKey: string, transform: PageTransform) => void;
   resetCellGeometry: (pageId: string, occurrenceKey: string) => void;
@@ -720,6 +721,30 @@ export const useAppStore = create<AppState>((set, get) => {
       if (idx === -1) return;
       const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
       get().reorderPage(idx, targetIdx);
+    },
+
+    applyAspectRatioCrop: (pageId, scope, ratio) => {
+      const state = get();
+      const targets = state.pages.filter(page => scope === 'all' || (scope === 'selected' ? page.isHighlighted : page.id === pageId));
+      if (!targets.length) return false;
+      const crops = new Map(targets.map(page => [page.id, centeredAspectCrop(page, ratio)]));
+      if ([...crops.values()].some(crop => !crop)) return false;
+      const before = captureSnapshot(state);
+      const ids = new Set(crops.keys());
+      const cellOverrides = Object.fromEntries(Object.entries(state.layout.cellOverrides ?? {}).map(([key,value]) => {
+        if (!ids.has(value.pageId)) return [key,value];
+        const { transform: _transform, allowOverflow: _overflow, ...rest } = value;
+        return [key,rest];
+      }));
+      set({ layout:{...state.layout,cellOverrides}, pages:state.pages.map(page => {
+        const crop = crops.get(page.id);
+        if (!crop) return page;
+        const overrides = {...page.overrides, cropBoxMm:cropToMm(page,crop)};
+        delete overrides.transform;
+        return {...page,overrides};
+      }) });
+      pushUndo('برش با نسبت ابعاد', 'Crop to aspect ratio', before, captureSnapshot(get()));
+      return true;
     },
 
     applyPageGeometry: (pageId, scope, edit) => {

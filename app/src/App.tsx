@@ -166,7 +166,7 @@ export const App: React.FC = () => {
     <ErrorBoundary>
       <div
         className={`flex h-screen w-screen flex-col overflow-hidden ${
-          settings.theme === 'light' ? 'invert hue-rotate-180' : ''
+          settings.theme === 'light' ? 'theme-light invert hue-rotate-180' : ''
         }`}
       >
         <QuickBar />

@@ -60,6 +60,23 @@ describe('real output rendering', () => {
     if (angle === 0) expect(pixel(image,10,50)).toEqual([255,255,255]);
     else expect(pixel(image,50,10)).toEqual([255,255,255]);
   });
+  it('exports a ratio crop of the source rather than merely changing its preview', async () => {
+    const source = await PDFDocument.create(); const p=source.addPage([200,100]);
+    p.drawRectangle({x:0,y:0,width:50,height:100,color:rgb(1,0,0)});
+    p.drawRectangle({x:50,y:0,width:100,height:100,color:rgb(0,1,0)});
+    p.drawRectangle({x:150,y:0,width:50,height:100,color:rgb(0,0,1)});
+    const doc={id:'d',fileType:'pdf',rawBytes:await source.save()} as SourceDocument;
+    const input={...page(0),widthMm:200*ptToMm,heightMm:100*ptToMm,isHighlighted:true};
+    useAppStore.setState({pages:[input],documents:[doc],layout});
+    expect(useAppStore.getState().applyAspectRatioCrop(input.id,'current',1)).toBe(true);
+    const output=await exportImposedPdf({documents:[doc],pages:useAppStore.getState().pages,layout,
+      effects:{...DEFAULT_EFFECTS,enabled:false},watermark:{...getDefaultWatermarkSettings(),enabled:false},
+      pageNumbering:{...getDefaultPageNumberSettings(),enabled:false},userName:'test'});
+    const image=await render(output);
+    expect(pixel(image,10,50)).toEqual([0,255,0]);
+    expect(pixel(image,50,50)).toEqual([0,255,0]);
+    expect(pixel(image,90,50)).toEqual([0,255,0]);
+  });
   it('honors a nonzero source CropBox when cropping the PDF', async () => {
     const source = await PDFDocument.create(); const p = source.addPage([120,100]);
     p.drawRectangle({x:0,y:0,width:60,height:100,color:rgb(1,0,0)});

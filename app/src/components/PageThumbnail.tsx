@@ -8,7 +8,7 @@ export function PageThumbnail({ page, cell, effects, sheetWidth, sheetHeight }: 
   const x = cell.allowOverflow ? cell.contentXMm : cell.contentXMm - cell.cellXMm;
   const y = cell.allowOverflow ? cell.contentYMm : cell.contentYMm - cell.cellYMm;
   return <div className="relative flex h-28 items-center justify-center overflow-hidden rounded-lg bg-slate-950">
-    <div className="relative overflow-hidden bg-white" style={{ width: `min(100%, ${7 * w / h}rem)`, aspectRatio: `${w} / ${h}` }}>
+    <div data-color-accurate className="relative overflow-hidden bg-white" style={{ width: `min(100%, ${7 * w / h}rem)`, aspectRatio: `${w} / ${h}` }}>
       <div data-thumbnail-content className="absolute overflow-hidden" style={{
         left: `${100 * x / w}%`, top: `${100 * y / h}%`,
         width: `${100 * cell.contentWidthMm / w}%`, height: `${100 * cell.contentHeightMm / h}%`,
