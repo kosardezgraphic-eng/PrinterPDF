@@ -279,4 +279,13 @@ describe('real output rendering', () => {
     const image = xobjects!.lookup(xobjects!.keys()[0], PDFStream);
     expect(image.dict.get(PDFName.of('Filter'))?.toString()).toBe('/DCTDecode');
   });
+  it('does not include non-printing ruler guides in PDF output', async () => {
+    const source=await PDFDocument.create();source.addPage([100,100]).drawRectangle({x:0,y:0,width:100,height:100,color:rgb(1,0,0)});
+    const params={documents:[{id:'d',fileType:'pdf',rawBytes:await source.save()} as SourceDocument],pages:[{...page(0),widthMm:100*ptToMm}],effects:{...DEFAULT_EFFECTS,enabled:false},watermark:{...getDefaultWatermarkSettings(),enabled:false},pageNumbering:{...getDefaultPageNumberSettings(),enabled:false},userName:'test'};
+    const outputWithout=await render(await exportImposedPdf({...params,layout}));
+    const outputWith=await render(await exportImposedPdf({...params,layout:{...layout,rulerGuides:[{id:'x',axis:'x',positionMm:10},{id:'y',axis:'y',positionMm:10}]}}));
+    expect(outputWith.width).toEqual(outputWithout.width);expect(outputWith.height).toEqual(outputWithout.height);
+    expect(outputWith.data).toEqual(outputWithout.data);
+  });
+
 });

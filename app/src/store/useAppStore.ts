@@ -15,6 +15,7 @@ import type {
   PageRotation,
   PageTransform,
   PrinterInfo,
+  RulerGuide,
   PrinterMarginResult,
   PrinterProfileSettings,
   PrintJobRequest,
@@ -274,6 +275,9 @@ interface AppState {
   updateLayout: (patch: Partial<LayoutSettings>, recordUndo?: boolean) => void;
   setNUpMatrix: (rows: number, cols: number, placementMode?: LayoutSettings['placementMode']) => void;
   updateMargins: (patch: Partial<LayoutSettings['marginsMm']>) => void;
+  addRulerGuide: (guide: RulerGuide) => void;
+  moveRulerGuide: (id: string, positionMm: number) => void;
+  removeRulerGuide: (id: string) => void;
   resetMarginsToPrinter: () => void;
   refreshPrinterMargins: () => void;
   commitLayoutGuides: (patch: Partial<Pick<LayoutSettings, 'marginsMm' | 'horizontalGutterMm' | 'verticalGutterMm'>>) => void;
@@ -1157,6 +1161,30 @@ export const useAppStore = create<AppState>((set, get) => {
         before,
         captureSnapshot(get())
       );
+    },
+
+    addRulerGuide: (guide) => {
+      const state = get();
+      if (!guide.id || !['x','y'].includes(guide.axis) || !Number.isFinite(guide.positionMm) || guide.positionMm < 0 ||
+        (state.layout.rulerGuides ?? []).some(item => item.id === guide.id)) return;
+      const before = captureSnapshot(state);
+      set({layout:{...state.layout, rulerGuides:[...(state.layout.rulerGuides ?? []), guide]}});
+      pushUndo('افزودن خط راهنما', 'Add ruler guide', before, captureSnapshot(get()));
+    },
+    moveRulerGuide: (id, positionMm) => {
+      const state = get(); const guides = state.layout.rulerGuides ?? [];
+      const original = guides.find(item => item.id === id);
+      if (!original || !Number.isFinite(positionMm) || positionMm < 0 || original.positionMm === positionMm) return;
+      const before = captureSnapshot(state);
+      set({layout:{...state.layout,rulerGuides:guides.map(item => item.id === id ? {...item,positionMm} : item)}});
+      pushUndo('جابجایی خط راهنما', 'Move ruler guide', before, captureSnapshot(get()));
+    },
+    removeRulerGuide: (id) => {
+      const state = get(); const guides = state.layout.rulerGuides ?? [];
+      if (!guides.some(item => item.id === id)) return;
+      const before = captureSnapshot(state);
+      set({layout:{...state.layout,rulerGuides:guides.filter(item => item.id !== id)}});
+      pushUndo('حذف خط راهنما', 'Remove ruler guide', before, captureSnapshot(get()));
     },
 
     commitLayoutGuides: (patch) => {
