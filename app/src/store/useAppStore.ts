@@ -1336,7 +1336,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const page=state.pages.find(p=>p.id===state.activePageId) ?? state.pages.find(p=>p.isHighlighted) ?? state.pages.find(p=>p.selectedForPrint) ?? state.pages[0];
       if(!page)return;
       const id=globalThis.crypto?.randomUUID?.() ?? `text-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const item:PageOverlayText={id,kind:'text',target:'page',targetScope:'document',targetDocumentIds:[page.documentId],targetPageIds:[],targetSheetIndex:1,
+      const item:PageOverlayText={id,kind:'text',target:'page',targetScope:'current',targetPageIds:[page.id],targetSheetIndex:1,
         xPercent:25,yPercent:25,widthPercent:50,heightPercent:15,opacity:1,rotation:0,text:'',fontSize:18,fontFamily:'Vazirmatn',color:'#000000',
         bold:false,italic:false,underline:false,align:state.settings.language==='fa'?'right':'left',lineHeight:1.25,wordSpacingPt:0,letterSpacingPt:0};
       const layout=page.selectedForPrint ? state.layout : {...state.layout,duplexMode:'none' as const};

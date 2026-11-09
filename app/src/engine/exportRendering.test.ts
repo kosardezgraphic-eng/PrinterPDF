@@ -354,4 +354,18 @@ describe('real output rendering', () => {
     }finally{vi.unstubAllGlobals();}
   });
 
+  it('exports only the original page of a new text in a multi-page document unless expanded',async()=>{
+    const pages=[1,2,3].map(n=>({...page(0),id:`p${n}`,documentId:'same-document',sourcePageNumber:0,widthMm:100*ptToMm,isBlankPage:true}));
+    const overlay={id:'t',kind:'text' as const,target:'page' as const,targetScope:'current' as const,targetPageIds:['p2'],targetSheetIndex:1,xPercent:25,yPercent:25,widthPercent:50,heightPercent:50,opacity:1,rotation:0,text:'{page}',fontSize:18,fontFamily:'Arial',color:'#000',bold:false,italic:false,underline:false,align:'left' as const};
+    const ctx={clearRect:vi.fn(),fillRect:vi.fn(),fillText:vi.fn(),measureText:()=>({width:0})};
+    const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRfoAAAAASUVORK5CYII=';
+    vi.stubGlobal('document',{createElement:()=>({width:1,height:1,getContext:()=>ctx,toDataURL:()=>png})});
+    try{
+      const params={documents:[],pages,allPages:pages,layout,effects:{...DEFAULT_EFFECTS,enabled:false},watermark:{...getDefaultWatermarkSettings(),enabled:false},pageNumbering:getDefaultPageNumberSettings(),overlays:[overlay],userName:'test'};
+      await exportImposedPdf(params);expect(ctx.fillText.mock.calls.map(call=>call[0])).toEqual(['2']);
+      ctx.fillText.mockClear();await exportImposedPdf({...params,overlays:[{...overlay,coverageMode:'all'}]});expect(ctx.fillText.mock.calls.map(call=>call[0])).toEqual(['1','2','3']);
+      ctx.fillText.mockClear();await exportImposedPdf({...params,overlays:[{...overlay,coverageMode:'selected',coveragePageIds:['p3']}]});expect(ctx.fillText.mock.calls.map(call=>call[0])).toEqual(['2','3']);
+    }finally{vi.unstubAllGlobals();}
+  });
+
 });
