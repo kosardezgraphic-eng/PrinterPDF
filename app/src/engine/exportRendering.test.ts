@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createCanvas } from '@napi-rs/canvas';
-import { PDFDict, PDFDocument, PDFName, PDFStream, rgb } from 'pdf-lib';
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, PDFStream, decodePDFRawStream, rgb } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PageItem, SourceDocument } from '@shared/models';
 import { DEFAULT_EFFECTS, DEFAULT_LAYOUT, useAppStore } from '../store/useAppStore';
@@ -44,6 +44,30 @@ describe('real output rendering', () => {
     const image = await render(await exportOne(doc, angle));
     const [r,g,b] = pixel(image,x,y);
     expect(r).toBeGreaterThan(240); expect(g).toBeLessThan(20); expect(b).toBeLessThan(20);
+  });
+  it.each([[45,50,22],[90,70,30]] as const)('exports extra clockwise %s° rotation around the content center', async (angle,x,y) => {
+    const source=await PDFDocument.create(); const sourcePage=source.addPage([100,100]);
+    sourcePage.drawRectangle({x:20,y:60,width:20,height:20,color:rgb(1,0,0)});
+    const doc={id:'d',fileType:'pdf',rawBytes:await source.save()} as SourceDocument;
+    const input={...page(0),widthMm:100*ptToMm,overrides:{transform:{x:0,y:0,scaleX:1,scaleY:1,rotationDeg:angle}}};
+    const output=await exportImposedPdf({documents:[doc],pages:[input],layout,effects:{...DEFAULT_EFFECTS,enabled:false},
+      watermark:{...getDefaultWatermarkSettings(),enabled:false},pageNumbering:{...getDefaultPageNumberSettings(),enabled:false},userName:'test'});
+    const image=await render(output);
+    expect(pixel(image,x,y)).toEqual([255,0,0]);
+    expect(pixel(image,30,30)).toEqual([255,255,255]);
+  });
+  it('uses the same rotation matrix for content and its inversion overlay', async () => {
+    const source=await PDFDocument.create();const sourcePage=source.addPage([60,100]);
+    sourcePage.drawRectangle({x:0,y:0,width:60,height:100,color:rgb(1,0,0)});
+    const doc={id:'d',fileType:'pdf',rawBytes:await source.save()} as SourceDocument;
+    const input={...page(0),overrides:{transform:{x:0,y:0,scaleX:1,scaleY:1,rotationDeg:45}}};
+    const output=await exportImposedPdf({documents:[doc],pages:[input],layout,effects:{...DEFAULT_EFFECTS,enabled:true,invert:true},
+      watermark:{...getDefaultWatermarkSettings(),enabled:false},pageNumbering:{...getDefaultPageNumberSettings(),enabled:false},userName:'test'});
+    const pdf=await PDFDocument.load(output);const contents=pdf.getPage(0).node.Contents() as PDFArray;
+    const decoded=Array.from({length:contents.size()},(_,i)=>new TextDecoder().decode(decodePDFRawStream(pdf.context.lookup(contents.get(i)) as PDFRawStream).decode())).join('\n');
+    const rotations=decoded.split('\n').filter(line=>line.includes(' cm') && line.includes('0.707106'));
+    expect(rotations.length).toBe(2);
+    expect(rotations[0]).toEqual(rotations[1]);
   });
   it.each([0,90] as const)('crops PDF content and refits it for rotation %i', async angle => {
     const source = await PDFDocument.create(); const p = source.addPage([100,100]);
@@ -202,6 +226,20 @@ describe('real output rendering', () => {
     expect(image.dict.get(PDFName.of('Subtype'))?.toString()).toBe('/Image');
     expect(image.dict.get(PDFName.of('Width'))?.toString()).toBe('60');
     expect(image.dict.get(PDFName.of('Height'))?.toString()).toBe('100');
+  });
+  it('exports a rotated cropped PNG with an additional rotation matrix', async () => {
+    const canvas=createCanvas(60,100);const ctx=canvas.getContext('2d');ctx.fillStyle='red';ctx.fillRect(0,0,60,100);
+    const png=new Uint8Array(await canvas.encode('png'));
+    const doc={id:'d',fileType:'image',mimeType:'image/png',rawBytes:png} as SourceDocument;
+    const input={...page(90),overrides:{cropBoxMm:{top:0,right:0,bottom:0,left:10*ptToMm},
+      transform:{x:0,y:0,scaleX:1,scaleY:1,rotationDeg:45}}};
+    const output=await exportImposedPdf({documents:[doc],pages:[input],layout,effects:{...DEFAULT_EFFECTS,enabled:false},
+      watermark:{...getDefaultWatermarkSettings(),enabled:false},pageNumbering:{...getDefaultPageNumberSettings(),enabled:false},userName:'test'});
+    const pdf=await PDFDocument.load(output);const contents=pdf.getPage(0).node.Contents() as PDFArray;
+    const decoded=Array.from({length:contents.size()},(_,i)=>new TextDecoder().decode(decodePDFRawStream(pdf.context.lookup(contents.get(i)) as PDFRawStream).decode())).join('\n');
+    expect(decoded).toContain('0.707106');expect(decoded).toContain(' cm');expect(decoded).toContain('W');
+    const xobjects=pdf.getPage(0).node.Resources()?.lookup(PDFName.of('XObject'),PDFDict);
+    expect(xobjects?.keys().length).toBe(1);
   });
   it('imports and embeds JPEG without changing its aspect ratio', async () => {
     const canvas = createCanvas(80,40);

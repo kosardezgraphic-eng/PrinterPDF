@@ -79,3 +79,26 @@ export function centeredAspectCrop(page: PageItem, ratio: number): Insets | null
   return normalizeInsets({left:crop.left + horizontalInset, right:crop.right + horizontalInset,
     top:crop.top + verticalInset, bottom:crop.bottom + verticalInset});
 }
+
+/** Clockwise angle used by CSS/screen coordinates, normalized for persistence. */
+export function normalizeAngle(degrees: number): number {
+  if (!Number.isFinite(degrees)) return 0;
+  return ((degrees + 180) % 360 + 360) % 360 - 180;
+}
+export function rotateVector(x: number, y: number, degrees: number) {
+  const radians = degrees * Math.PI / 180, cos = Math.cos(radians), sin = Math.sin(radians);
+  return { x: cos * x - sin * y, y: sin * x + cos * y };
+}
+export function rotationFromPointer(initial: number, centerX: number, centerY: number,
+  startX: number, startY: number, x: number, y: number, snap: boolean): number {
+  if (Math.hypot(startX-centerX,startY-centerY) < 0.001 || Math.hypot(x-centerX,y-centerY) < 0.001) return normalizeAngle(initial);
+  const start = Math.atan2(startY-centerY,startX-centerX), end = Math.atan2(y-centerY,x-centerX);
+  const angle = initial + (end-start)*180/Math.PI;
+  return normalizeAngle(snap ? Math.round(angle / 45) * 45 : angle);
+}
+/** Axis-aligned bounds of the rotated content, for preflight clipping warnings. */
+export function rotatedBounds(rect: Rect, angle: number): Rect {
+  const r=normalizeAngle(angle)*Math.PI/180, c=Math.abs(Math.cos(r)), s=Math.abs(Math.sin(r));
+  const width=rect.width*c+rect.height*s, height=rect.width*s+rect.height*c;
+  return {x:rect.x+(rect.width-width)/2,y:rect.y+(rect.height-height)/2,width,height};
+}

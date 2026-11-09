@@ -9,8 +9,8 @@ import { PreviewWorkspace } from '../components/PreviewWorkspace';
 const makePage = (id:string):PageItem => ({id,documentId:'d',documentName:'d',sourcePageNumber:1,widthMm:50,heightMm:100,rotation:0,
  selectedForPrint:true,isHighlighted:true,isBlankPage:false,colorProfile:'color',inkCoveragePercent:0,thumbnailDataUrl:'data:image/png;base64,AA=='});
 let container: HTMLDivElement, root: Root;
-function pointer(el:Element,type:string,x:number,y:number,pointerType='mouse') {
- const ev = new MouseEvent(type,{bubbles:true,cancelable:true,clientX:x,clientY:y,button:0});
+function pointer(el:Element,type:string,x:number,y:number,pointerType='mouse',shiftKey=false) {
+ const ev = new MouseEvent(type,{bubbles:true,cancelable:true,clientX:x,clientY:y,button:0,shiftKey});
  Object.defineProperties(ev,{pointerId:{value:1},pointerType:{value:pointerType}}); act(() => el.dispatchEvent(ev));
 }
 beforeEach(() => {
@@ -50,6 +50,62 @@ describe('matrix layer interaction', () => {
   cell=computeImpositionSheets(useAppStore.getState().pages,useAppStore.getState().layout)[0].cells[0];
   expect(cell.contentHeightMm).toBeCloseTo(previousHeight);
   expect(cell.contentWidthMm/cell.contentHeightMm).not.toBeCloseTo(.5);
+ });
+ it.each(['mouse','touch'])('rotates a selected occurrence freely with %s, updates preview and can undo', pointerType => {
+  const content=container.querySelector('[data-canvas-page-id="red"] [data-page-content]') as HTMLElement;
+  vi.spyOn(content,'getBoundingClientRect').mockReturnValue({left:0,top:0,right:100,bottom:200,width:100,height:200,x:0,y:0,toJSON:()=>({})});
+  const handle=container.querySelector('[aria-label="Rotate image"]')!;
+  pointer(handle,'pointerdown',50,50,pointerType);pointer(handle,'pointermove',80,60,pointerType);
+  expect(parseFloat(content.style.transform.replace('rotate(',''))).toBeCloseTo(36.87,1);
+  expect(container.querySelector('[data-rotation-value]')?.textContent).toContain('36.9');
+  pointer(handle,'pointerup',80,60,pointerType);
+  const read=() => computeImpositionSheets(useAppStore.getState().pages,useAppStore.getState().layout)[0].cells[0].transform?.rotationDeg ?? 0;
+  expect(read()).toBeCloseTo(36.87,1);
+  act(() => useAppStore.getState().undo());expect(read()).toBe(0);
+  act(() => useAppStore.getState().redo());expect(read()).toBeCloseTo(36.87,1);
+  expect(computeImpositionSheets(useAppStore.getState().pages,useAppStore.getState().layout)[0].cells[1].transform?.rotationDeg).toBeUndefined();
+ });
+ it.each([[80,60,45],[100,100,90],[20,60,-45]] as const)('snaps rotation to %s,%s → %s° with Shift', (x,y,expected) => {
+  const content=container.querySelector('[data-canvas-page-id="red"] [data-page-content]') as HTMLElement;
+  vi.spyOn(content,'getBoundingClientRect').mockReturnValue({left:0,top:0,right:100,bottom:200,width:100,height:200,x:0,y:0,toJSON:()=>({})});
+  const handle=container.querySelector('[aria-label="Rotate image"]')!;
+  pointer(handle,'pointerdown',50,50);pointer(handle,'pointermove',x,y,'mouse',true);
+  expect(content.style.transform).toBe(`rotate(${expected}deg)`);
+  pointer(handle,'pointerup',x,y,'mouse',true);
+  expect(computeImpositionSheets(useAppStore.getState().pages,useAppStore.getState().layout)[0].cells[0].transform?.rotationDeg).toBe(expected);
+ });
+ it('cancels rotation without saving and offers keyboard rotation', () => {
+  const content=container.querySelector('[data-canvas-page-id="red"] [data-page-content]') as HTMLElement;
+  vi.spyOn(content,'getBoundingClientRect').mockReturnValue({left:0,top:0,right:100,bottom:200,width:100,height:200,x:0,y:0,toJSON:()=>({})});
+  const handle=container.querySelector('[aria-label="Rotate image"]')!;
+  pointer(handle,'pointerdown',50,50,'touch');pointer(handle,'pointermove',100,100,'touch');pointer(handle,'pointercancel',100,100,'touch');
+  expect(content.style.transform).toBe('rotate(0deg)');
+  expect(computeImpositionSheets(useAppStore.getState().pages,useAppStore.getState().layout)[0].cells[0].transform?.rotationDeg).toBeUndefined();
+  act(() => handle.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',shiftKey:true,bubbles:true,cancelable:true})));
+  expect(content.style.transform).toBe('rotate(45deg)');
+ });
+ it('rotates only the chosen step-and-repeat occurrence', () => {
+  act(() => useAppStore.setState({pages:[makePage('red')],layout:{...useAppStore.getState().layout,placementMode:'step-and-repeat'}}));
+  const copies=container.querySelectorAll('[data-canvas-page-id="red"]');
+  const second=copies[1].querySelector<HTMLElement>('[data-page-content]')!;act(() => second.click());
+  vi.spyOn(second,'getBoundingClientRect').mockReturnValue({left:0,top:0,right:100,bottom:200,width:100,height:200,x:0,y:0,toJSON:()=>({})});
+  const handle=copies[1].querySelector('[aria-label="Rotate image"]')!;
+  pointer(handle,'pointerdown',50,50);pointer(handle,'pointermove',100,100,'mouse',true);pointer(handle,'pointerup',100,100,'mouse',true);
+  const cells=computeImpositionSheets(useAppStore.getState().pages,useAppStore.getState().layout)[0].cells;
+  expect(cells[0].transform?.rotationDeg).toBeUndefined();expect(cells[1].transform?.rotationDeg).toBe(90);
+  const saved=JSON.parse(JSON.stringify(useAppStore.getState().layout));
+  expect(computeImpositionSheets(useAppStore.getState().pages,saved)[0].cells[1].transform?.rotationDeg).toBe(90);
+ });
+ it('keeps rotation while moving or resizing using the rotated local axes', () => {
+  const current=()=>computeImpositionSheets(useAppStore.getState().pages,useAppStore.getState().layout)[0].cells[0];
+  act(() => useAppStore.getState().applyCellTransform('red',current().occurrenceKey!,{x:0,y:0,scaleX:1,scaleY:1,rotationDeg:90}));
+  const before=current(), handle=container.querySelector('[data-canvas-page-id="red"] [aria-label="move e"]')!;
+  pointer(handle,'pointerdown',10,10);pointer(handle,'pointermove',10,29.5);pointer(handle,'pointerup',10,29.5);
+  const after=current();
+  expect(after.contentWidthMm-before.contentWidthMm).toBeCloseTo(10);
+  expect(after.contentHeightMm).toBeCloseTo(before.contentHeightMm);
+  expect(after.contentYMm+after.contentHeightMm/2 - (before.contentYMm+before.contentHeightMm/2)).toBeCloseTo(5);
+  expect(after.transform?.rotationDeg).toBe(90);
  });
  it('reorders from the right-click menu without losing the transform', () => {
   const content=container.querySelector('[data-canvas-page-id="red"] > div')!;

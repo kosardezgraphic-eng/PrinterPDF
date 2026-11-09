@@ -12,6 +12,7 @@ export function PageThumbnail({ page, cell, effects, sheetWidth, sheetHeight }: 
       <div data-thumbnail-content className="absolute overflow-hidden" style={{
         left: `${100 * x / w}%`, top: `${100 * y / h}%`,
         width: `${100 * cell.contentWidthMm / w}%`, height: `${100 * cell.contentHeightMm / h}%`,
+        transform: `rotate(${cell.transform?.rotationDeg ?? 0}deg)`,
       }}>
         <PageContentImage page={page} effects={effects} rotation={cell.effectiveRotation} width={cell.contentWidthMm} height={cell.contentHeightMm} />
       </div>
