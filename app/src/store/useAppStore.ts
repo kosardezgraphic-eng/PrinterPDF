@@ -10,6 +10,7 @@ import type {
   EffectsSettings,
   LayoutSettings,
   PageItem,
+  PageOverlay,
   PageNumberSettings,
   PageRotation,
   PageTransform,
@@ -68,6 +69,7 @@ interface WorkspaceSnapshot {
   effects: EffectsSettings;
   watermark: WatermarkSettings;
   pageNumbering: PageNumberSettings;
+  overlays: PageOverlay[];
 }
 
 const historyManager = new CommandHistoryManager<WorkspaceSnapshot>(300);
@@ -184,6 +186,8 @@ interface AppState {
   effects: EffectsSettings;
   watermark: WatermarkSettings;
   pageNumbering: PageNumberSettings;
+  overlays: PageOverlay[];
+  selectedOverlayId: string | null;
   settings: AppSettings;
 
   // Printers & Spooler
@@ -278,6 +282,10 @@ interface AppState {
   resetEffects: () => void;
   updateWatermark: (patch: Partial<WatermarkSettings>) => void;
   updatePageNumbering: (patch: Partial<PageNumberSettings>) => void;
+  addOverlay: (overlay: PageOverlay) => void;
+  updateOverlay: (id: string, patch: Partial<PageOverlay>) => void;
+  removeOverlay: (id: string) => void;
+  selectOverlay: (id: string | null) => void;
   updateSettings: (patch: Partial<AppSettings>) => void;
 
   // Export & Print & Project
@@ -346,6 +354,7 @@ function captureSnapshot(state: AppState): WorkspaceSnapshot {
     effects: state.effects,
     watermark: state.watermark,
     pageNumbering: state.pageNumbering,
+    overlays: state.overlays,
   };
 }
 
@@ -376,6 +385,8 @@ export const useAppStore = create<AppState>((set, get) => {
     effects: DEFAULT_EFFECTS,
     watermark: getDefaultWatermarkSettings(),
     pageNumbering: getDefaultPageNumberSettings(),
+    overlays: [],
+    selectedOverlayId: null,
     settings: DEFAULT_SETTINGS,
 
     printers: [],
@@ -447,6 +458,7 @@ export const useAppStore = create<AppState>((set, get) => {
         documents: sample?.documents ?? [],
         pages: sample?.pages ?? [],
         bookmarks: sample?.bookmarks ?? [],
+        overlays: [], selectedOverlayId: null,
       });
       if (marginKey(get()) === previousMarginKey) refreshPrinterMargins();
     },
@@ -458,6 +470,7 @@ export const useAppStore = create<AppState>((set, get) => {
         documents: sample.documents,
         pages: sample.pages,
         bookmarks: sample.bookmarks,
+        overlays: [], selectedOverlayId: null,
         layout: { ...get().layout, cellOverrides: {} },
         activeSheetIndex: 0,
       });
@@ -518,6 +531,7 @@ export const useAppStore = create<AppState>((set, get) => {
         documents: [],
         pages: [],
         bookmarks: [],
+        overlays: [], selectedOverlayId: null,
         layout: { ...get().layout, cellOverrides: {} },
         activeSheetIndex: 0,
         previewPageRequest: null,
@@ -533,6 +547,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const redoPeek = historyManager.peekRedo();
       set({
         ...snap.before,
+        selectedOverlayId: snap.before.overlays.some(item => item.id === get().selectedOverlayId) ? get().selectedOverlayId : null,
         canUndo: historyManager.canUndo(),
         canRedo: historyManager.canRedo(),
         undoLabel: undoPeek ? (lang === 'fa' ? undoPeek.labelFa : undoPeek.labelEn) : '',
@@ -555,6 +570,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const redoPeek = historyManager.peekRedo();
       set({
         ...snap.after,
+        selectedOverlayId: snap.after.overlays.some(item => item.id === get().selectedOverlayId) ? get().selectedOverlayId : null,
         canUndo: historyManager.canUndo(),
         canRedo: historyManager.canRedo(),
         undoLabel: undoPeek ? (lang === 'fa' ? undoPeek.labelFa : undoPeek.labelEn) : '',
@@ -1235,6 +1251,29 @@ export const useAppStore = create<AppState>((set, get) => {
       }));
     },
 
+    addOverlay: (overlay) => {
+      const state=get();
+      if (state.overlays.some(item=>item.id===overlay.id)) return;
+      const before=captureSnapshot(state);
+      set({overlays:[...state.overlays,overlay],selectedOverlayId:overlay.id});
+      pushUndo('افزودن لایه', 'Add overlay', before, captureSnapshot(get()));
+    },
+    updateOverlay: (id, patch) => {
+      const state=get();
+      const item=state.overlays.find(overlay=>overlay.id===id);
+      if (!item) return;
+      const before=captureSnapshot(state);
+      set({overlays:state.overlays.map(overlay=>overlay.id===id ? {...overlay,...patch,id:item.id,kind:item.kind} as PageOverlay : overlay)});
+      pushUndo('ویرایش لایه', 'Edit overlay', before, captureSnapshot(get()));
+    },
+    removeOverlay: (id) => {
+      const state=get(); if(!state.overlays.some(item=>item.id===id)) return;
+      const before=captureSnapshot(state);
+      set({overlays:state.overlays.filter(item=>item.id!==id),selectedOverlayId:state.selectedOverlayId===id?null:state.selectedOverlayId});
+      pushUndo('حذف لایه', 'Remove overlay', before, captureSnapshot(get()));
+    },
+    selectOverlay: id => set({selectedOverlayId:id}),
+
     updateSettings: (patch) => {
       set((state) => {
         const next = { ...state.settings, ...patch };
@@ -1301,6 +1340,7 @@ export const useAppStore = create<AppState>((set, get) => {
         effects: state.effects,
         watermark: state.watermark,
         pageNumbering: state.pageNumbering,
+        overlays: state.overlays,
         documents: state.documents.map(({ rawBytes: _r, ...rest }) => rest),
         pages: state.pages,
         bookmarks: state.bookmarks,
@@ -1333,6 +1373,8 @@ export const useAppStore = create<AppState>((set, get) => {
           effects: parsed.effects ?? DEFAULT_EFFECTS,
           watermark: parsed.watermark ?? getDefaultWatermarkSettings(),
           pageNumbering: parsed.pageNumbering ?? getDefaultPageNumberSettings(),
+          overlays: Array.isArray(parsed.overlays) ? parsed.overlays : [],
+          selectedOverlayId: null,
           documents: parsed.documents as SourceDocument[],
           pages: parsed.pages,
           bookmarks: parsed.bookmarks ?? [],

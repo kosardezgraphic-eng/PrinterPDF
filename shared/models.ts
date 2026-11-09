@@ -490,7 +490,41 @@ export interface PspProjectFile {
   effects: EffectsSettings;
   watermark: WatermarkSettings;
   pageNumbering: PageNumberSettings;
+  /** Optional for backwards compatibility with older projects. */
+  overlays?: PageOverlay[];
   documents: Omit<SourceDocument, 'rawBytes'>[];
   pages: PageItem[];
   bookmarks: BookmarkItem[];
 }
+
+/** Overlay coordinates are percentages of the selected sheet or source-page box. */
+export type OverlayScope = 'current' | 'all' | 'even' | 'odd' | 'first' | 'last' | 'selected';
+export type OverlayTarget = 'page' | 'sheet';
+export type ShapeType = 'rectangle' | 'rounded-rect' | 'circle' | 'line' | 'arrow' | 'triangle' | 'polygon' | 'star' | 'diamond' | 'badge';
+export type NumberingNumberFormat = 'persian' | 'english' | 'roman' | 'abjad';
+export interface OverlayBase {
+  id: string;
+  target: OverlayTarget;
+  targetScope: OverlayScope;
+  /** Stable page ids captured when applying current/selected. */
+  targetPageIds: string[];
+  /** One-based side index captured for current sheet. */
+  targetSheetIndex: number;
+  xPercent: number; yPercent: number; widthPercent: number; heightPercent: number;
+  opacity: number; rotation: number;
+}
+export interface PageOverlayText extends OverlayBase {
+  kind: 'text'; text: string; fontSize: number; fontFamily: string; color: string;
+  backgroundColor?: string; bold: boolean; italic: boolean; underline: boolean;
+  align: 'right' | 'center' | 'left'; syncGroupId?: string;
+}
+export interface PageOverlayShape extends OverlayBase {
+  kind: 'shape'; type: ShapeType; fillColor: string; strokeColor: string;
+  strokeWidth: number; strokeStyle: 'solid' | 'dashed' | 'dotted'; borderRadius: number;
+}
+export interface PageOverlayNumbering extends OverlayBase {
+  kind: 'numbering'; enabled: boolean; fontSize: number; fontFamily: string; color: string;
+  backgroundColor?: string; bold: boolean; italic: boolean;
+  format: NumberingNumberFormat; template: string; startOffset: number; padZeros: number; customScript: string;
+}
+export type PageOverlay = PageOverlayText | PageOverlayShape | PageOverlayNumbering;
