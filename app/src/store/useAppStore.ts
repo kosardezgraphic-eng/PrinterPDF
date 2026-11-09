@@ -237,6 +237,7 @@ interface AppState {
 
   // Page Operations (A3 - A4)
   togglePageSelectedForPrint: (pageId: string) => void;
+  invertHighlightedPrintSelection: () => void;
   highlightPage: (pageId: string, multiSelect?: boolean, rangeSelect?: boolean) => void;
   requestPreviewPage: (pageId: string) => void;
   focusPageFromPreview: (pageId: string | null, preserveSelection?: boolean, occurrenceKey?: string) => void;
@@ -561,18 +562,24 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     togglePageSelectedForPrint: (pageId) => {
-      const before = captureSnapshot(get());
-      set((state) => ({
-        pages: state.pages.map((p) =>
-          p.id === pageId ? { ...p, selectedForPrint: !p.selectedForPrint } : p
-        ),
-      }));
-      pushUndo(
-        'تغییر وضعیت چاپ صفحه',
-        'Toggle page print selection',
-        before,
-        captureSnapshot(get())
-      );
+      const state = get();
+      const clicked = state.pages.find(page => page.id === pageId);
+      if (!clicked) return;
+      const nextValue = !clicked.selectedForPrint;
+      const before = captureSnapshot(state);
+      set({ pages: state.pages.map(page => {
+        const targeted = page.id === pageId || (clicked.isHighlighted && page.isHighlighted);
+        return targeted && page.selectedForPrint !== nextValue ? {...page, selectedForPrint:nextValue} : page;
+      }) });
+      pushUndo('تغییر وضعیت چاپ صفحات', 'Change page print selection', before, captureSnapshot(get()));
+    },
+
+    invertHighlightedPrintSelection: () => {
+      const state = get();
+      if (!state.pages.some(page => page.isHighlighted)) return;
+      const before = captureSnapshot(state);
+      set({ pages:state.pages.map(page => page.isHighlighted ? {...page, selectedForPrint:!page.selectedForPrint} : page) });
+      pushUndo('معکوس کردن وضعیت چاپ صفحات انتخاب‌شده', 'Invert selected pages print selection', before, captureSnapshot(get()));
     },
 
     // Navigation is deliberately separate from edits and sidebar multi-selection.

@@ -84,6 +84,19 @@ describe('real output rendering', () => {
     if (angle === 0) expect(pixel(image,10,50)).toEqual([255,255,255]);
     else expect(pixel(image,50,10)).toEqual([255,255,255]);
   });
+  it('exports only pages enabled by a group print selection change', async () => {
+    const source=await PDFDocument.create();
+    for (const color of [rgb(1,0,0),rgb(0,1,0),rgb(0,0,1)]) source.addPage([100,100]).drawRectangle({x:0,y:0,width:100,height:100,color});
+    const doc={id:'d',fileType:'pdf',rawBytes:await source.save()} as SourceDocument;
+    const pages=[1,2,3].map(n=>({...page(0),id:`p${n}`,sourcePageNumber:n,widthMm:100*ptToMm,isHighlighted:n!==2,selectedForPrint:n!==3}));
+    useAppStore.setState({pages,documents:[doc],layout});
+    useAppStore.getState().togglePageSelectedForPrint('p1');
+    expect(useAppStore.getState().pages.map(p=>p.selectedForPrint)).toEqual([false,true,false]);
+    const output=await exportImposedPdf({documents:[doc],pages:useAppStore.getState().pages,layout,effects:{...DEFAULT_EFFECTS,enabled:false},
+      watermark:{...getDefaultWatermarkSettings(),enabled:false},pageNumbering:{...getDefaultPageNumberSettings(),enabled:false},userName:'test'});
+    expect((await PDFDocument.load(output)).getPageCount()).toBe(1);
+    expect(pixel(await render(output),50,50)).toEqual([0,255,0]);
+  });
   it('exports reordered multi-page selections in the new global sequence', async () => {
     const source=await PDFDocument.create();
     for (const color of [rgb(1,0,0),rgb(0,1,0),rgb(0,0,1)]) source.addPage([100,100]).drawRectangle({x:0,y:0,width:100,height:100,color});
