@@ -64,17 +64,22 @@ export const SidebarPages: React.FC = () => {
   const listRef = useRef<HTMLDivElement>(null);
   const thumbnailRefs = useRef(new Map<string, HTMLDivElement>());
   const placements = useMemo(() => {
-    const byPage = new Map<string, ComputedCellPlacement>();
+    const byPage = new Map<string, {cell:ComputedCellPlacement; width:number; height:number}>();
+    const byOccurrence = new Map<string, {cell:ComputedCellPlacement; width:number; height:number}>();
     const add = (sheetPages: typeof pages) => {
       for (const sheet of computeImpositionSheets(sheetPages, layout)) {
-        for (const cell of sheet.cells) if (cell.page && !byPage.has(cell.page.id)) byPage.set(cell.page.id, cell);
+        for (const cell of sheet.cells) if (cell.page) {
+          const placement = { cell, width:sheet.widthMm, height:sheet.heightMm };
+          if (!byPage.has(cell.page.id)) byPage.set(cell.page.id, placement);
+          if (cell.occurrenceKey) byOccurrence.set(cell.occurrenceKey, placement);
+        }
       }
     };
     add(pages);
     // Excluded pages have no real placement; preview them using the same layout rules.
     const excluded = pages.filter(page => !page.selectedForPrint);
     if (excluded.length) add(excluded.map(page => ({ ...page, selectedForPrint: true })));
-    return byPage;
+    return { byPage, byOccurrence };
   }, [pages, layout]);
 
   useLayoutEffect(() => {
@@ -288,7 +293,9 @@ export const SidebarPages: React.FC = () => {
                   {!doc.collapsed && (
                     <div className="grid grid-cols-2 gap-2 p-2">
                       {docPages.map(({ page, globalIdx }) => {
-                        const cell = placements.get(page.id);
+                        const placement = sidebarReveal?.pageId === page.id && sidebarReveal.occurrenceKey
+                          ? placements.byOccurrence.get(sidebarReveal.occurrenceKey) ?? placements.byPage.get(page.id)
+                          : placements.byPage.get(page.id);
                         return (
                           <div
                             key={page.id}
@@ -367,7 +374,7 @@ export const SidebarPages: React.FC = () => {
                             </div>
 
                             {/* Thumbnail mirrors the actual cell placement, crop, rotation and effects. */}
-                            {cell && <PageThumbnail page={page} cell={cell} effects={effects} />}
+                            {placement && <PageThumbnail page={page} cell={placement.cell} sheetWidth={placement.width} sheetHeight={placement.height} effects={effects} />}
 
                             {/* Bottom Info */}
                             <div className="mt-1 flex items-center justify-between text-[10px] text-slate-400">

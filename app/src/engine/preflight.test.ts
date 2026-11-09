@@ -23,3 +23,11 @@ it('does not claim a simulated job was sent to a printer', async () => {
   expect(useAppStore.getState().toasts.at(-1)?.type).toBe('error');
   submit.mockRestore();
 });
+
+
+it('warns when moved content extends past the physical sheet', () => {
+  const page = { id:'p', documentId:'d', sourcePageNumber:1, selectedForPrint:true, isBlankPage:false,
+    widthMm:210, heightMm:297, rotation:0, overrides:{transform:{x:2,y:0,scaleX:1,scaleY:1}} } as PageItem;
+  const sheets=computeImpositionSheets([page],{...DEFAULT_LAYOUT,duplexMode:'none'});
+  expect(checkPreflight([page],[],sheets,DEFAULT_EFFECTS).map(issue => issue.code)).toContain('out-of-bounds');
+});

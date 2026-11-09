@@ -12,6 +12,7 @@ import type {
   PageItem,
   PageNumberSettings,
   PageRotation,
+  PageTransform,
   PrinterInfo,
   PrinterProfileSettings,
   PrintJobRequest,
@@ -32,8 +33,8 @@ import {
   importFilesBatch,
   triggerBlobDownload,
 } from '../engine/pdfService';
-import { cropToMm, type Insets } from '../engine/pageGeometry';
-import { computeImpositionSheets } from '../engine/layoutEngine';
+import { cropToMm, IDENTITY_TRANSFORM, type Insets } from '../engine/pageGeometry';
+import { computeImpositionSheets, sortCellsByLayer } from '../engine/layoutEngine';
 import { ipcBridge, selectOptimalPrinter } from '../engine/ipcBridge';
 
 export type RibbonTabId =
@@ -197,7 +198,7 @@ interface AppState {
   ribbonCollapsed: boolean;
   sidebarTab: 'pages' | 'bookmarks';
   activeSheetIndex: number;
-  sidebarReveal: { pageId: string } | null;
+  sidebarReveal: { pageId: string; occurrenceKey?: string } | null;
   zoomPercent: number;
   viewMode: PreviewViewMode;
   showRulers: boolean;
@@ -236,7 +237,7 @@ interface AppState {
   // Page Operations (A3 - A4)
   togglePageSelectedForPrint: (pageId: string) => void;
   highlightPage: (pageId: string, multiSelect?: boolean, rangeSelect?: boolean) => void;
-  focusPageFromPreview: (pageId: string | null, preserveSelection?: boolean) => void;
+  focusPageFromPreview: (pageId: string | null, preserveSelection?: boolean, occurrenceKey?: string) => void;
   selectAllForPrint: (selected: boolean) => void;
   selectOddEvenForPrint: (mode: 'odd' | 'even') => void;
   invertPrintSelection: () => void;
@@ -245,6 +246,9 @@ interface AppState {
   moveHighlightedPages: (direction: 'up' | 'down') => void;
   rotatePages: (pageIds: string[], deltaDeg: 90 | 180 | 270) => void;
   applyPageGeometry: (pageId: string, scope: PageEditScope, edit: { kind: 'crop'; crop: Insets } | { kind: 'transform'; transform: NonNullable<PageItem['overrides']>['transform'] } | { kind: 'reset' }) => void;
+  applyCellTransform: (pageId: string, occurrenceKey: string, transform: PageTransform) => void;
+  resetCellGeometry: (pageId: string, occurrenceKey: string) => void;
+  reorderCellLayer: (sheetIndex: number, occurrenceKey: string, direction: 'front' | 'back' | 'forward' | 'backward') => void;
   duplicatePages: (pageIds: string[]) => void;
   makePageArray: (pageId: string, count: number) => void;
   insertBlankPageAfter: (pageId?: string) => void;
@@ -316,6 +320,11 @@ interface AppState {
   ) => void;
   addToast: (toast: Omit<ToastNotification, 'id'>) => void;
   dismissToast: (id: string) => void;
+}
+
+function removeCellOverrides(layout: LayoutSettings, removedPageIds: Set<string>): LayoutSettings {
+  if (!layout.cellOverrides) return layout;
+  return { ...layout, cellOverrides: Object.fromEntries(Object.entries(layout.cellOverrides).filter(([, value]) => !removedPageIds.has(value.pageId))) };
 }
 
 function captureSnapshot(state: AppState): WorkspaceSnapshot {
@@ -435,6 +444,7 @@ export const useAppStore = create<AppState>((set, get) => {
         documents: sample.documents,
         pages: sample.pages,
         bookmarks: sample.bookmarks,
+        layout: { ...get().layout, cellOverrides: {} },
         activeSheetIndex: 0,
       });
       pushUndo(
@@ -494,6 +504,7 @@ export const useAppStore = create<AppState>((set, get) => {
         documents: [],
         pages: [],
         bookmarks: [],
+        layout: { ...get().layout, cellOverrides: {} },
         activeSheetIndex: 0,
       });
       pushUndo('پاک‌سازی میز کار', 'Clear Workspace', before, captureSnapshot(get()));
@@ -560,7 +571,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     // Navigation is deliberately separate from edits and sidebar multi-selection.
     // Only explicit preview navigation replaces the highlighted set.
-    focusPageFromPreview: (pageId, preserveSelection = false) => {
+    focusPageFromPreview: (pageId, preserveSelection = false, occurrenceKey) => {
       set(state => {
         const target = pageId ? state.pages.find(page => page.id === pageId) : undefined;
         if (pageId && !target) return state;
@@ -572,7 +583,7 @@ export const useAppStore = create<AppState>((set, get) => {
           }),
           documents: target ? state.documents.map(doc => doc.id === target.documentId && doc.collapsed ? { ...doc, collapsed: false } : doc) : state.documents,
           sidebarTab: target ? 'pages' : state.sidebarTab,
-          sidebarReveal: target ? { pageId: target.id } : null,
+          sidebarReveal: target ? { pageId: target.id, occurrenceKey } : null,
         };
       });
     },
@@ -709,18 +720,72 @@ export const useAppStore = create<AppState>((set, get) => {
       if (!targets.length) return;
       const ids = new Set(targets.map(page => page.id));
       const before = captureSnapshot(state);
-      set(current => ({ pages: current.pages.map(page => {
-        if (!ids.has(page.id)) return page;
-        const overrides = { ...page.overrides };
-        if (edit.kind === 'crop') {
-          overrides.cropBoxMm = cropToMm(page, edit.crop);
-          // Cropping re-fits the remaining content in its cell.
-          delete overrides.transform;
-        } else if (edit.kind === 'transform') overrides.transform = edit.transform;
-        else { delete overrides.cropBoxMm; delete overrides.transform; }
-        return { ...page, overrides };
-      }) }));
+      set(current => {
+        const cellOverrides = Object.fromEntries(Object.entries(current.layout.cellOverrides ?? {}).map(([key, value]) => {
+          if (!ids.has(value.pageId)) return [key, value];
+          const { transform: _transform, allowOverflow: _overflow, ...rest } = value;
+          return [key, rest];
+        }));
+        return { layout: { ...current.layout, cellOverrides }, pages: current.pages.map(page => {
+          if (!ids.has(page.id)) return page;
+          const overrides = { ...page.overrides };
+          if (edit.kind === 'crop') {
+            overrides.cropBoxMm = cropToMm(page, edit.crop);
+            delete overrides.transform;
+          } else if (edit.kind === 'transform') overrides.transform = edit.transform;
+          else { delete overrides.cropBoxMm; delete overrides.transform; }
+          return { ...page, overrides };
+        }) };
+      });
       pushUndo('ویرایش هندسه صفحات', 'Edit page geometry', before, captureSnapshot(get()));
+    },
+
+    applyCellTransform: (pageId, occurrenceKey, transform) => {
+      const state = get();
+      const exists = computeImpositionSheets(state.pages, state.layout).some(sheet => sheet.cells.some(cell => cell.page?.id === pageId && cell.occurrenceKey === occurrenceKey));
+      if (!exists) return;
+      const before = captureSnapshot(state);
+      set(current => ({ layout: { ...current.layout, cellOverrides: { ...current.layout.cellOverrides,
+        [occurrenceKey]: { ...current.layout.cellOverrides?.[occurrenceKey], pageId, transform, allowOverflow:true } } } }));
+      pushUndo('تغییر اندازه و مکان خانه', 'Move or resize cell content', before, captureSnapshot(get()));
+    },
+
+    resetCellGeometry: (pageId, occurrenceKey) => {
+      const state = get();
+      const page = state.pages.find(item => item.id === pageId);
+      if (!page || !computeImpositionSheets(state.pages, state.layout).some(sheet => sheet.cells.some(cell => cell.page?.id === pageId && cell.occurrenceKey === occurrenceKey))) return;
+      const before = captureSnapshot(state);
+      const cellOverrides = { ...state.layout.cellOverrides };
+      const existing = { ...cellOverrides[occurrenceKey], pageId };
+      if (page.overrides?.transform) { existing.transform = { ...IDENTITY_TRANSFORM }; existing.allowOverflow = false; }
+      else { delete existing.transform; delete existing.allowOverflow; }
+      cellOverrides[occurrenceKey] = existing;
+      set({ layout: { ...state.layout, cellOverrides }, pages: state.pages.map(item => {
+        if (item.id !== pageId) return item;
+        const overrides = { ...item.overrides }; delete overrides.cropBoxMm;
+        return { ...item, overrides };
+      }) });
+      pushUndo('بازنشانی خانه', 'Reset cell geometry', before, captureSnapshot(get()));
+    },
+
+    reorderCellLayer: (sheetIndex, occurrenceKey, direction) => {
+      const state = get();
+      const sheet = computeImpositionSheets(state.pages, state.layout)[sheetIndex];
+      if (!sheet) return;
+      const ordered = sortCellsByLayer(sheet.cells).filter(cell => cell.page && cell.occurrenceKey);
+      const index = ordered.findIndex(cell => cell.occurrenceKey === occurrenceKey);
+      if (index < 0) return;
+      const next = direction === 'front' ? ordered.length - 1 : direction === 'back' ? 0 :
+        Math.max(0, Math.min(ordered.length - 1, index + (direction === 'forward' ? 1 : -1)));
+      if (next === index) return;
+      const before = captureSnapshot(state);
+      const [moved] = ordered.splice(index, 1); ordered.splice(next, 0, moved);
+      const cellOverrides = { ...state.layout.cellOverrides };
+      ordered.forEach((cell, zIndex) => { const key = cell.occurrenceKey!;
+        cellOverrides[key] = { ...cellOverrides[key], pageId:cell.page!.id, zIndex };
+      });
+      set({ layout: { ...state.layout, cellOverrides } });
+      pushUndo('تغییر ترتیب لایه‌ها', 'Reorder cell layers', before, captureSnapshot(get()));
     },
 
     rotatePages: (pageIds, deltaDeg) => {
@@ -851,6 +916,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const idSet = new Set(pageIds);
       set((state) => ({
         pages: state.pages.filter((p) => !idSet.has(p.id)),
+        layout: removeCellOverrides(state.layout, idSet),
       }));
       pushUndo(
         `حذف ${pageIds.length} صفحه`,
@@ -865,6 +931,7 @@ export const useAppStore = create<AppState>((set, get) => {
       set((state) => ({
         documents: state.documents.filter((d) => d.id !== docId),
         pages: state.pages.filter((p) => p.documentId !== docId),
+        layout: removeCellOverrides(state.layout, new Set(state.pages.filter(p => p.documentId === docId).map(p => p.id))),
         bookmarks: state.bookmarks.filter((b) => b.documentId !== docId),
       }));
       pushUndo('حذف فایل از پروژه', 'Remove document', before, captureSnapshot(get()));

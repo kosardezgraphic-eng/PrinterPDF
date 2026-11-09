@@ -62,6 +62,9 @@ export interface SourceDocument {
   rawBytes?: Uint8Array;
 }
 
+export interface PageTransform { x: number; y: number; scaleX: number; scaleY: number }
+export interface CellOverride { pageId: string; transform?: PageTransform; zIndex?: number; allowOverflow?: boolean }
+
 export interface PagePerPageOverrides {
   invert?: boolean;
   grayscale?: boolean;
@@ -70,7 +73,7 @@ export interface PagePerPageOverrides {
   manualRotation?: boolean;
   cropBoxMm?: { top: number; right: number; bottom: number; left: number };
   /** Relative to the cell: offsets in cell fractions and independent size multipliers. */
-  transform?: { x: number; y: number; scaleX: number; scaleY: number };
+  transform?: PageTransform;
 }
 
 export interface PageItem {
@@ -155,6 +158,8 @@ export interface LayoutSettings {
   horizontalGutterMm: number;
   /** D3: Vertical spacing between cells in mm */
   verticalGutterMm: number;
+  /** Per-occurrence transforms and layer order, keyed by page and matrix occurrence. */
+  cellOverrides?: Record<string, CellOverride>;
   /** D3: Scale mode */
   scaleMode: ScaleMode;
   /** Custom scale percentage (10..400) */
@@ -192,6 +197,10 @@ export interface ComputedCellPlacement {
   contentHeightMm: number;
   scaleFactor: number;
   effectiveRotation: PageRotation;
+  occurrenceKey?: string;
+  transform?: PageTransform;
+  zIndex?: number;
+  allowOverflow?: boolean;
 }
 
 export interface ComputedSheetSide {

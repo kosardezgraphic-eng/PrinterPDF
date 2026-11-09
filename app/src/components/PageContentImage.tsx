@@ -22,7 +22,9 @@ export function pageImageStyle(page: PageItem, rotation: PageRotation, width: nu
 export function PageContentImage({ page, effects, rotation, width, height }: {
   page: PageItem; effects: EffectsSettings; rotation: PageRotation; width: number; height: number;
 }) {
-  if (!page.thumbnailDataUrl || width <= 0 || height <= 0) return null;
+  if (width <= 0 || height <= 0) return null;
+  if (page.isBlankPage && page.sourcePageNumber === 0) return <div aria-hidden="true" className="absolute inset-0 bg-white" style={{ filter:buildCssFilterForPage(page, effects) }} />;
+  if (!page.thumbnailDataUrl) return null;
   return <img draggable={false} src={page.thumbnailDataUrl} alt="" aria-hidden="true"
     style={{ ...pageImageStyle(page, rotation, width, height), filter: buildCssFilterForPage(page, effects) }}
     className="max-w-none select-none pointer-events-none" />;

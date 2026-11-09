@@ -21,6 +21,7 @@ import { LayoutGuides, MeasurementTool } from './SheetTools';
 import { t } from '../i18n/translations';
 import {
   computeImpositionSheets,
+  sortCellsByLayer,
   convertMmToUnit,
 } from '../engine/layoutEngine';
 import { checkPreflight } from '../engine/preflight';
@@ -64,6 +65,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     importFiles,
     loadSampleWorkspace,
     applyPageGeometry,
+    resetCellGeometry,
     commitLayoutGuides,
     selectPrinter,
     setDefaultPrinter,
@@ -81,8 +83,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const [spaceDown, setSpaceDown] = useState(false);
   const [canvasTool, setCanvasTool] = useState<CanvasTool>('select');
   const [draftLayout, setDraftLayout] = useState<LayoutSettings | null>(null);
-  const [editScope, setEditScope] = useState<PageEditScope>('selected');
+  const [editScope, setEditScope] = useState<PageEditScope>('current');
   const [currentEditPageId, setCurrentEditPageId] = useState<string | null>(null);
+  const [currentOccurrenceKey, setCurrentOccurrenceKey] = useState<string | null>(null);
   const [panning, setPanning] = useState(false);
   const [showPreflight, setShowPreflight] = useState(false);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -122,6 +125,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     const page = sheets[next].cells.find(cell => cell.page)?.page;
     focusPageFromPreview(page?.id ?? null);
     setCurrentEditPageId(page?.id ?? null);
+    setCurrentOccurrenceKey(null);
   }, [sheets, safeSheetIdx, setActiveSheetIndex, focusPageFromPreview]);
 
   useEffect(() => {
@@ -344,7 +348,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 })}
 
               {/* Imposed Cells (D1 - D5) */}
-              {sheetSide.cells.map((cell) => {
+              {sortCellsByLayer(sheetSide.cells).map((cell) => {
                 const cellLeft = cell.cellXMm * basePxPerMm;
                 const cellTop = cell.cellYMm * basePxPerMm;
                 const cellW = cell.cellWidthMm * basePxPerMm;
@@ -376,10 +380,11 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                       )}
                     </div>
 
-                    {cell.page && <PageCanvasCell cell={cell} pxPerMm={basePxPerMm} tool={canvasTool} scope={editScope} spaceDown={spaceDown} onCurrentPage={(id, preserveSelection) => {
+                    {cell.page && <PageCanvasCell cell={cell} sheetIndex={sheetSide.sideIndex - 1} pxPerMm={basePxPerMm} tool={canvasTool} scope={editScope} spaceDown={spaceDown} onCurrentPage={(id, preserveSelection, occurrenceKey) => {
                       setCurrentEditPageId(id);
+                      setCurrentOccurrenceKey(occurrenceKey);
                       setActiveSheetIndex(sheetSide.sideIndex - 1);
-                      focusPageFromPreview(id, preserveSelection);
+                      focusPageFromPreview(id, preserveSelection, occurrenceKey);
                     }} />}
                   </React.Fragment>
                 );
@@ -589,16 +594,22 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
         </button>)}
         <label className="flex items-center gap-1">{lang === 'fa' ? 'اعمال روی:' : 'Apply to:'}
           <select value={editScope} onChange={e => setEditScope(e.target.value as PageEditScope)} className="rounded border border-slate-700 bg-slate-800 px-2 py-1">
-            <option value="current">{lang === 'fa' ? 'فقط این صفحه' : 'This page'}</option>
+            <option value="current">{canvasTool === 'crop' ? (lang === 'fa' ? 'این صفحه (همه تکرارها)' : 'This page (all repeats)') : (lang === 'fa' ? 'فقط این خانه' : 'This cell')}</option>
             <option value="selected">{lang === 'fa' ? 'صفحات انتخاب‌شده در پنل' : 'Selected thumbnails'}</option>
             <option value="all">{lang === 'fa' ? 'همه صفحات' : 'All pages'}</option>
           </select>
         </label>
         <button type="button" disabled={!pages.some(page => page.isHighlighted)} onClick={() => {
           const page = pages.find(item => item.id === currentEditPageId && item.isHighlighted) ?? pages.find(item => item.isHighlighted);
-          if (page) applyPageGeometry(page.id, editScope, { kind:'reset' });
+          if (!page) return;
+          if (editScope === 'current') {
+            const cell = sheets[safeSheetIdx]?.cells.find(item => item.page?.id === page.id && item.occurrenceKey === currentOccurrenceKey)
+              ?? sheets[safeSheetIdx]?.cells.find(item => item.page?.id === page.id);
+            if (cell?.occurrenceKey) resetCellGeometry(page.id, cell.occurrenceKey);
+          } else applyPageGeometry(page.id, editScope, { kind:'reset' });
         }} className="rounded bg-slate-800 px-3 py-1.5 hover:bg-slate-700 disabled:opacity-50">{lang === 'fa' ? 'بازنشانی برش و اندازه' : 'Reset crop and size'}</button>
-        {(canvasTool === 'move' || canvasTool === 'crop') && <span className="text-slate-400">{lang === 'fa' ? 'ابتدا صفحه‌ها را از بندانگشتی‌ها انتخاب کنید؛ دستگیره‌ها را با موس یا لمس بکشید.' : 'Select thumbnails first, then drag the handles with mouse or touch.'}</span>}
+        {canvasTool === 'move' && <span className="text-slate-400">{lang === 'fa' ? 'گوشه‌ها متناسب، لبه‌ها مستقل؛ برای ترتیب لایه راست‌کلیک یا ⋮ را انتخاب کنید.' : 'Corners preserve proportions; edges resize one axis. Right-click or ⋮ for layer order.'}</span>}
+        {canvasTool === 'crop' && <span className="text-slate-400">{lang === 'fa' ? 'برش صفحه روی همه تکرارهای آن اعمال و اندازه‌های اختصاصی آن صفحه بازنشانی می‌شود.' : 'Cropping a page affects all repeats and resets their individual sizes.'}</span>}
         {canvasTool === 'layout' && <span className="text-slate-400">{lang === 'fa' ? 'سبز: حاشیه؛ بنفش: فاصلهٔ یکسان همهٔ ستون‌ها یا ردیف‌ها. با موس یا لمس بکشید.' : 'Drag green margin or purple uniform gutter handles with mouse or touch.'}</span>}
         {canvasTool === 'measure' && <span className="text-slate-400">{lang === 'fa' ? 'برای اندازه‌گیری بکشید؛ Shift جهت افقی یا عمودی را قفل می‌کند.' : 'Drag to measure; hold Shift to lock horizontally or vertically.'}</span>}
       </div>}

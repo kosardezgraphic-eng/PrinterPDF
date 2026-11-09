@@ -24,7 +24,7 @@ import type {
   SourceDocument,
   WatermarkSettings,
 } from '@shared/models';
-import { computeImpositionSheets } from './layoutEngine';
+import { computeImpositionSheets, sortCellsByLayer } from './layoutEngine';
 import { pageCropFractions, rotateInsets } from './pageGeometry';
 import { shouldApplyEffectsToPage } from './effectsPipeline';
 import { formatPageNumberLabel, resolveTextMacros } from './watermarkEngine';
@@ -550,7 +550,7 @@ export async function exportImposedPdf(params: {
 
     const outPage = outPdf.addPage([sheetWidthPt, sheetHeightPt]);
 
-    for (const cell of sheetSide.cells) {
+    for (const cell of sortCellsByLayer(sheetSide.cells)) {
       if (!cell.page) continue;
 
       const cellXPt = cell.cellXMm * MM_TO_PT;
@@ -579,13 +579,16 @@ export async function exportImposedPdf(params: {
         height: rotated ? contentWPt : contentHPt,
         rotate: degrees(-rotation),
       };
-      outPage.pushOperators(pushGraphicsState(), rectangle(cellXPt, cellYPt, cellWPt, cellHPt), clip(), endPath());
+      outPage.pushOperators(pushGraphicsState());
+      if (!cell.allowOverflow) outPage.pushOperators(rectangle(cellXPt, cellYPt, cellWPt, cellHPt), clip(), endPath());
       if (srcPdf && cell.page.sourcePageNumber > 0) {
         const pageIdxZero = cell.page.sourcePageNumber - 1;
         if (pageIdxZero >= srcPdf.getPageCount()) {
           throw new Error(`Invalid source page ${cell.page.sourcePageNumber} in ${cell.page.documentName}`);
         }
         const sourcePage = srcPdf.getPage(pageIdxZero);
+        // The PDF thumbnail is rendered on white paper; keep that opaque paper when layers overlap.
+        outPage.drawRectangle({ x:contentXPt, y:contentYPt, width:contentWPt, height:contentHPt, color:rgb(1,1,1) });
         // pdf-lib cannot embed a page with no Contents; such a page is empty.
         if (sourcePage.node.Contents()) {
           const box = sourcePage.getCropBox();
@@ -613,6 +616,8 @@ export async function exportImposedPdf(params: {
           rotate: degrees(-rotation),
         });
         outPage.pushOperators(popGraphicsState());
+      } else if (cell.page.sourcePageNumber === 0 && cell.page.isBlankPage) {
+        outPage.drawRectangle({ x:contentXPt, y:contentYPt, width:contentWPt, height:contentHPt, color:rgb(1,1,1) });
       } else if (cell.page.sourcePageNumber > 0) {
         throw new Error(`Missing or unsupported source for ${cell.page.documentName}; re-import the original file`);
       }
@@ -659,7 +664,8 @@ export async function exportImposedPdf(params: {
       // E1: Vector Invert via PDF BlendMode.Difference over the cell
       const { effectiveInvert } = shouldApplyEffectsToPage(cell.page, effects);
       if (effectiveInvert) {
-        outPage.pushOperators(pushGraphicsState(), rectangle(cellXPt, cellYPt, cellWPt, cellHPt), clip(), endPath());
+        outPage.pushOperators(pushGraphicsState());
+        if (!cell.allowOverflow) outPage.pushOperators(rectangle(cellXPt, cellYPt, cellWPt, cellHPt), clip(), endPath());
         outPage.drawRectangle({
           x: contentXPt,
           y: contentYPt,

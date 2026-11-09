@@ -115,6 +115,14 @@ function computeAlignedOffset(
   return { offsetX, offsetY };
 }
 
+/** Stable for sequential pages and independently addressable repeat-grid occurrences. */
+export function cellOccurrenceKey(pageId: string, mode: LayoutSettings['placementMode'], row: number, col: number): string {
+  return JSON.stringify(mode === 'step-and-repeat' ? [mode, pageId, row, col] : [mode, pageId]);
+}
+export function sortCellsByLayer(cells: ComputedCellPlacement[]): ComputedCellPlacement[] {
+  return cells.slice().sort((a, b) => (a.zIndex ?? a.cellIndex) - (b.zIndex ?? b.cellIndex) || a.cellIndex - b.cellIndex);
+}
+
 /**
  * Computes all output sheet sides (Front/Back) and exact millimeter placements
  * for every active page according to LayoutSettings.
@@ -331,7 +339,9 @@ export function computeImpositionSheets(
         layout.alignment
       );
 
-      const transform = item.page.overrides?.transform ?? IDENTITY_TRANSFORM;
+      const occurrenceKey = cellOccurrenceKey(item.page.id, layout.placementMode, item.row, item.col);
+      const override = layout.cellOverrides?.[occurrenceKey];
+      const transform = override?.transform ?? item.page.overrides?.transform ?? IDENTITY_TRANSFORM;
       const finalWidth = contentWidthMm * Math.max(0.05, Math.min(10, transform.scaleX));
       const finalHeight = contentHeightMm * Math.max(0.05, Math.min(10, transform.scaleY));
       return {
@@ -350,6 +360,10 @@ export function computeImpositionSheets(
         contentHeightMm: finalHeight,
         scaleFactor: finalScale,
         effectiveRotation: item.effectiveRotation,
+        occurrenceKey,
+        transform,
+        zIndex: override?.zIndex,
+        allowOverflow: override?.transform ? override.allowOverflow !== false : !!item.page.overrides?.transform,
       };
     });
 
