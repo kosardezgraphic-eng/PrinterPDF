@@ -130,6 +130,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     ? computeImpositionSheets([{ ...previewOnlyPage, selectedForPrint: true }], { ...layout, duplexMode:'none' })
     : outputSheets, [previewOnlyPage, layout, outputSheets]);
   const pageNumbers = useMemo(() => new Map(pages.map((page, index) => [page.id, index + 1])), [pages]);
+  const textEditing = useAppStore(s => !!s.textEdit);
+  useEffect(() => { if (textEditing) setCanvasTool('move'); }, [textEditing]);
   const hasTextOverlays = useMemo(() => overlays.some(item => item.kind === 'text'), [overlays]);
   useEffect(() => {
     if (!selectedOverlayId) return;
@@ -501,7 +503,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 );
               })}
 
-              {hasTextOverlays && <TextOverlayLayer sheet={sheetSide} totalSheets={outputSheets.length} pages={pages} pageIndices={pageNumbers} pxPerMm={basePxPerMm} enabled={!previewOnlyPage && canvasTool==='move' && !spaceDown}/>}
+              {hasTextOverlays && <TextOverlayLayer sheet={sheetSide} totalSheets={outputSheets.length} pages={pages} pageIndices={pageNumbers} pxPerMm={basePxPerMm} enabled={canvasTool==='move' && !spaceDown} previewOnly={!!previewOnlyPage}/>}
 
               {/* F1: Watermark Overlay (Single or Tiled) */}
               {watermark.enabled && resolvedWatermarkText && (

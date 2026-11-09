@@ -503,7 +503,7 @@ export interface PspProjectFile {
 }
 
 /** Overlay coordinates are percentages of the selected sheet or source-page box. */
-export type OverlayScope = 'current' | 'all' | 'even' | 'odd' | 'first' | 'last' | 'selected';
+export type OverlayScope = 'current' | 'all' | 'even' | 'odd' | 'first' | 'last' | 'selected' | 'document' | 'selected-documents';
 export type OverlayTarget = 'page' | 'sheet';
 export type ShapeType = 'rectangle' | 'rounded-rect' | 'circle' | 'line' | 'arrow' | 'triangle' | 'polygon' | 'star' | 'diamond' | 'badge';
 export type NumberingNumberFormat = 'persian' | 'english' | 'roman' | 'abjad';
@@ -518,10 +518,16 @@ export interface OverlayBase {
   xPercent: number; yPercent: number; widthPercent: number; heightPercent: number;
   opacity: number; rotation: number;
 }
+export interface TextScriptRange { start: number; end: number; script: 'super' | 'sub' }
 export interface PageOverlayText extends OverlayBase {
   kind: 'text'; text: string; fontSize: number; fontFamily: string; color: string;
   backgroundColor?: string; bold: boolean; italic: boolean; underline: boolean;
   align: 'right' | 'center' | 'left'; syncGroupId?: string;
+  /** Document scopes use stable document IDs; ranges use UTF-16 offsets. */
+  targetDocumentIds?: string[];
+  scriptRanges?: TextScriptRange[];
+  /** Line height multiplier and extra word/letter spacing in points. */
+  lineHeight?: number; wordSpacingPt?: number; letterSpacingPt?: number;
 }
 export interface PageOverlayShape extends OverlayBase {
   kind: 'shape'; type: ShapeType; fillColor: string; strokeColor: string;

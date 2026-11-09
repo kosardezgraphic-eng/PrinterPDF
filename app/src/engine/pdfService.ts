@@ -552,10 +552,7 @@ export async function exportImposedPdf(params: {
   const totalSides = Math.max(1, sheets.length);
   const pageIndices = new Map(allPages.map((page,index)=>[page.id,index+1]));
   const textImages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPng>>>();
-  const textItems = overlays.filter(item=>item.kind==='text');
-  if (textItems.length && typeof document !== 'undefined' && document.fonts) {
-    await Promise.all(textItems.map(item=>document.fonts.load(`${item.italic?'italic ':''}${item.bold?'bold':'normal'} 18px "${item.fontFamily.replace(/["\\]/g,'')}"`,item.text)));
-  }
+  const loadedTextFonts = new Set<string>();
 
   for (let sIdx = 0; sIdx < sheets.length; sIdx++) {
     const sheetSide = sheets[sIdx];
@@ -743,13 +740,19 @@ export async function exportImposedPdf(params: {
     for (const placement of textPlacements(sheetSide,totalSides,allPages,overlays,pageIndices)) {
       if (!Number.isFinite(placement.width) || !Number.isFinite(placement.height) || placement.width <= 0 || placement.height <= 0) continue;
       if (typeof document === 'undefined') throw new Error('Text overlay export requires a Canvas 2D renderer');
-      const item=placement.text, w=placement.width*MM_TO_PT, h=placement.height*MM_TO_PT;
+      if (placement.formulaError) throw new Error(`Invalid text formula in overlay ${placement.text.id}`);
+      const item=placement.renderText, w=placement.width*MM_TO_PT, h=placement.height*MM_TO_PT;
       const scale=Math.min(200/72,4096/w,4096/h);
-      const key=JSON.stringify([item.text,item.fontFamily,item.fontSize,item.color,item.backgroundColor,item.bold,item.italic,item.underline,item.align,w,h]);
+      const key=JSON.stringify([item.text,item.fontFamily,item.fontSize,item.color,item.backgroundColor,item.bold,item.italic,item.underline,item.align,item.scriptRanges,item.lineHeight,item.letterSpacingPt,item.wordSpacingPt,w,h]);
       let image=textImages.get(key);
       if(!image){
+        if(document.fonts){const font=`${item.italic?'italic ':''}${item.bold?'bold':'normal'} 18px "${item.fontFamily.replace(/["\\]/g,'')}"`;
+          const fontKey=JSON.stringify([font,item.text]);if(!loadedTextFonts.has(fontKey)){await document.fonts.load(font,item.text);loadedTextFonts.add(fontKey);}}
+
         const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.ceil(w*scale));canvas.height=Math.max(1,Math.ceil(h*scale));
         const ctx=canvas.getContext('2d');if(!ctx)throw new Error('Text overlay Canvas 2D is unavailable');
+        if ((item.letterSpacingPt??0)!==0 && !('letterSpacing' in ctx) || (item.wordSpacingPt??0)!==0 && !('wordSpacing' in ctx))
+          throw new Error('This environment cannot export the requested text spacing');
         drawOverlayText(ctx,item,canvas.width,canvas.height,canvas.width/w);
         image=await outPdf.embedPng(canvas.toDataURL('image/png'));textImages.set(key,image);
       }

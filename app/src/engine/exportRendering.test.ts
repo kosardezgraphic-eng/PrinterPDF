@@ -323,4 +323,20 @@ describe('real output rendering', () => {
     }finally{vi.unstubAllGlobals();}
   });
 
+  it('resolves dynamic text separately for each PDF page and rejects unsafe formulas',async()=>{
+    const src=await PDFDocument.create();src.addPage([100,100]);src.addPage([100,100]);
+    const pages=[1,2].map(n=>({...page(0),id:`p${n}`,sourcePageNumber:n,widthMm:100*ptToMm}));
+    const overlay={id:'t',kind:'text' as const,target:'page' as const,targetScope:'all' as const,targetPageIds:[],targetSheetIndex:1,xPercent:25,yPercent:25,widthPercent:50,heightPercent:50,opacity:1,rotation:0,text:'{page}/{total}={=page * 2}',fontSize:18,fontFamily:'Arial',color:'#000',bold:false,italic:false,underline:false,align:'left' as const};
+    const ctx={clearRect:vi.fn(),fillRect:vi.fn(),fillText:vi.fn(),measureText:()=>({width:0})};
+    const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRfoAAAAASUVORK5CYII=';
+    vi.stubGlobal('document',{createElement:()=>({width:1,height:1,getContext:()=>ctx,toDataURL:()=>png})});
+    try{
+      const params={documents:[{id:'d',fileType:'pdf',rawBytes:await src.save()} as SourceDocument],pages,allPages:pages,layout,effects:{...DEFAULT_EFFECTS,enabled:false},watermark:{...getDefaultWatermarkSettings(),enabled:false},pageNumbering:getDefaultPageNumberSettings(),overlays:[overlay],userName:'test'};
+      await exportImposedPdf(params);
+      expect(ctx.fillText).toHaveBeenCalledWith('1/2=2',0,0,expect.any(Number));
+      expect(ctx.fillText).toHaveBeenCalledWith('2/2=4',0,0,expect.any(Number));
+      await expect(exportImposedPdf({...params,overlays:[{...overlay,text:'{=page / 0}'}]})).rejects.toThrow('Invalid text formula');
+    }finally{vi.unstubAllGlobals();}
+  });
+
 });
