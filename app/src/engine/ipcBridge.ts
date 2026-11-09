@@ -10,6 +10,8 @@ import type {
   PageOrientation,
   PaperSizeId,
   PrinterInfo,
+  PrinterMarginRequest,
+  PrinterMarginResult,
   PrinterProfileSettings,
   PrintJobRequest,
   PspProjectFile,
@@ -276,6 +278,17 @@ export const ipcBridge = {
     const api = electronApi();
     if (api) return api.listPrinters();
     return structuredClone(memPrinters);
+  },
+
+  async getPrinterMargins(request: PrinterMarginRequest): Promise<PrinterMarginResult> {
+    const api = electronApi();
+    if (api) {
+      if (typeof api.getPrinterMargins !== 'function') return {status:'unavailable',reason:'Printer margin bridge unavailable'};
+      return api.getPrinterMargins(request);
+    }
+    const printer = memPrinters.find(p => p.name === request.printerName);
+    if (printer?.isVirtual) return {status:'available',source:'simulated-virtual',marginsMm:{top:0,right:0,bottom:0,left:0}};
+    return {status:'unavailable',reason:'Browser preview does not have access to physical printer margins'};
   },
 
   async updatePrinterProfile(

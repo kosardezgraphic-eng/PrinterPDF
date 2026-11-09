@@ -16,7 +16,7 @@ const checkbox=(id:string)=>card(id).querySelector<HTMLButtonElement>('[role="ch
 const flags=()=>useAppStore.getState().pages.map(p=>p.selectedForPrint);
 const selected=()=>useAppStore.getState().pages.filter(p=>p.isHighlighted).map(p=>p.id);
 const rightClick=(id:string)=>act(()=>card(id).dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:100,clientY:100})));
-const invert=()=>Array.from(container.querySelectorAll('button')).find(b=>b.textContent?.includes('Invert print selection of highlighted pages'))!;
+const invert=()=>Array.from(container.querySelectorAll('button')).find(b=>b.textContent?.includes('Invert print selection of all pages'))!;
 beforeEach(()=>{
   (globalThis as unknown as {IS_REACT_ACT_ENVIRONMENT:boolean}).IS_REACT_ACT_ENVIRONMENT=true;
   useAppStore.setState({documents:[doc('d1'),doc('d2')],pages:[page('a','d1',true,true),page('b','d1',true,false),page('c','d2',false,true),page('d','d2',true,true)],
@@ -49,22 +49,22 @@ describe('multi-thumbnail print checkboxes',()=>{
   it('right-clicks a selected thumbnail without collapsing the selection and inverts mixed values independently',()=>{
     rightClick('b');expect(selected()).toEqual(['a','b','d']);expect(flags()).toEqual([true,false,true,true]);
     expect(invert()).toBeTruthy();act(()=>invert().click());
-    expect(flags()).toEqual([false,true,true,false]);expect(selected()).toEqual(['a','b','d']);expect(container.textContent).not.toContain('Invert print selection of highlighted pages');
+    expect(flags()).toEqual([false,true,false,false]);expect(selected()).toEqual(['a','b','d']);expect(container.textContent).not.toContain('Invert print selection of all pages');
     act(()=>useAppStore.getState().undo());expect(flags()).toEqual([true,false,true,true]);expect(selected()).toEqual(['a','b','d']);
-    act(()=>useAppStore.getState().redo());expect(flags()).toEqual([false,true,true,false]);
+    act(()=>useAppStore.getState().redo());expect(flags()).toEqual([false,true,false,false]);
   });
-  it('right-clicking an unselected thumbnail targets only it',()=>{
+  it('right-clicking an unselected thumbnail still inverts all pages',()=>{
     rightClick('c');expect(selected()).toEqual(['c']);act(()=>invert().click());
-    expect(flags()).toEqual([true,false,false,true]);expect(selected()).toEqual(['c']);
+    expect(flags()).toEqual([false,true,false,false]);expect(selected()).toEqual(['c']);
   });
   it('applies to selected thumbnails inside a collapsed document',()=>{
     act(()=>useAppStore.setState({documents:[doc('d1'),doc('d2',true)]}));
     expect(container.querySelector('[data-page-id="d"]')).toBeNull();
-    act(()=>checkbox('a').click());expect(flags()).toEqual([false,false,true,false]);
+    rightClick('a');act(()=>invert().click());expect(flags()).toEqual([false,true,false,false]);
   });
   it('provides localized context command and accessible checkbox state',()=>{
     act(()=>useAppStore.setState({settings:{...useAppStore.getState().settings,language:'fa'}}));
     expect(checkbox('a').getAttribute('aria-label')).toContain('انتخاب برای چاپ');
-    rightClick('a');expect(container.textContent).toContain('معکوس کردن وضعیت چاپ صفحات انتخاب‌شده');
+    rightClick('a');expect(container.textContent).toContain('معکوس کردن وضعیت چاپ همهٔ صفحات');
   });
 });

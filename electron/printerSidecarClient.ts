@@ -8,6 +8,8 @@ import type {
 } from '../shared/ipc-channels';
 import type {
   PrinterInfo,
+  PrinterMarginRequest,
+  PrinterMarginResult,
   PrinterProfileSettings,
   PrintJobRequest,
   SpoolerJobInfo,
@@ -113,6 +115,10 @@ export class PrinterSidecarClient {
 
   public async listPrinters(): Promise<PrinterInfo[]> {
     return this.callRpc<PrinterInfo[]>('printer:list');
+  }
+
+  public async getPrinterMargins(request: PrinterMarginRequest): Promise<PrinterMarginResult> {
+    return this.callRpc<PrinterMarginResult>('printer:get-margins', request);
   }
 
   public async updateProfile(

@@ -23,6 +23,28 @@ public sealed record JsonRpcResponse(
     [property: JsonPropertyName("error")] JsonRpcError? Error = null
 );
 
+public sealed record PrinterMarginRequestDto(
+    [property: JsonPropertyName("printerName")] string PrinterName,
+    [property: JsonPropertyName("paperSize")] string PaperSize,
+    [property: JsonPropertyName("orientation")] string Orientation,
+    [property: JsonPropertyName("widthMm")] double WidthMm,
+    [property: JsonPropertyName("heightMm")] double HeightMm
+);
+
+public sealed record PrinterMarginsDto(
+    [property: JsonPropertyName("top")] double Top,
+    [property: JsonPropertyName("right")] double Right,
+    [property: JsonPropertyName("bottom")] double Bottom,
+    [property: JsonPropertyName("left")] double Left
+);
+
+public sealed record PrinterMarginResultDto(
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("source"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Source = null,
+    [property: JsonPropertyName("marginsMm"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] PrinterMarginsDto? MarginsMm = null,
+    [property: JsonPropertyName("reason"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason = null
+);
+
 public sealed record PrinterCapabilitiesDto(
     [property: JsonPropertyName("supportedPapers")] IReadOnlyList<string> SupportedPapers,
     [property: JsonPropertyName("supportedTrays")] IReadOnlyList<string> SupportedTrays,

@@ -23,16 +23,18 @@ describe('print selection for highlighted pages',()=>{
     expect(flags()).toEqual([true,false,false,true]);expect(selected()).toEqual(['a','b','d']);
     useAppStore.getState().undo();expect(flags()).toEqual([true,false,true,true]);
   });
-  it('inverts each highlighted page separately and can undo/redo as one action',()=>{
-    useAppStore.getState().invertHighlightedPrintSelection();
-    expect(flags()).toEqual([false,true,true,false]);expect(selected()).toEqual(['a','b','d']);expect(output()).toEqual(['b','c']);
+  it('inverts every page separately and can undo/redo as one action',()=>{
+    useAppStore.getState().invertAllPrintSelection();
+    expect(flags()).toEqual([false,true,false,false]);expect(selected()).toEqual(['a','b','d']);expect(output()).toEqual(['b']);
     useAppStore.getState().undo();expect(flags()).toEqual([true,false,true,true]);expect(selected()).toEqual(['a','b','d']);
-    useAppStore.getState().redo();expect(flags()).toEqual([false,true,true,false]);
+    useAppStore.getState().redo();expect(flags()).toEqual([false,true,false,false]);
   });
-  it('ignores nonexistent targets and inversion with no highlighted pages',()=>{
+  it('inverts all even without highlighted pages, and ignores nonexistent targets',()=>{
     useAppStore.setState({pages:useAppStore.getState().pages.map(p=>({...p,isHighlighted:false}))});
-    const original=useAppStore.getState();
-    useAppStore.getState().togglePageSelectedForPrint('missing');useAppStore.getState().invertHighlightedPrintSelection();
-    expect(useAppStore.getState().pages).toBe(original.pages);expect(useAppStore.getState().undoLabel).toBe(original.undoLabel);
+    const original=useAppStore.getState().pages;
+    useAppStore.getState().togglePageSelectedForPrint('missing');
+    expect(useAppStore.getState().pages).toBe(original);
+    useAppStore.getState().invertAllPrintSelection();
+    expect(flags()).toEqual([false,true,false,false]);expect(selected()).toEqual([]);
   });
 });

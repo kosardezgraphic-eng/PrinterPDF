@@ -8,6 +8,7 @@ import { SessionStore } from './sessionStore';
 import type {
   AppSettings,
   PrinterProfileSettings,
+  PrinterMarginRequest,
   PrintJobRequest,
   PspProjectFile,
 } from '../shared/models';
@@ -77,6 +78,14 @@ async function createMainWindow(): Promise<void> {
 function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.PRINTER_LIST, async () => {
     return sidecar.listPrinters();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PRINTER_GET_MARGINS, async (_e, request: PrinterMarginRequest) => {
+    if (!request || typeof request.printerName !== 'string' || !request.printerName ||
+      !Number.isFinite(request.widthMm) || !Number.isFinite(request.heightMm) ||
+      request.widthMm <= 0 || request.heightMm <= 0 || request.widthMm > 2000 || request.heightMm > 2000 ||
+      !['portrait','landscape'].includes(request.orientation)) throw new Error('Invalid printer margin request');
+    return sidecar.getPrinterMargins(request);
   });
 
   ipcMain.handle(

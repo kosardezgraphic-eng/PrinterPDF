@@ -41,7 +41,7 @@ export const SidebarPages: React.FC = () => {
     sidebarTab,
     setSidebarTab,
     togglePageSelectedForPrint,
-    invertHighlightedPrintSelection,
+    invertAllPrintSelection,
     highlightPage,
     requestPreviewPage,
     selectAllForPrint,
@@ -509,11 +509,11 @@ export const SidebarPages: React.FC = () => {
         >
           <button
             type="button"
-            onClick={() => { invertHighlightedPrintSelection(); setContextMenu(null); }}
+            onClick={() => { invertAllPrintSelection(); setContextMenu(null); }}
             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 cursor-pointer"
           >
             <CheckSquare className="h-3.5 w-3.5 text-sky-400" aria-hidden="true" />
-            <span>{lang === 'fa' ? 'معکوس کردن وضعیت چاپ صفحات انتخاب‌شده' : 'Invert print selection of highlighted pages'}</span>
+            <span>{lang === 'fa' ? 'معکوس کردن وضعیت چاپ همهٔ صفحات' : 'Invert print selection of all pages'}</span>
           </button>
           <button
             type="button"

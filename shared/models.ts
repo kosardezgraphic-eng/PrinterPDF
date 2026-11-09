@@ -158,6 +158,8 @@ export interface LayoutSettings {
   uniqueScale: boolean;
   /** D3: Outer sheet margins in mm */
   marginsMm: MarginsMm;
+  /** Printer defaults follow the selected printer/paper; custom margins are preserved. */
+  marginMode?: 'printer' | 'custom';
   /** D3: Horizontal spacing between cells in mm */
   horizontalGutterMm: number;
   /** D3: Vertical spacing between cells in mm */
@@ -344,6 +346,15 @@ export type PrinterStatus =
   | 'LowToner'
   | 'DoorOpen'
   | 'Error';
+
+/** Printable-area query for the selected printer and oriented paper size. */
+export interface PrinterMarginRequest {
+  printerName: string; paperSize: PaperSizeId; orientation: PageOrientation;
+  widthMm: number; heightMm: number;
+}
+export type PrinterMarginResult =
+  | { status: 'available'; source: 'hardware' | 'virtual' | 'simulated-virtual'; marginsMm: MarginsMm }
+  | { status: 'unavailable'; reason: string };
 
 export interface PrinterCapabilities {
   supportedPapers: PaperSizeId[];

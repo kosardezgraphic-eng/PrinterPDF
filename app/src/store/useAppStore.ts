@@ -14,6 +14,7 @@ import type {
   PageRotation,
   PageTransform,
   PrinterInfo,
+  PrinterMarginResult,
   PrinterProfileSettings,
   PrintJobRequest,
   PspProjectFile,
@@ -34,7 +35,7 @@ import {
   triggerBlobDownload,
 } from '../engine/pdfService';
 import { centeredAspectCrop, cropToMm, IDENTITY_TRANSFORM, type Insets } from '../engine/pageGeometry';
-import { computeImpositionSheets, sortCellsByLayer } from '../engine/layoutEngine';
+import { computeImpositionSheets, getSheetDimensionsMm, sortCellsByLayer } from '../engine/layoutEngine';
 import { ipcBridge, selectOptimalPrinter } from '../engine/ipcBridge';
 
 export type RibbonTabId =
@@ -81,6 +82,7 @@ export const DEFAULT_LAYOUT: LayoutSettings = {
   placementMode: 'sequential',
   uniqueScale: false,
   marginsMm: { top: 10, right: 10, bottom: 10, left: 10 },
+  marginMode: 'printer',
   horizontalGutterMm: 6,
   verticalGutterMm: 6,
   scaleMode: 'fit',
@@ -187,6 +189,7 @@ interface AppState {
   // Printers & Spooler
   printers: PrinterInfo[];
   selectedPrinterName: string;
+  printerMargins: PrinterMarginResult | { status: 'loading' };
   spoolerJobs: SpoolerJobInfo[];
 
   // Batch Queue
@@ -237,7 +240,7 @@ interface AppState {
 
   // Page Operations (A3 - A4)
   togglePageSelectedForPrint: (pageId: string) => void;
-  invertHighlightedPrintSelection: () => void;
+  invertAllPrintSelection: () => void;
   highlightPage: (pageId: string, multiSelect?: boolean, rangeSelect?: boolean) => void;
   requestPreviewPage: (pageId: string) => void;
   focusPageFromPreview: (pageId: string | null, preserveSelection?: boolean, occurrenceKey?: string) => void;
@@ -267,6 +270,8 @@ interface AppState {
   updateLayout: (patch: Partial<LayoutSettings>, recordUndo?: boolean) => void;
   setNUpMatrix: (rows: number, cols: number, placementMode?: LayoutSettings['placementMode']) => void;
   updateMargins: (patch: Partial<LayoutSettings['marginsMm']>) => void;
+  resetMarginsToPrinter: () => void;
+  refreshPrinterMargins: () => void;
   commitLayoutGuides: (patch: Partial<Pick<LayoutSettings, 'marginsMm' | 'horizontalGutterMm' | 'verticalGutterMm'>>) => void;
   updateEffects: (patch: Partial<EffectsSettings>, recordUndo?: boolean) => void;
   toggleGlobalInvert: () => void;
@@ -375,6 +380,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     printers: [],
     selectedPrinterName: '',
+    printerMargins: { status: 'unavailable', reason: 'No printer selected' },
     spoolerJobs: [],
 
     batchQueue: INITIAL_BATCH_QUEUE,
@@ -431,6 +437,7 @@ export const useAppStore = create<AppState>((set, get) => {
           message: error instanceof Error ? error.message : String(error),
         });
       }
+      const previousMarginKey = marginKey(get());
       const defaultPrinter =
         printers.find((p) => p.isDefault)?.name ?? printers[0]?.name ?? '';
       set({
@@ -441,6 +448,7 @@ export const useAppStore = create<AppState>((set, get) => {
         pages: sample?.pages ?? [],
         bookmarks: sample?.bookmarks ?? [],
       });
+      if (marginKey(get()) === previousMarginKey) refreshPrinterMargins();
     },
 
     loadSampleWorkspace: async () => {
@@ -574,12 +582,12 @@ export const useAppStore = create<AppState>((set, get) => {
       pushUndo('تغییر وضعیت چاپ صفحات', 'Change page print selection', before, captureSnapshot(get()));
     },
 
-    invertHighlightedPrintSelection: () => {
+    invertAllPrintSelection: () => {
       const state = get();
-      if (!state.pages.some(page => page.isHighlighted)) return;
+      if (!state.pages.length) return;
       const before = captureSnapshot(state);
-      set({ pages:state.pages.map(page => page.isHighlighted ? {...page, selectedForPrint:!page.selectedForPrint} : page) });
-      pushUndo('معکوس کردن وضعیت چاپ صفحات انتخاب‌شده', 'Invert selected pages print selection', before, captureSnapshot(get()));
+      set({ pages:state.pages.map(page => ({...page, selectedForPrint:!page.selectedForPrint})) });
+      pushUndo('معکوس کردن وضعیت چاپ همه صفحات', 'Invert all pages print selection', before, captureSnapshot(get()));
     },
 
     // Navigation is deliberately separate from edits and sidebar multi-selection.
@@ -1100,7 +1108,7 @@ export const useAppStore = create<AppState>((set, get) => {
     updateLayout: (patch, recordUndo = true) => {
       const before = captureSnapshot(get());
       set((state) => ({
-        layout: { ...state.layout, ...patch },
+        layout: { ...state.layout, ...patch, ...(patch.marginsMm && !patch.marginMode ? {marginMode: 'custom' as const} : {}) },
         activeSheetIndex: 0,
       }));
       if (recordUndo) {
@@ -1137,7 +1145,8 @@ export const useAppStore = create<AppState>((set, get) => {
 
     commitLayoutGuides: (patch) => {
       const before = captureSnapshot(get());
-      set(state => ({ layout: { ...state.layout, ...patch } }));
+      set(state => ({ layout: { ...state.layout, ...patch,
+        ...(patch.marginsMm && Object.keys(patch.marginsMm).some(key => patch.marginsMm![key as keyof typeof patch.marginsMm] !== state.layout.marginsMm[key as keyof typeof state.layout.marginsMm]) ? {marginMode:'custom' as const} : {}) } }));
       pushUndo('تغییر حاشیه و فاصله‌ها', 'Adjust margins and gutters', before, captureSnapshot(get()));
     },
 
@@ -1146,6 +1155,7 @@ export const useAppStore = create<AppState>((set, get) => {
       set((state) => ({
         layout: {
           ...state.layout,
+          marginMode: 'custom',
           marginsMm: {
             ...state.layout.marginsMm,
             ...patch,
@@ -1153,6 +1163,16 @@ export const useAppStore = create<AppState>((set, get) => {
         },
       }));
       pushUndo('تغییر حاشیه‌ها', 'Update margins', before, captureSnapshot(get()));
+    },
+
+    refreshPrinterMargins: () => refreshPrinterMargins(),
+
+    resetMarginsToPrinter: () => {
+      const state = get();
+      if (state.printerMargins.status !== 'available') return;
+      const before = captureSnapshot(state);
+      set({ layout: { ...state.layout, marginMode:'printer', marginsMm: { ...state.printerMargins.marginsMm } } });
+      pushUndo('بازنشانی حاشیه چاپگر', 'Reset printer margins', before, captureSnapshot(get()));
     },
 
     updateEffects: (patch, recordUndo = false) => {
@@ -1307,8 +1327,9 @@ export const useAppStore = create<AppState>((set, get) => {
         if (!parsed.pages || !parsed.layout) {
           throw new Error('INVALID_PSP');
         }
+        const previousMarginKey = marginKey(get());
         set({
-          layout: parsed.layout,
+          layout: { ...parsed.layout, marginMode: parsed.layout.marginMode ?? 'custom' },
           effects: parsed.effects ?? DEFAULT_EFFECTS,
           watermark: parsed.watermark ?? getDefaultWatermarkSettings(),
           pageNumbering: parsed.pageNumbering ?? getDefaultPageNumberSettings(),
@@ -1317,6 +1338,7 @@ export const useAppStore = create<AppState>((set, get) => {
           bookmarks: parsed.bookmarks ?? [],
           activeSheetIndex: 0,
         });
+        if (get().layout.marginMode === 'printer' && marginKey(get()) === previousMarginKey) refreshPrinterMargins();
         get().addToast({
           type: 'success',
           title:
@@ -1366,7 +1388,9 @@ export const useAppStore = create<AppState>((set, get) => {
     setDefaultPrinter: async (printerName) => {
       await ipcBridge.setDefaultPrinter(printerName);
       const printers = await ipcBridge.listPrinters();
+      const previousName = get().selectedPrinterName;
       set({ printers, selectedPrinterName: printerName });
+      if (previousName === printerName) refreshPrinterMargins();
     },
 
     simulatePrinterStatusChange: async (printerName, status) => {
@@ -1550,4 +1574,38 @@ export const useAppStore = create<AppState>((set, get) => {
       set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
     },
   };
+});
+
+// A single subscription covers printer selection, initialization, project restore and
+// undo/redo. Results are keyed to the exact oriented media; old responses are discarded.
+let printerMarginSequence = 0;
+const marginKey = (state: AppState) => JSON.stringify([state.selectedPrinterName, state.layout.paperSize,
+  state.layout.orientation, state.layout.customWidthMm, state.layout.customHeightMm]);
+function refreshPrinterMargins() {
+  const state = useAppStore.getState();
+  const sequence = ++printerMarginSequence;
+  const key = marginKey(state);
+  if (!state.selectedPrinterName) {
+    useAppStore.setState({printerMargins:{status:'unavailable',reason:'No printer selected'}});
+    return;
+  }
+  const request = {printerName:state.selectedPrinterName, paperSize:state.layout.paperSize,
+    orientation:state.layout.orientation, ...getSheetDimensionsMm(state.layout)};
+  useAppStore.setState({printerMargins:{status:'loading'}});
+  void ipcBridge.getPrinterMargins(request).then(result => {
+    const current = useAppStore.getState();
+    if (sequence !== printerMarginSequence || marginKey(current) !== key) return;
+    const margins = result.status === 'available' ? result.marginsMm : null;
+    const valid = margins && [margins.top,margins.right,margins.bottom,margins.left].every(v => Number.isFinite(v) && v >= 0) &&
+      margins.left + margins.right < request.widthMm && margins.top + margins.bottom < request.heightMm;
+    const safe: PrinterMarginResult = result.status === 'available' && !valid ? {status:'unavailable',reason:'Invalid printer margins'} : result;
+    useAppStore.setState({printerMargins:safe, ...(safe.status === 'available' && current.layout.marginMode === 'printer' ?
+      {layout:{...current.layout,marginsMm:{...safe.marginsMm}}} : {})});
+  }).catch(error => {
+    if (sequence === printerMarginSequence && marginKey(useAppStore.getState()) === key)
+      useAppStore.setState({printerMargins:{status:'unavailable',reason:error instanceof Error ? error.message : String(error)}});
+  });
+}
+useAppStore.subscribe((state, previous) => {
+  if (marginKey(state) !== marginKey(previous)) refreshPrinterMargins();
 });
