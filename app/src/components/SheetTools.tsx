@@ -38,10 +38,10 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, onDr
   const cellW = Math.max(5, (Math.max(10,sheet.widthMm-margins.left-margins.right)-(cols-1)*Math.max(0,layout.horizontalGutterMm))/cols);
   const cellH = Math.max(5, (Math.max(10,sheet.heightMm-margins.top-margins.bottom)-(rows-1)*Math.max(0,layout.verticalGutterMm))/rows);
   const guides: { guide:Guide; x:number; y:number; label:string; cursor:string }[] = [
-    {guide:{type:'margin',side:'left'},x:margins.left,y:sheet.heightMm/2,label:fa?'حاشیه چپ':'Left margin',cursor:'ew-resize'},
-    {guide:{type:'margin',side:'right'},x:sheet.widthMm-margins.right,y:sheet.heightMm/2,label:fa?'حاشیه راست':'Right margin',cursor:'ew-resize'},
-    {guide:{type:'margin',side:'top'},x:sheet.widthMm/2,y:margins.top,label:fa?'حاشیه بالا':'Top margin',cursor:'ns-resize'},
-    {guide:{type:'margin',side:'bottom'},x:sheet.widthMm/2,y:sheet.heightMm-margins.bottom,label:fa?'حاشیه پایین':'Bottom margin',cursor:'ns-resize'},
+    {guide:{type:'margin',side:'left'},x:margins.left,y:sheet.heightMm/4,label:fa?'حاشیه چپ':'Left margin',cursor:'ew-resize'},
+    {guide:{type:'margin',side:'right'},x:sheet.widthMm-margins.right,y:sheet.heightMm/4,label:fa?'حاشیه راست':'Right margin',cursor:'ew-resize'},
+    {guide:{type:'margin',side:'top'},x:sheet.widthMm/4,y:margins.top,label:fa?'حاشیه بالا':'Top margin',cursor:'ns-resize'},
+    {guide:{type:'margin',side:'bottom'},x:sheet.widthMm/4,y:sheet.heightMm-margins.bottom,label:fa?'حاشیه پایین':'Bottom margin',cursor:'ns-resize'},
     ...Array.from({length:cols-1},(_,index) => ({guide:{type:'gutter',axis:'horizontal',index} as Guide,
       x:margins.left+(index+1)*cellW+(index+1)*Math.max(0,layout.horizontalGutterMm),y:margins.top+(sheet.heightMm-margins.top-margins.bottom)*.35,
       label:fa?`فاصله ستون‌ها ${index+1} (همه ستون‌ها)`:`Column gutter ${index+1} (all columns)`,cursor:'ew-resize'})),
@@ -49,14 +49,14 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, onDr
       x:margins.left+(sheet.widthMm-margins.left-margins.right)*.35,y:margins.top+(index+1)*cellH+(index+1)*Math.max(0,layout.verticalGutterMm),
       label:fa?`فاصله ردیف‌ها ${index+1} (همه ردیف‌ها)`:`Row gutter ${index+1} (all rows)`,cursor:'ns-resize'})),
   ];
-  return <div ref={rectRef} data-layout-guides className="pointer-events-none absolute inset-0 z-30">
+  return <div ref={rectRef} data-layout-guides className="pointer-events-none absolute inset-0 z-[15]">
     <div className="absolute border border-dashed border-emerald-600" style={{ left:margins.left*pxPerMm, right:margins.right*pxPerMm, top:margins.top*pxPerMm, bottom:margins.bottom*pxPerMm }} />
     {guides.filter(item => item.guide.type === 'gutter').map(item => <div key={`line-${item.label}`} className="absolute border-violet-600/80 border-dashed"
       style={item.guide.type === 'gutter' && item.guide.axis === 'horizontal'
         ? {left:item.x*pxPerMm, top:margins.top*pxPerMm, bottom:margins.bottom*pxPerMm, borderLeftWidth:1}
         : {top:item.y*pxPerMm, left:margins.left*pxPerMm, right:margins.right*pxPerMm, borderTopWidth:1}} />)}
     {guides.map(({guide,x,y,label,cursor}) => <button key={label} type="button" title={label} aria-label={label}
-      onPointerDown={e => begin(e,guide)} onPointerMove={move} onPointerUp={e => finish(e)} onPointerCancel={e => finish(e,true)}
+      onClick={e => e.stopPropagation()} onPointerDown={e => begin(e,guide)} onPointerMove={move} onPointerUp={e => finish(e)} onPointerCancel={e => finish(e,true)}
       onLostPointerCapture={e => finish(e,true)}
       style={{ left:x*pxPerMm, top:y*pxPerMm, cursor, touchAction:'none', transform:'translate(-50%,-50%)' }}
       className="pointer-events-auto absolute flex h-10 w-10 items-center justify-center rounded-full">

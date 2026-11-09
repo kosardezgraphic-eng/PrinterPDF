@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef } from 'react';
 import {
   FilePlus2,
   FolderOpen,
@@ -30,6 +30,7 @@ import {
   Trash2,
   FileDown,
 } from 'lucide-react';
+import { MatrixSizeFields } from './MatrixSizeFields';
 import { useAppStore, type RibbonTabId } from '../store/useAppStore';
 import { t } from '../i18n/translations';
 import {
@@ -87,12 +88,6 @@ export const Ribbon: React.FC = () => {
   } = useAppStore();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [showMatrixPicker, setShowMatrixPicker] = useState(false);
-  const [hoverMatrix, setHoverMatrix] = useState<{ r: number; c: number }>({
-    r: layout.rows,
-    c: layout.cols,
-  });
-
   const lang = settings.language;
   const tr = t(lang);
 
@@ -106,16 +101,6 @@ export const Ribbon: React.FC = () => {
     { id: 'batch', label: tr.ribbonTabs.batch, icon: <Layers className="h-3.5 w-3.5" /> },
     { id: 'printers', label: tr.ribbonTabs.printers, icon: <Printer className="h-3.5 w-3.5" /> },
     { id: 'view', label: tr.ribbonTabs.view, icon: <Eye className="h-3.5 w-3.5" /> },
-  ];
-
-  const nUpPresets: Array<{ label: string; r: number; c: number }> = [
-    { label: '1-Up (۱×۱)', r: 1, c: 1 },
-    { label: '2-Up (۱×۲)', r: 1, c: 2 },
-    { label: '4-Up (۲×۲)', r: 2, c: 2 },
-    { label: '6-Up (۲×۳)', r: 2, c: 3 },
-    { label: '8-Up (۲×۴)', r: 2, c: 4 },
-    { label: '9-Up (۳×۳)', r: 3, c: 3 },
-    { label: '16-Up (۴×۴)', r: 4, c: 4 },
   ];
 
   return (
@@ -143,6 +128,9 @@ export const Ribbon: React.FC = () => {
               <button
                 key={tab.id}
                 type="button"
+                aria-label={tab.label}
+                title={tab.label}
+                aria-pressed={active}
                 onClick={() => {
                   setActiveRibbonTab(tab.id);
                   if (ribbonCollapsed) setRibbonCollapsed(false);
@@ -154,7 +142,7 @@ export const Ribbon: React.FC = () => {
                 }`}
               >
                 {tab.icon}
-                <span>{tab.label}</span>
+                <span className="sr-only">{tab.label}</span>
                 {tab.id === 'effects' && effects.invert && (
                   <span className="h-2 w-2 rounded-full bg-fuchsia-400" />
                 )}
@@ -192,28 +180,31 @@ export const Ribbon: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
+                  title={lang === 'fa' ? 'افزودن فایل PDF / عکس' : 'Add PDF / Images'}
                   className="flex flex-col items-center gap-1 rounded-xl bg-sky-600/20 border border-sky-500/40 px-3.5 py-2 text-sky-300 hover:bg-sky-600/30 cursor-pointer"
                 >
                   <FilePlus2 className="h-5 w-5" />
-                  <span className="font-bold">
+                  <span className="sr-only">
                     {lang === 'fa' ? 'افزودن فایل PDF / عکس' : 'Add PDF / Images'}
                   </span>
                 </button>
                 <button
                   type="button"
                   onClick={() => void loadSampleWorkspace()}
+                  title={tr.quickBar.loadDemoJob}
                   className="flex flex-col items-center gap-1 rounded-xl border border-slate-700 bg-slate-800/80 px-3 py-2 text-slate-200 hover:bg-slate-700 cursor-pointer"
                 >
                   <BookOpen className="h-5 w-5 text-amber-400" />
-                  <span>{tr.quickBar.loadDemoJob}</span>
+                  <span className="sr-only">{tr.quickBar.loadDemoJob}</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => insertBlankPageAfter()}
+                  title={tr.sidebar.insertBlank}
                   className="flex flex-col items-center gap-1 rounded-xl border border-slate-700 bg-slate-800/80 px-3 py-2 text-slate-200 hover:bg-slate-700 cursor-pointer"
                 >
                   <Copy className="h-5 w-5 text-emerald-400" />
-                  <span>{tr.sidebar.insertBlank}</span>
+                  <span className="sr-only">{tr.sidebar.insertBlank}</span>
                 </button>
               </div>
 
@@ -221,20 +212,22 @@ export const Ribbon: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => void exportMergedOrImposedPdf(false)}
+                  title={lang === 'fa' ? 'ذخیره خروجی PDF' : 'Export Final PDF'}
                   className="flex flex-col items-center gap-1 rounded-xl border border-emerald-500/40 bg-emerald-600/15 px-3.5 py-2 text-emerald-300 hover:bg-emerald-600/25 cursor-pointer"
                 >
                   <FileDown className="h-5 w-5" />
-                  <span className="font-bold">
+                  <span className="sr-only">
                     {lang === 'fa' ? 'ذخیره خروجی PDF' : 'Export Final PDF'}
                   </span>
                 </button>
                 <button
                   type="button"
                   onClick={clearWorkspace}
+                  title={lang === 'fa' ? 'بستن همه اسناد' : 'Close All'}
                   className="flex flex-col items-center gap-1 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-rose-300 hover:bg-rose-500/20 cursor-pointer"
                 >
                   <Trash2 className="h-5 w-5" />
-                  <span>{lang === 'fa' ? 'بستن همه اسناد' : 'Close All'}</span>
+                  <span className="sr-only">{lang === 'fa' ? 'بستن همه اسناد' : 'Close All'}</span>
                 </button>
               </div>
             </>
@@ -243,85 +236,7 @@ export const Ribbon: React.FC = () => {
           {/* 2. PAGE LAYOUT / IMPOSITION TAB (D1 - D5) */}
           {activeRibbonTab === 'layout' && (
             <>
-              {/* Group D1: N-Up & Interactive 10x10 Matrix */}
-              <div className="relative flex items-center gap-1.5 border-e border-slate-800 pe-3">
-                <div className="flex flex-col gap-1">
-                  <span className="text-[10px] font-semibold text-slate-400">
-                    {lang === 'fa' ? 'چندصفحه در یک برگ (N-Up)' : 'Pages per Sheet (N-Up)'}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    {nUpPresets.map((preset) => {
-                      const isCurrent =
-                        layout.rows === preset.r && layout.cols === preset.c;
-                      return (
-                        <button
-                          key={preset.label}
-                          type="button"
-                          onClick={() => setNUpMatrix(preset.r, preset.c)}
-                          className={`rounded-lg px-2.5 py-1.5 text-xs font-bold transition cursor-pointer ${
-                            isCurrent
-                              ? 'bg-sky-600 text-white shadow'
-                              : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                          }`}
-                        >
-                          {preset.label}
-                        </button>
-                      );
-                    })}
-                    <button
-                      type="button"
-                      onClick={() => setShowMatrixPicker(!showMatrixPicker)}
-                      className="rounded-lg border border-sky-500/40 bg-sky-500/15 px-2.5 py-1.5 text-xs font-bold text-sky-300 hover:bg-sky-500/25 cursor-pointer"
-                    >
-                      {lang === 'fa'
-                        ? `ماتریس دلخواه (${layout.rows}×${layout.cols})`
-                        : `Grid (${layout.rows}×${layout.cols})`}
-                    </button>
-                  </div>
-                </div>
-
-                {/* 10x10 Interactive Grid Popover (D1) */}
-                {showMatrixPicker && (
-                  <div className="absolute top-14 start-0 z-50 rounded-2xl border border-slate-700 bg-slate-900 p-3 shadow-2xl">
-                    <div className="mb-2 flex items-center justify-between text-xs font-bold text-slate-200">
-                      <span>
-                        {lang === 'fa'
-                          ? `انتخاب ماتریس: ${hoverMatrix.r} سطر × ${hoverMatrix.c} ستون (${
-                              hoverMatrix.r * hoverMatrix.c
-                            }-Up)`
-                          : `Matrix: ${hoverMatrix.r} × ${hoverMatrix.c} (${
-                              hoverMatrix.r * hoverMatrix.c
-                            }-Up)`}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-10 gap-1">
-                      {Array.from({ length: 10 }, (_, rIdx) =>
-                        Array.from({ length: 10 }, (__, cIdx) => {
-                          const r = rIdx + 1;
-                          const c = cIdx + 1;
-                          const active = r <= hoverMatrix.r && c <= hoverMatrix.c;
-                          return (
-                            <button
-                              key={`${r}-${c}`}
-                              type="button"
-                              onMouseEnter={() => setHoverMatrix({ r, c })}
-                              onClick={() => {
-                                setNUpMatrix(r, c);
-                                setShowMatrixPicker(false);
-                              }}
-                              className={`h-4 w-4 rounded-xs border transition cursor-pointer ${
-                                active
-                                  ? 'border-sky-400 bg-sky-500'
-                                  : 'border-slate-700 bg-slate-800'
-                              }`}
-                            />
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
+              <MatrixSizeFields rows={layout.rows} cols={layout.cols} language={lang} onChange={setNUpMatrix} />
 
               {/* Group D2: Placement Mode (Sequential vs Step & Repeat) + Unique Scale */}
               <div className="flex flex-col gap-1 border-e border-slate-800 pe-3">

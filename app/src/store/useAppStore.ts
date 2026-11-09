@@ -199,6 +199,7 @@ interface AppState {
   sidebarTab: 'pages' | 'bookmarks';
   activeSheetIndex: number;
   sidebarReveal: { pageId: string; occurrenceKey?: string } | null;
+  previewPageRequest: { pageId: string } | null;
   zoomPercent: number;
   viewMode: PreviewViewMode;
   showRulers: boolean;
@@ -237,6 +238,7 @@ interface AppState {
   // Page Operations (A3 - A4)
   togglePageSelectedForPrint: (pageId: string) => void;
   highlightPage: (pageId: string, multiSelect?: boolean, rangeSelect?: boolean) => void;
+  requestPreviewPage: (pageId: string) => void;
   focusPageFromPreview: (pageId: string | null, preserveSelection?: boolean, occurrenceKey?: string) => void;
   selectAllForPrint: (selected: boolean) => void;
   selectOddEvenForPrint: (mode: 'odd' | 'even') => void;
@@ -380,6 +382,7 @@ export const useAppStore = create<AppState>((set, get) => {
     sidebarTab: 'pages',
     activeSheetIndex: 0,
     sidebarReveal: null,
+    previewPageRequest: null,
     zoomPercent: 100,
     viewMode: 'single',
     showRulers: true,
@@ -506,6 +509,7 @@ export const useAppStore = create<AppState>((set, get) => {
         bookmarks: [],
         layout: { ...get().layout, cellOverrides: {} },
         activeSheetIndex: 0,
+        previewPageRequest: null,
       });
       pushUndo('پاک‌سازی میز کار', 'Clear Workspace', before, captureSnapshot(get()));
     },
@@ -586,6 +590,10 @@ export const useAppStore = create<AppState>((set, get) => {
           sidebarReveal: target ? { pageId: target.id, occurrenceKey } : null,
         };
       });
+    },
+
+    requestPreviewPage: pageId => {
+      if (get().pages.some(page => page.id === pageId)) set({ previewPageRequest: { pageId } });
     },
 
     highlightPage: (pageId, multiSelect = false, rangeSelect = false) => {
