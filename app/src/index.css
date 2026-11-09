@@ -27,3 +27,9 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* The light UI currently uses a root inversion. Counter-invert complete paper
+   surfaces (not individual images) so their content and effects stay accurate. */
+.theme-light [data-color-accurate] {
+  filter: invert(1) hue-rotate(180deg);
+}

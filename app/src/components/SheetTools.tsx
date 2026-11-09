@@ -1,15 +1,16 @@
-import { useRef, useState, type PointerEvent } from 'react';
+import { useId, useRef, useState, type PointerEvent } from 'react';
 import type { ComputedSheetSide, LayoutSettings, MeasurementUnit } from '@shared/models';
 import { convertMmToUnit } from '../engine/layoutEngine';
 import { measurement, measureEndpoint, moveLayoutGuide, type Guide, type Point } from '../engine/sheetInteraction';
 
 interface GuideProps {
   sheet: ComputedSheetSide; layout: LayoutSettings; pxPerMm: number; spaceDown: boolean;
-  language: string; onDraft: (layout: LayoutSettings | null) => void;
+  language: string; unit: MeasurementUnit; onDraft: (layout: LayoutSettings | null) => void;
   onCommit: (layout: LayoutSettings) => void;
 }
 /** Global, uniform gutters are changed by dragging the trailing edge of a gap. */
-export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, onDraft, onCommit }: GuideProps) {
+export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit, onDraft, onCommit }: GuideProps) {
+  const guideId = useId();
   const dragging = useRef<{ pointer: number; x: number; y: number; scaleX: number; scaleY: number; guide: Guide; base: LayoutSettings } | null>(null);
   const rectRef = useRef<HTMLDivElement>(null);
   const begin = (e: PointerEvent<HTMLButtonElement>, guide: Guide) => {
@@ -55,7 +56,14 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, onDr
       style={item.guide.type === 'gutter' && item.guide.axis === 'horizontal'
         ? {left:item.x*pxPerMm, top:margins.top*pxPerMm, bottom:margins.bottom*pxPerMm, borderLeftWidth:1}
         : {top:item.y*pxPerMm, left:margins.left*pxPerMm, right:margins.right*pxPerMm, borderTopWidth:1}} />)}
-    {guides.map(({guide,x,y,label,cursor}) => <button key={label} type="button" title={label} aria-label={label}
+    {guides.map(({guide,x,y,label}, index) => {
+      const mm = guide.type === 'margin' ? margins[guide.side] : guide.axis === 'horizontal' ? layout.horizontalGutterMm : layout.verticalGutterMm;
+      const value = `${convertMmToUnit(mm,unit)} ${unit}`;
+      return <span key={`value-${label}`} id={`${guideId}-${index}`} data-guide-value={label} dir="ltr"
+        style={{left:Math.max(2,Math.min(sheet.widthMm*pxPerMm-56,x*pxPerMm+18)),top:Math.max(2,Math.min(sheet.heightMm*pxPerMm-20,y*pxPerMm-10))}}
+        className="absolute whitespace-nowrap rounded bg-white/90 px-1 text-[10px] font-semibold text-slate-800 shadow-sm">{value}</span>;
+    })}
+    {guides.map(({guide,x,y,label,cursor}, index) => <button key={label} type="button" aria-describedby={`${guideId}-${index}`} title={`${label}: ${convertMmToUnit(guide.type === 'margin' ? margins[guide.side] : guide.axis === 'horizontal' ? layout.horizontalGutterMm : layout.verticalGutterMm,unit)} ${unit}`} aria-label={label}
       onClick={e => e.stopPropagation()} onPointerDown={e => begin(e,guide)} onPointerMove={move} onPointerUp={e => finish(e)} onPointerCancel={e => finish(e,true)}
       onLostPointerCapture={e => finish(e,true)}
       style={{ left:x*pxPerMm, top:y*pxPerMm, cursor, touchAction:'none', transform:'translate(-50%,-50%)' }}

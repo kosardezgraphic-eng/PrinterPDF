@@ -6,6 +6,7 @@
 import {
   BlendMode,
   clip,
+  concatTransformationMatrix,
   endPath,
   popGraphicsState,
   pushGraphicsState,
@@ -25,7 +26,7 @@ import type {
   WatermarkSettings,
 } from '@shared/models';
 import { computeImpositionSheets, sortCellsByLayer } from './layoutEngine';
-import { pageCropFractions, rotateInsets } from './pageGeometry';
+import { normalizeAngle, pageCropFractions, rotateInsets } from './pageGeometry';
 import { shouldApplyEffectsToPage } from './effectsPipeline';
 import { formatPageNumberLabel, resolveTextMacros } from './watermarkEngine';
 import { globalThumbnailCache } from './pageCache';
@@ -579,8 +580,16 @@ export async function exportImposedPdf(params: {
         height: rotated ? contentWPt : contentHPt,
         rotate: degrees(-rotation),
       };
+      const extraRotation = normalizeAngle(cell.transform?.rotationDeg ?? 0);
+      const angle = -extraRotation * Math.PI / 180;
+      const cos = Math.cos(angle), sin = Math.sin(angle);
+      const cx = contentXPt + contentWPt / 2, cy = contentYPt + contentHPt / 2;
+      const rotateContent = () => {
+        if (extraRotation) outPage.pushOperators(concatTransformationMatrix(cos, sin, -sin, cos, cx - cos*cx + sin*cy, cy - sin*cx - cos*cy));
+      };
       outPage.pushOperators(pushGraphicsState());
       if (!cell.allowOverflow) outPage.pushOperators(rectangle(cellXPt, cellYPt, cellWPt, cellHPt), clip(), endPath());
+      rotateContent();
       if (srcPdf && cell.page.sourcePageNumber > 0) {
         const pageIdxZero = cell.page.sourcePageNumber - 1;
         if (pageIdxZero >= srcPdf.getPageCount()) {
@@ -666,6 +675,7 @@ export async function exportImposedPdf(params: {
       if (effectiveInvert) {
         outPage.pushOperators(pushGraphicsState());
         if (!cell.allowOverflow) outPage.pushOperators(rectangle(cellXPt, cellYPt, cellWPt, cellHPt), clip(), endPath());
+        rotateContent();
         outPage.drawRectangle({
           x: contentXPt,
           y: contentYPt,

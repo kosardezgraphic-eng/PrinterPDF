@@ -38,6 +38,35 @@ describe('sheet tool pointer interactions', () => {
     expect(container.querySelector('[data-layout-guides]')).toBeNull();
     expect(container.querySelectorAll('[aria-label^="move "]')).toHaveLength(0);
   });
+  it('shows unit-aware guide values on the active sheet and updates them during a drag', () => {
+    expect(container.querySelector('[data-guide-value]')).toBeNull();
+    act(() => (container.querySelector('[data-sheet-canvas-index]') as HTMLElement).click());
+    const value=() => container.querySelector('[data-guide-value="Left margin"]')!;
+    expect(value().textContent).toBe('10 mm');
+    expect(container.querySelector('[data-guide-value="Column gutter 1 (all columns)"]')?.textContent).toBe('6 mm');
+    const overlay=container.querySelector('[data-layout-guides]') as HTMLElement;
+    vi.spyOn(overlay,'getBoundingClientRect').mockReturnValue(rect);
+    const handle=container.querySelector('[aria-label="Left margin"]')!;
+    expect(handle.getAttribute('aria-describedby')).toBe(value().id);
+    pointer(handle,'pointerdown',20,300); pointer(handle,'pointermove',40,300);
+    expect(value().textContent).toBe('20 mm');
+    pointer(handle,'pointercancel',40,300); expect(value().textContent).toBe('10 mm');
+    act(() => useAppStore.setState({settings:{...useAppStore.getState().settings,unit:'cm'}}));
+    expect(value().textContent).toBe('1 cm');
+  });
+  it('shades the configured margin as a preview-only guide and resets margins with undo', () => {
+    const shading=container.querySelector('[data-layout-margin-shading]')!;
+    expect(shading.getAttribute('aria-label')).toContain('printer limits are unknown');
+    expect(shading.children).toHaveLength(5);
+    act(() => useAppStore.getState().updateMargins({left:25}));
+    const reset=Array.from(container.querySelectorAll('button')).find(b=>b.textContent==='Reset margins (app default)')!;
+    expect(reset.title).toContain('actual printer margins are unavailable');
+    act(() => reset.click());
+    expect(useAppStore.getState().layout.marginsMm).toEqual(DEFAULT_LAYOUT.marginsMm);
+    expect(useAppStore.getState().layout.horizontalGutterMm).toBe(6);
+    act(() => useAppStore.getState().undo());
+    expect(useAppStore.getState().layout.marginsMm.left).toBe(25);
+  });
   it('moves guides between clicked sheets and does not activate resize handles on paper', () => {
     act(() => useAppStore.setState({pages:[page,{...page,id:'p2'}],layout:{...useAppStore.getState().layout,rows:1,cols:1},viewMode:'continuous'}));
     const sheets=container.querySelectorAll<HTMLElement>('[data-sheet-canvas-index]');
@@ -80,6 +109,25 @@ describe('sheet tool pointer interactions', () => {
     const handle=container.querySelector('[aria-label="Column gutter 1 (all columns)"]')!;
     pointer(handle,'pointerdown',100,100,'touch'); pointer(handle,'pointermove',120,100,'touch'); pointer(handle,'pointercancel',120,100,'touch');
     expect(useAppStore.getState().layout.horizontalGutterMm).toBe(6);
+  });
+  it('applies a centered source aspect crop through the crop tool and supports undo', () => {
+    clickTool('Crop');
+    const width=container.querySelector<HTMLInputElement>('[aria-label="Crop ratio width"]')!;
+    const height=container.querySelector<HTMLInputElement>('[aria-label="Crop ratio height"]')!;
+    const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!;
+    act(() => {setter.call(width,'2');width.dispatchEvent(new Event('input',{bubbles:true}));});
+    expect(height.value).toBe('1');
+    const button=Array.from(container.querySelectorAll('button')).find(b=>b.textContent==='Apply centered crop')!;
+    act(() => button.click());
+    const crop=useAppStore.getState().pages[0].overrides?.cropBoxMm!;
+    expect((100-crop.left-crop.right)/(200-crop.top-crop.bottom)).toBeCloseTo(2);
+    act(() => useAppStore.getState().undo()); expect(useAppStore.getState().pages[0].overrides).toBeUndefined();
+    act(() => {setter.call(width,'0');width.dispatchEvent(new Event('input',{bubbles:true}));});
+    expect(button.disabled).toBe(true);
+    act(() => {setter.call(width,'10000');width.dispatchEvent(new Event('input',{bubbles:true}));});
+    act(() => button.click());
+    expect(container.querySelector('[role=alert]')?.textContent).toContain('cannot fit');
+    expect(useAppStore.getState().pages[0].overrides).toBeUndefined();
   });
   it('measures a shift-locked horizontal line without changing layout', () => {
     clickTool('Measure');

@@ -62,7 +62,11 @@ export interface SourceDocument {
   rawBytes?: Uint8Array;
 }
 
-export interface PageTransform { x: number; y: number; scaleX: number; scaleY: number }
+export interface PageTransform {
+  x: number; y: number; scaleX: number; scaleY: number;
+  /** Additional clockwise rotation of this occurrence around its center, in degrees. */
+  rotationDeg?: number;
+}
 export interface CellOverride { pageId: string; transform?: PageTransform; zIndex?: number; allowOverflow?: boolean }
 
 export interface PagePerPageOverrides {

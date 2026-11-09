@@ -6,6 +6,7 @@ import type { PageItem, SourceDocument } from '@shared/models';
 import { DEFAULT_LAYOUT, DEFAULT_SETTINGS, useAppStore } from '../store/useAppStore';
 import { PreviewWorkspace } from '../components/PreviewWorkspace';
 import { SidebarPages } from '../components/SidebarPages';
+import { computeImpositionSheets } from './layoutEngine';
 import { pageImageStyle } from '../components/PageContentImage';
 
 const makePage = (id: string, doc: string, highlighted = false): PageItem => ({
@@ -99,6 +100,13 @@ describe('preview and thumbnails', () => {
     expect(image().style.filter).toContain('invert');
     act(() => useAppStore.getState().undo());
     expect(image().style.filter).not.toContain('invert');
+  });
+  it('mirrors additional occurrence rotation in the thumbnail without replacing image effects', () => {
+    const state=useAppStore.getState(); const cell=computeImpositionSheets(state.pages,state.layout)[0].cells[0];
+    act(() => state.applyCellTransform('p1',cell.occurrenceKey!,{x:0,y:0,scaleX:1,scaleY:1,rotationDeg:45}));
+    const card=container.querySelector('[data-page-id="p1"]')!;
+    expect((card.querySelector('[data-thumbnail-content]') as HTMLElement).style.transform).toBe('rotate(45deg)');
+    expect((container.querySelector('[data-canvas-page-id="p1"] [data-page-content]') as HTMLElement).style.transform).toBe('rotate(45deg)');
   });
   it('uses the clicked cell in an N-up sheet and does not change print selection', () => {
     act(() => useAppStore.setState({ layout:{...useAppStore.getState().layout,cols:2}, viewMode:'grid' }));

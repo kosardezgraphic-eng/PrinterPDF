@@ -23,6 +23,8 @@ import {
 import { useAppStore, type PageEditScope } from '../store/useAppStore';
 import { PageCanvasCell, type CanvasTool } from './PageCanvasCell';
 import { LayoutGuides, MeasurementTool } from './SheetTools';
+import { AspectCropControls } from './AspectCropControls';
+import { DEFAULT_LAYOUT } from '../store/useAppStore';
 import { t } from '../i18n/translations';
 import {
   computeImpositionSheets,
@@ -71,6 +73,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     importFiles,
     loadSampleWorkspace,
     applyPageGeometry,
+    applyAspectRatioCrop,
     resetCellGeometry,
     commitLayoutGuides,
     selectPrinter,
@@ -378,6 +381,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
             {/* Actual Sheet Canvas */}
             <div
               data-sheet-canvas-index={sheetSide.sideIndex - 1}
+              data-color-accurate
               onClick={e => {
                 if ((canvasTool === 'move' || canvasTool === 'layout') && !previewOnlyPage) {
                   e.stopPropagation(); setActiveGuideSheet(sheetSide.sideIndex - 1); setCurrentOccurrenceKey(null);
@@ -410,16 +414,16 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
               }}
               className="relative overflow-hidden rounded-sm bg-white shadow-[0_20px_50px_rgba(0,0,0,0.65)] ring-1 ring-slate-300 transition-all duration-150"
             >
-              {/* Margin Guide Dashed Box */}
-              <div
-                style={{
-                  left: layout.marginsMm.left * basePxPerMm,
-                  top: layout.marginsMm.top * basePxPerMm,
-                  right: layout.marginsMm.right * basePxPerMm,
-                  bottom: layout.marginsMm.bottom * basePxPerMm,
-                }}
-                className="pointer-events-none absolute border border-dashed border-sky-500/35"
-              />
+              {/* The shaded area is the configured layout margin, not a measured printer hard margin. */}
+              <div data-layout-margin-shading aria-label={lang === 'fa' ? 'حاشیه تنظیم‌شدهٔ چیدمان؛ محدوده واقعی چاپگر نامشخص است' : 'Configured layout margin; actual printer limits are unknown'}
+                className="pointer-events-none absolute inset-0 z-10">
+                <div className="absolute inset-x-0 top-0 bg-slate-500/15" style={{height:layout.marginsMm.top*basePxPerMm}} />
+                <div className="absolute inset-x-0 bottom-0 bg-slate-500/15" style={{height:layout.marginsMm.bottom*basePxPerMm}} />
+                <div className="absolute left-0 bg-slate-500/15" style={{top:layout.marginsMm.top*basePxPerMm,bottom:layout.marginsMm.bottom*basePxPerMm,width:layout.marginsMm.left*basePxPerMm}} />
+                <div className="absolute right-0 bg-slate-500/15" style={{top:layout.marginsMm.top*basePxPerMm,bottom:layout.marginsMm.bottom*basePxPerMm,width:layout.marginsMm.right*basePxPerMm}} />
+                <div style={{left:layout.marginsMm.left*basePxPerMm,top:layout.marginsMm.top*basePxPerMm,right:layout.marginsMm.right*basePxPerMm,bottom:layout.marginsMm.bottom*basePxPerMm}}
+                  className="absolute border border-dashed border-slate-500/70" />
+              </div>
 
               {/* Transparent Mode Back-Side Ghost Overlay (J2) */}
               {pairedBackSide &&
@@ -542,7 +546,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 </div>
               )}
 
-              {(canvasTool === 'layout' || canvasTool === 'move') && activeGuideSheet === sheetSide.sideIndex - 1 && !previewOnlyPage && <LayoutGuides sheet={sheetSide} layout={layout} pxPerMm={basePxPerMm} spaceDown={spaceDown} language={lang}
+              {(canvasTool === 'layout' || canvasTool === 'move') && activeGuideSheet === sheetSide.sideIndex - 1 && !previewOnlyPage && <LayoutGuides sheet={sheetSide} layout={layout} pxPerMm={basePxPerMm} spaceDown={spaceDown} language={lang} unit={settings.unit}
                 onDraft={setDraftLayout} onCommit={next => commitLayoutGuides({ marginsMm:next.marginsMm, horizontalGutterMm:next.horizontalGutterMm, verticalGutterMm:next.verticalGutterMm })} />}
               {canvasTool === 'measure' && <MeasurementTool sheet={sheetSide} unit={settings.unit} language={lang} spaceDown={spaceDown} />}
 
@@ -706,6 +710,13 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
             <option value="all">{lang === 'fa' ? 'همه صفحات' : 'All pages'}</option>
           </select>
         </label>
+        {canvasTool === 'crop' && <AspectCropControls language={lang} disabled={!!previewOnlyPage || !pages.some(page => page.isHighlighted)} onApply={ratio => {
+          const page = pages.find(item => item.id === currentEditPageId && item.isHighlighted) ?? pages.find(item => item.isHighlighted);
+          return !!page && applyAspectRatioCrop(page.id, editScope, ratio);
+        }} />}
+        <button type="button" disabled={!!previewOnlyPage} title={lang === 'fa' ? 'حاشیه‌های ۱۰ میلی‌متری پیش‌فرض برنامه؛ حاشیه واقعی چاپگر در دسترس نیست' : 'Reset to the app default of 10 mm; actual printer margins are unavailable'} onClick={() => commitLayoutGuides({marginsMm:{...DEFAULT_LAYOUT.marginsMm}})}
+          className="rounded bg-slate-800 px-2 py-1.5 hover:bg-slate-700 disabled:opacity-50">{lang === 'fa' ? 'بازنشانی حاشیه (پیش‌فرض برنامه)' : 'Reset margins (app default)'}</button>
+        <span className="text-slate-400">{lang === 'fa' ? 'حد چاپگر نامشخص است' : 'Printer limits unknown'}</span>
         <button type="button" aria-label={lang === 'fa' ? 'بازنشانی برش و اندازه' : 'Reset crop and size'} title={lang === 'fa' ? 'بازنشانی برش و اندازه' : 'Reset crop and size'} disabled={!!previewOnlyPage || !pages.some(page => page.isHighlighted)} onClick={() => {
           const page = pages.find(item => item.id === currentEditPageId && item.isHighlighted) ?? pages.find(item => item.isHighlighted);
           if (!page) return;
