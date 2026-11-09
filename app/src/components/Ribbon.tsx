@@ -72,6 +72,7 @@ export const Ribbon: React.FC = () => {
     resetEffects,
     updateWatermark,
     updatePageNumbering,
+    addTextOverlay,
     exportMergedOrImposedPdf,
     insertBlankPageAfter,
     reversePageOrder,
@@ -586,6 +587,10 @@ export const Ribbon: React.FC = () => {
           {/* 4. INSERT TAB: WATERMARK & PAGE/BATES NUMBERING (F1 - F2) */}
           {activeRibbonTab === 'insert' && (
             <>
+              <button type="button" aria-label={lang==='fa'?'افزودن متن':'Add text'} disabled={!pages.length}
+                onClick={addTextOverlay} className="flex items-center gap-1 rounded-lg border border-sky-500 bg-sky-700 px-3 py-2 font-semibold text-white disabled:opacity-40">
+                <Type className="h-4 w-4" aria-hidden="true" />{lang==='fa'?'افزودن متن':'Add text'}
+              </button>
               {/* F1: Watermark */}
               <div className="flex items-center gap-2.5 border-e border-slate-800 pe-4">
                 <label className="flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 font-bold text-sky-300 cursor-pointer">

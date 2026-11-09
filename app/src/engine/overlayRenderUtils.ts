@@ -1,6 +1,6 @@
 import type { PageOverlay, PageOverlayNumbering, PageOverlayShape } from '@shared/models';
 
-export interface OverlayContext { pageIndex: number; total: number; pageId?: string; sheetIndex: number; sheetPageIds: string[] }
+export interface OverlayContext { pageIndex: number; total: number; pageId?: string; documentId?: string; sheetIndex: number; sheetPageIds: string[] }
 export interface OverlayRect { x: number; y: number; width: number; height: number; pixelsPerPoint: number }
 
 const selectedIdSets = new WeakMap<string[], Set<string>>();
@@ -14,6 +14,7 @@ export function matchesOverlayScope(overlay: PageOverlay, context: OverlayContex
   const n = overlay.target === 'sheet' ? context.sheetIndex : context.pageIndex;
   switch (overlay.targetScope) {
     case 'all': return true;
+    case 'document': case 'selected-documents': return overlay.kind === 'text' && !!context.documentId && !!overlay.targetDocumentIds?.includes(context.documentId);
     case 'odd': return n % 2 === 1;
     case 'even': return n % 2 === 0;
     case 'first': return n === 1;

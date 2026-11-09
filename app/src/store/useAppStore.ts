@@ -11,6 +11,8 @@ import type {
   LayoutSettings,
   PageItem,
   PageOverlay,
+  PageOverlayText,
+  TextScriptRange,
   PageNumberSettings,
   PageRotation,
   PageTransform,
@@ -39,6 +41,7 @@ import {
 import { centeredAspectCrop, cropToMm, IDENTITY_TRANSFORM, type Insets } from '../engine/pageGeometry';
 import { computeImpositionSheets, getSheetDimensionsMm, sortCellsByLayer } from '../engine/layoutEngine';
 import { ipcBridge, selectOptimalPrinter } from '../engine/ipcBridge';
+import { adjustScriptRanges, setScriptRange } from '../engine/textFormatting';
 
 export type RibbonTabId =
   | 'file'
@@ -178,6 +181,11 @@ const INITIAL_BATCH_QUEUE: BatchJobItem[] = [
   },
 ];
 
+export interface TextEditSession {
+  overlayId: string; occurrenceKey: string; text: string; ranges: TextScriptRange[];
+  selectionStart: number; selectionEnd: number;
+}
+
 interface AppState {
   // Core domain state
   documents: SourceDocument[];
@@ -189,6 +197,8 @@ interface AppState {
   pageNumbering: PageNumberSettings;
   overlays: PageOverlay[];
   selectedOverlayId: string | null;
+  activePageId: string | null;
+  textEdit: TextEditSession | null;
   settings: AppSettings;
 
   // Printers & Spooler
@@ -290,6 +300,13 @@ interface AppState {
   updateOverlay: (id: string, patch: Partial<PageOverlay>) => void;
   removeOverlay: (id: string) => void;
   selectOverlay: (id: string | null) => void;
+  addTextOverlay: () => void;
+  beginTextEdit: (id: string, occurrenceKey: string) => void;
+  updateTextDraft: (text: string, start: number, end: number) => void;
+  selectTextDraft: (start: number, end: number) => void;
+  styleTextSelection: (script: 'super' | 'sub') => void;
+  insertTextToken: (token: string) => void;
+  finishTextEdit: (cancel?: boolean) => void;
   updateSettings: (patch: Partial<AppSettings>) => void;
 
   // Export & Print & Project
@@ -391,6 +408,8 @@ export const useAppStore = create<AppState>((set, get) => {
     pageNumbering: getDefaultPageNumberSettings(),
     overlays: [],
     selectedOverlayId: null,
+    activePageId: null,
+    textEdit: null,
     settings: DEFAULT_SETTINGS,
 
     printers: [],
@@ -462,7 +481,7 @@ export const useAppStore = create<AppState>((set, get) => {
         documents: sample?.documents ?? [],
         pages: sample?.pages ?? [],
         bookmarks: sample?.bookmarks ?? [],
-        overlays: [], selectedOverlayId: null,
+        overlays: [], selectedOverlayId: null, textEdit: null, activePageId: null,
       });
       if (marginKey(get()) === previousMarginKey) refreshPrinterMargins();
     },
@@ -474,7 +493,7 @@ export const useAppStore = create<AppState>((set, get) => {
         documents: sample.documents,
         pages: sample.pages,
         bookmarks: sample.bookmarks,
-        overlays: [], selectedOverlayId: null,
+        overlays: [], selectedOverlayId: null, textEdit: null, activePageId: null,
         layout: { ...get().layout, cellOverrides: {} },
         activeSheetIndex: 0,
       });
@@ -535,7 +554,7 @@ export const useAppStore = create<AppState>((set, get) => {
         documents: [],
         pages: [],
         bookmarks: [],
-        overlays: [], selectedOverlayId: null,
+        overlays: [], selectedOverlayId: null, textEdit: null, activePageId: null,
         layout: { ...get().layout, cellOverrides: {} },
         activeSheetIndex: 0,
         previewPageRequest: null,
@@ -544,6 +563,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     undo: () => {
+      if (get().textEdit) get().finishTextEdit();
       const snap = historyManager.undo();
       if (!snap) return;
       const lang = get().settings.language;
@@ -567,6 +587,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     redo: () => {
+      if (get().textEdit) get().finishTextEdit();
       const snap = historyManager.redo();
       if (!snap) return;
       const lang = get().settings.language;
@@ -623,6 +644,7 @@ export const useAppStore = create<AppState>((set, get) => {
             return page.isHighlighted === highlighted ? page : { ...page, isHighlighted: highlighted };
           }),
           documents: target ? state.documents.map(doc => doc.id === target.documentId && doc.collapsed ? { ...doc, collapsed: false } : doc) : state.documents,
+          activePageId: target?.id ?? null,
           sidebarTab: target ? 'pages' : state.sidebarTab,
           sidebarReveal: target ? { pageId: target.id, occurrenceKey } : null,
         };
@@ -630,7 +652,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     requestPreviewPage: pageId => {
-      if (get().pages.some(page => page.id === pageId)) set({ previewPageRequest: { pageId } });
+      if (get().pages.some(page => page.id === pageId)) set({ previewPageRequest: { pageId }, activePageId: pageId });
     },
 
     highlightPage: (pageId, multiSelect = false, rangeSelect = false) => {
@@ -649,6 +671,7 @@ export const useAppStore = create<AppState>((set, get) => {
             targetIndex
           );
           return {
+            activePageId: pageId,
             pages: state.pages.map((p, idx) => ({
               ...p,
               isHighlighted: idx >= start && idx <= end,
@@ -658,6 +681,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
         if (multiSelect) {
           return {
+            activePageId: pageId,
             pages: state.pages.map((p) =>
               p.id === pageId ? { ...p, isHighlighted: !p.isHighlighted } : p
             ),
@@ -665,6 +689,7 @@ export const useAppStore = create<AppState>((set, get) => {
         }
 
         return {
+          activePageId: pageId,
           pages: state.pages.map((p) => ({
             ...p,
             isHighlighted: p.id === pageId,
@@ -1295,12 +1320,67 @@ export const useAppStore = create<AppState>((set, get) => {
       pushUndo('ویرایش لایه', 'Edit overlay', before, captureSnapshot(get()));
     },
     removeOverlay: (id) => {
+      if(get().textEdit?.overlayId===id) get().finishTextEdit();
       const state=get(); if(!state.overlays.some(item=>item.id===id)) return;
       const before=captureSnapshot(state);
       set({overlays:state.overlays.filter(item=>item.id!==id),selectedOverlayId:state.selectedOverlayId===id?null:state.selectedOverlayId});
       pushUndo('حذف لایه', 'Remove overlay', before, captureSnapshot(get()));
     },
-    selectOverlay: id => set({selectedOverlayId:id}),
+    selectOverlay: id => {
+      if (get().textEdit && get().textEdit?.overlayId !== id) get().finishTextEdit();
+      set({selectedOverlayId:id});
+    },
+    addTextOverlay: () => {
+      if(get().textEdit) get().finishTextEdit();
+      const state=get();
+      const page=state.pages.find(p=>p.id===state.activePageId) ?? state.pages.find(p=>p.isHighlighted) ?? state.pages.find(p=>p.selectedForPrint) ?? state.pages[0];
+      if(!page)return;
+      const id=globalThis.crypto?.randomUUID?.() ?? `text-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const item:PageOverlayText={id,kind:'text',target:'page',targetScope:'document',targetDocumentIds:[page.documentId],targetPageIds:[],targetSheetIndex:1,
+        xPercent:25,yPercent:25,widthPercent:50,heightPercent:15,opacity:1,rotation:0,text:'',fontSize:18,fontFamily:'Vazirmatn',color:'#000000',
+        bold:false,italic:false,underline:false,align:state.settings.language==='fa'?'right':'left',lineHeight:1.25,wordSpacingPt:0,letterSpacingPt:0};
+      const layout=page.selectedForPrint ? state.layout : {...state.layout,duplexMode:'none' as const};
+      const sheets=computeImpositionSheets(page.selectedForPrint ? state.pages : [{...page,selectedForPrint:true}],layout);
+      const sheet=sheets.find(s=>s.cells.some(c=>c.page?.id===page.id));
+      const cell=sheet?.cells.find(c=>c.page?.id===page.id);
+      if(!sheet || !cell)return;
+      get().addOverlay(item);
+      set({activePageId:page.id,previewPageRequest:{pageId:page.id},activeSheetIndex:sheet.sideIndex-1,
+        textEdit:{overlayId:id,occurrenceKey:`${id}-${cell.occurrenceKey??cell.cellIndex}`,text:'',ranges:[],selectionStart:0,selectionEnd:0}});
+    },
+    beginTextEdit: (id, occurrenceKey) => {
+      const existing=get().textEdit;
+      if(existing?.overlayId===id && existing.occurrenceKey===occurrenceKey)return;
+      if(existing)get().finishTextEdit();
+      const item=get().overlays.find(o=>o.id===id);
+      if(!item || item.kind!=='text')return;
+      set({selectedOverlayId:id,textEdit:{overlayId:id,occurrenceKey,text:item.text,ranges:item.scriptRanges??[],selectionStart:0,selectionEnd:0}});
+    },
+    updateTextDraft: (text,start,end) => set(state=>{
+      const edit=state.textEdit;if(!edit)return state;
+      return {textEdit:{...edit,text,ranges:adjustScriptRanges(edit.text,text,edit.ranges),selectionStart:start,selectionEnd:end}};
+    }),
+    selectTextDraft: (start,end) => set(state=>state.textEdit && (state.textEdit.selectionStart!==start || state.textEdit.selectionEnd!==end)?{textEdit:{...state.textEdit,selectionStart:start,selectionEnd:end}}:state),
+    styleTextSelection: script => set(state=>{
+      const edit=state.textEdit;if(!edit)return state;
+      return {textEdit:{...edit,ranges:setScriptRange(edit.text,edit.ranges,edit.selectionStart,edit.selectionEnd,script)}};
+    }),
+    insertTextToken: token => set(state=>{
+      const edit=state.textEdit;if(!edit)return state;
+      const text=edit.text.slice(0,edit.selectionStart)+token+edit.text.slice(edit.selectionEnd);
+      const cursor=edit.selectionStart+token.length;
+      return {textEdit:{...edit,text,ranges:adjustScriptRanges(edit.text,text,edit.ranges),selectionStart:cursor,selectionEnd:cursor}};
+    }),
+    finishTextEdit: (cancel=false) => {
+      const state=get(),edit=state.textEdit;if(!edit)return;
+      const item=state.overlays.find(o=>o.id===edit.overlayId);
+      set({textEdit:null});
+      if(cancel || !item || item.kind!=='text')return;
+      if(item.text===edit.text && JSON.stringify(item.scriptRanges??[])===JSON.stringify(edit.ranges))return;
+      const before=captureSnapshot(state);
+      set({overlays:get().overlays.map(o=>o.id===item.id?{...item,text:edit.text,scriptRanges:edit.ranges}:o)});
+      pushUndo('ویرایش نوشته', 'Edit text', before, captureSnapshot(get()));
+    },
 
     updateSettings: (patch) => {
       set((state) => {
@@ -1311,6 +1391,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     exportMergedOrImposedPdf: async (onlyHighlighted = false) => {
+      if(get().textEdit)get().finishTextEdit();
       const state = get();
       const targetPages = onlyHighlighted
         ? state.pages.filter((p) => p.isHighlighted)
@@ -1352,15 +1433,19 @@ export const useAppStore = create<AppState>((set, get) => {
           type: 'success',
           title:
             state.settings.language === 'fa'
-              ? `فایل PDF نهایی (${fileName}) با کیفیت برداری ساخته و دانلود شد`
-              : `Vector PDF (${fileName}) generated and downloaded`,
+              ? `فایل PDF نهایی (${fileName}) ساخته و دانلود شد`
+              : `PDF (${fileName}) generated and downloaded`,
         });
+      } catch (error) {
+        state.addToast({type:'error',title:state.settings.language==='fa'?'ساخت PDF ناموفق بود':'PDF export failed',
+          message:error instanceof Error?error.message:String(error)});
       } finally {
         set({ isExportingPdf: false, exportProgress: 0 });
       }
     },
 
     savePspProject: () => {
+      if(get().textEdit)get().finishTextEdit();
       const state = get();
       const project: PspProjectFile = {
         version: '1.0.0',
@@ -1404,7 +1489,7 @@ export const useAppStore = create<AppState>((set, get) => {
           watermark: parsed.watermark ?? getDefaultWatermarkSettings(),
           pageNumbering: parsed.pageNumbering ?? getDefaultPageNumberSettings(),
           overlays: Array.isArray(parsed.overlays) ? parsed.overlays : [],
-          selectedOverlayId: null,
+          selectedOverlayId: null, textEdit: null, activePageId: null,
           documents: parsed.documents as SourceDocument[],
           pages: parsed.pages,
           bookmarks: parsed.bookmarks ?? [],

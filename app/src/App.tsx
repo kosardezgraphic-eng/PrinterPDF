@@ -12,7 +12,8 @@ import { TextControlPanel } from './components/TextControlPanel';
 export const App: React.FC = () => {
   const {
     settings,
-    activeRibbonTab,
+    selectedOverlayId,
+    overlays,
     pages,
     zoomPercent,
     initializeWorkspace,
@@ -176,7 +177,7 @@ export const App: React.FC = () => {
         <div className="flex flex-1 overflow-hidden">
           <SidebarPages />
           <PreviewWorkspace onCursorMoveMm={setCursorPos} />
-          {activeRibbonTab === 'insert' && <TextControlPanel />}
+          {selectedOverlayId && overlays.some(o=>o.id===selectedOverlayId && o.kind==='text') && <TextControlPanel />}
         </div>
         <StatusBar cursorPos={cursorPos} />
         <ModalsAndToasts />
