@@ -21,7 +21,7 @@ beforeEach(() => {
     marginsMm:{top:0,bottom:0,left:0,right:0},horizontalGutterMm:0,verticalGutterMm:0},activeSheetIndex:0,viewMode:'single'});
  container=document.createElement('div');document.body.appendChild(container);root=createRoot(container);
  act(() => root.render(React.createElement(PreviewWorkspace,{onCursorMoveMm:()=>{}})));
- const button=Array.from(container.querySelectorAll('button')).find(b => b.textContent?.trim()==='Move / resize')!; act(() => button.click());
+ const first=container.querySelector('[data-canvas-page-id="red"] > div') as HTMLElement; act(() => first.click());
 });
 afterEach(() => {act(() => root.unmount());container.remove();vi.restoreAllMocks();});
 
@@ -67,7 +67,8 @@ describe('matrix layer interaction', () => {
   act(() => useAppStore.setState({pages:[makePage('red')],layout:{...useAppStore.getState().layout,placementMode:'step-and-repeat'}}));
   const copies=container.querySelectorAll('[data-canvas-page-id="red"]');
   expect(copies).toHaveLength(2);
-  const second=copies[1].firstElementChild!;
+  const second=copies[1].firstElementChild as HTMLElement;
+  act(() => second.click());
   pointer(second,'pointerdown',120,20);pointer(second,'pointermove',140,20);pointer(second,'pointerup',140,20);
   const cells=computeImpositionSheets(useAppStore.getState().pages,useAppStore.getState().layout)[0].cells;
   expect(cells[0].contentXMm).toBeCloseTo(0);

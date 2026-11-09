@@ -6,7 +6,7 @@ import { dragCrop, IDENTITY_TRANSFORM, pageCropFractions, resizeRect, resizeProp
 import { PageContentImage } from './PageContentImage';
 import { useAppStore } from '../store/useAppStore';
 
-export type CanvasTool = 'select' | 'move' | 'crop' | 'layout' | 'measure';
+export type CanvasTool = 'move' | 'crop' | 'layout' | 'measure';
 const HANDLES: { id: Handle; left: string; top: string; cursor: string }[] = [
   { id:'nw', left:'0%', top:'0%', cursor:'nwse-resize' }, { id:'n', left:'50%', top:'0%', cursor:'ns-resize' },
   { id:'ne', left:'100%', top:'0%', cursor:'nesw-resize' }, { id:'e', left:'100%', top:'50%', cursor:'ew-resize' },
@@ -15,7 +15,7 @@ const HANDLES: { id: Handle; left: string; top: string; cursor: string }[] = [
 ];
 
 type Gesture = { x: number; y: number; pointerId: number; handle: Handle | 'move'; rect: Rect; transform: PageTransform };
-interface Props { cell: ComputedCellPlacement; sheetIndex: number; pxPerMm: number; tool: CanvasTool; scope: PageEditScope; spaceDown: boolean; onCurrentPage: (id: string, preserveSelection: boolean, occurrenceKey: string) => void }
+interface Props { cell: ComputedCellPlacement; sheetIndex: number; isActive: boolean; pxPerMm: number; tool: CanvasTool; scope: PageEditScope; spaceDown: boolean; onCurrentPage: (id: string, preserveSelection: boolean, occurrenceKey: string) => void }
 
 /** Limit resize preview to exactly the same scale range as the stored transform. */
 function resizeForMove(rect: Rect, handle: Handle, dx: number, dy: number, transform: PageTransform): Rect {
@@ -33,7 +33,7 @@ function resizeForMove(rect: Rect, handle: Handle, dx: number, dy: number, trans
     y:handle.includes('n') ? rect.y+rect.height-height : rect.y, width, height };
 }
 
-export function PageCanvasCell({ cell, sheetIndex, pxPerMm, tool, scope, spaceDown, onCurrentPage }: Props) {
+export function PageCanvasCell({ cell, sheetIndex, isActive, pxPerMm, tool, scope, spaceDown, onCurrentPage }: Props) {
   const effects = useAppStore(state => state.effects);
   const language = useAppStore(state => state.settings.language);
   const applyPageGeometry = useAppStore(state => state.applyPageGeometry);
@@ -44,12 +44,25 @@ export function PageCanvasCell({ cell, sheetIndex, pxPerMm, tool, scope, spaceDo
   const [delta, setDelta] = useState({ x:0, y:0 });
   const [active, setActive] = useState(false);
   const [menu, setMenu] = useState<{x:number;y:number} | null>(null);
+  const longPress = useRef<{ pointerId:number; x:number; y:number; timer:ReturnType<typeof setTimeout> | null; fired:boolean } | null>(null);
+  const suppressTouchClick = useRef<{x:number;y:number} | null>(null);
+  const suppressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (longPress.current?.timer) clearTimeout(longPress.current.timer);
+    if (suppressTimer.current) clearTimeout(suppressTimer.current);
+  }, []);
+  useEffect(() => {
+    // Changing tools during a touch/drag cancels the pending gesture.
+    if (longPress.current?.timer) clearTimeout(longPress.current.timer);
+    longPress.current = null;
+    if (interaction.current) { interaction.current = null; setActive(false); setDelta({x:0,y:0}); }
+  }, [tool]);
   useEffect(() => {
     if (!menu) return;
     const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenu(null); };
     window.addEventListener('keydown',close); return () => window.removeEventListener('keydown',close);
   }, [menu]);
-  const canEdit = (tool === 'move' || tool === 'crop') && page.isHighlighted;
+  const canEdit = tool === 'move' ? isActive && page.isHighlighted : tool === 'crop' && page.isHighlighted;
   // Sheet coordinates rather than cell coordinates let a layer move anywhere on the sheet.
   const base: Rect = { x:cell.contentXMm*pxPerMm, y:cell.contentYMm*pxPerMm,
     width:cell.contentWidthMm*pxPerMm, height:cell.contentHeightMm*pxPerMm };
@@ -71,6 +84,13 @@ export function PageCanvasCell({ cell, sheetIndex, pxPerMm, tool, scope, spaceDo
     setDelta({ x:0, y:0 }); setActive(true);
   };
   const move = (event: React.PointerEvent<HTMLElement>) => {
+    const press = longPress.current;
+    if (press && press.pointerId === event.pointerId) {
+      if (press.fired) { event.preventDefault(); event.stopPropagation(); return; }
+      if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > 8 && press.timer) {
+        clearTimeout(press.timer); press.timer = null;
+      }
+    }
     const start = interaction.current;
     if (!start || start.pointerId !== event.pointerId) return;
     event.preventDefault(); event.stopPropagation(); setDelta({ x:event.clientX-start.x, y:event.clientY-start.y });
@@ -81,7 +101,7 @@ export function PageCanvasCell({ cell, sheetIndex, pxPerMm, tool, scope, spaceDo
     event.preventDefault(); event.stopPropagation();
     const dx = event.clientX-start.x, dy = event.clientY-start.y;
     interaction.current = null; setActive(false); setDelta({ x:0, y:0 });
-    if (canceled || Math.abs(dx) + Math.abs(dy) < 0.5) return;
+    if (canceled || Math.hypot(dx, dy) < (event.pointerType === 'touch' ? 8 : 0.5)) return;
     if (tool === 'crop' && start.handle !== 'move') {
       applyPageGeometry(page.id, scope, { kind:'crop', crop:dragCrop(pageCropFractions(page), cell.effectiveRotation, start.handle, dx, dy, start.rect.width, start.rect.height) });
     } else if (tool === 'move') {
@@ -97,8 +117,50 @@ export function PageCanvasCell({ cell, sheetIndex, pxPerMm, tool, scope, spaceDo
       else applyPageGeometry(page.id,scope,{kind:'transform',transform});
     }
   };
-  const pointerEvents = { onPointerMove:move, onPointerUp:(e: React.PointerEvent<HTMLElement>) => end(e), onPointerCancel:(e: React.PointerEvent<HTMLElement>) => end(e,true), onLostPointerCapture:(e: React.PointerEvent<HTMLElement>) => end(e,true) };
   const openMenu = (x:number,y:number) => { onCurrentPage(page.id,true,occurrenceKey); setMenu({x:Math.max(0,Math.min(window.innerWidth-205,x)),y:Math.max(0,Math.min(window.innerHeight-190,y))}); };
+  const consumeTouchClick = (event: React.MouseEvent<HTMLElement>) => {
+    const point = suppressTouchClick.current;
+    if (!point || Math.hypot(event.clientX - point.x, event.clientY - point.y) > 12) return false;
+    suppressTouchClick.current = null;
+    if (suppressTimer.current) clearTimeout(suppressTimer.current);
+    suppressTimer.current = null;
+    return true;
+  };
+  const finishPress = (event: React.PointerEvent<HTMLElement>, canceled = false) => {
+    const press = longPress.current;
+    if (press && press.pointerId === event.pointerId) {
+      if (press.timer) clearTimeout(press.timer);
+      longPress.current = null;
+      if (press.fired) {
+        event.preventDefault(); event.stopPropagation();
+        // A browser may synthesize a click at the release point after a long press.
+        suppressTouchClick.current = {x:event.clientX, y:event.clientY};
+        if (suppressTimer.current) clearTimeout(suppressTimer.current);
+        suppressTimer.current = setTimeout(() => { suppressTouchClick.current = null; suppressTimer.current = null; }, 700);
+        return;
+      }
+    }
+    end(event,canceled);
+  };
+  const startTouchHold = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.pointerType !== 'touch' || spaceDown || (tool !== 'move' && tool !== 'crop')) return;
+    if (longPress.current) {
+      if (longPress.current.timer) clearTimeout(longPress.current.timer);
+      longPress.current.timer = null;
+      return;
+    }
+    const press = { pointerId:event.pointerId, x:event.clientX, y:event.clientY, timer:null as ReturnType<typeof setTimeout> | null, fired:false };
+    longPress.current = press;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    press.timer = setTimeout(() => {
+      if (longPress.current !== press) return;
+      press.timer = null; press.fired = true;
+      interaction.current = null; setActive(false); setDelta({x:0,y:0});
+      suppressTouchClick.current = {x:press.x, y:press.y};
+      openMenu(press.x+16,press.y+16);
+    }, 600);
+  };
+  const pointerEvents = { onPointerMove:move, onPointerUp:(e: React.PointerEvent<HTMLElement>) => finishPress(e), onPointerCancel:(e: React.PointerEvent<HTMLElement>) => finishPress(e,true), onLostPointerCapture:(e: React.PointerEvent<HTMLElement>) => finishPress(e,true) };
   const fa = language === 'fa';
   const menuActions = [
     {id:'front' as const, label:fa?'انتقال به روی همه':'Bring to front'},
@@ -107,26 +169,39 @@ export function PageCanvasCell({ cell, sheetIndex, pxPerMm, tool, scope, spaceDo
     {id:'back' as const, label:fa?'انتقال به پشت همه':'Send to back'},
   ];
   return <div data-canvas-page-id={page.id} data-occurrence-key={occurrenceKey} className="pointer-events-none absolute inset-0"
-    onContextMenu={e => { e.preventDefault(); e.stopPropagation(); openMenu(e.clientX,e.clientY); }}>
-    <div onClick={() => { if (tool === 'select' || ((tool === 'move' || tool === 'crop') && !page.isHighlighted)) onCurrentPage(page.id,false,occurrenceKey); }}
-      onPointerDown={e => { if (tool === 'move') begin(e,'move'); }} {...pointerEvents}
-      style={{ left:display.x, top:display.y, width:display.width, height:display.height, clipPath:inset, touchAction:canEdit ? 'none' : 'auto', cursor:canEdit && tool === 'move' ? 'move' : 'pointer' }}
-      className={`pointer-events-auto absolute overflow-hidden ${page.isHighlighted ? 'ring-2 ring-inset ring-sky-500' : ''}`}>
+    onContextMenu={e => {
+      e.preventDefault(); e.stopPropagation();
+      const press = longPress.current;
+      if (press?.fired) return;
+      if (press) {
+        if (press.timer) clearTimeout(press.timer);
+        press.timer = null; press.fired = true;
+        interaction.current = null; setActive(false); setDelta({x:0,y:0}); suppressTouchClick.current = {x:press.x,y:press.y};
+      }
+      openMenu(press ? press.x+16 : e.clientX,press ? press.y+16 : e.clientY);
+    }}>
+    <div onClick={e => {
+      e.stopPropagation();
+      if (consumeTouchClick(e)) { e.preventDefault(); return; }
+      if (tool === 'move' || tool === 'crop') onCurrentPage(page.id,page.isHighlighted,occurrenceKey);
+    }}
+      onPointerDown={e => { startTouchHold(e); if (tool === 'move') begin(e,'move'); }} {...pointerEvents}
+      style={{ left:display.x, top:display.y, width:display.width, height:display.height, clipPath:inset, touchAction:canEdit ? 'none' : 'auto', WebkitTouchCallout:'none', userSelect:'none', cursor:canEdit && tool === 'move' ? 'move' : 'pointer' }}
+      className={`pointer-events-auto absolute overflow-hidden ${(tool === 'move' ? isActive && page.isHighlighted : page.isHighlighted) ? 'ring-2 ring-inset ring-sky-500' : ''}`}>
       <PageContentImage page={page} effects={effects} rotation={cell.effectiveRotation} width={display.width} height={display.height} />
     </div>
     {canEdit && <div style={{ left:tool === 'crop' ? cropFrame.x : display.x, top:tool === 'crop' ? cropFrame.y : display.y,
       width:tool === 'crop' ? cropFrame.width : display.width, height:tool === 'crop' ? cropFrame.height : display.height }}
       className={`pointer-events-none absolute z-20 border-2 ${tool === 'crop' ? 'border-amber-500' : 'border-sky-500'}`}>
       {HANDLES.map(handle => <button key={handle.id} type="button" aria-label={`${tool} ${handle.id}`}
-        onPointerDown={e => begin(e, handle.id)} {...pointerEvents}
+        onPointerDown={e => begin(e, handle.id)} onClick={e => e.stopPropagation()} {...pointerEvents}
         style={{ left:handle.left, top:handle.top, cursor:handle.cursor, touchAction:'none', transform:'translate(-50%, -50%)' }}
         className={`pointer-events-auto absolute h-5 w-5 rounded-sm border-2 border-white shadow ${tool === 'crop' ? 'bg-amber-500' : 'bg-sky-600'}`} />)}
-      <button type="button" aria-label={fa?'ترتیب لایه':'Layer order'} title={fa?'ترتیب لایه':'Layer order'}
-        onClick={e => { e.stopPropagation(); const r=e.currentTarget.getBoundingClientRect(); openMenu(r.left,r.bottom); }}
-        className="pointer-events-auto absolute right-4 top-1 flex h-8 w-8 items-center justify-center rounded bg-slate-800 text-sm text-white">⋮</button>
     </div>}
-    {menu && createPortal(<div className="fixed inset-0 z-[9999]" onClick={() => setMenu(null)} onContextMenu={e => {e.preventDefault();setMenu(null);}}>
-      <div role="menu" style={{position:'fixed',left:menu.x,top:menu.y}} className="min-w-48 rounded-lg border border-slate-600 bg-slate-900 p-1 text-sm text-white shadow-xl" onClick={e => e.stopPropagation()}>
+    {menu && createPortal(<div className="fixed inset-0 z-[9999]"
+      onClickCapture={e => { if (consumeTouchClick(e)) { e.preventDefault(); e.stopPropagation(); } }}
+      onClick={e => { e.stopPropagation(); setMenu(null); }} onContextMenu={e => {e.preventDefault();e.stopPropagation();setMenu(null);}}>
+      <div data-layer-menu role="menu" style={{position:'fixed',left:menu.x,top:menu.y}} className="min-w-48 rounded-lg border border-slate-600 bg-slate-900 p-1 text-sm text-white shadow-xl" onClick={e => e.stopPropagation()}>
         {menuActions.map(action => <button role="menuitem" key={action.id} type="button" className="block w-full rounded px-3 py-2 text-start hover:bg-slate-700"
           onClick={() => {reorderCellLayer(sheetIndex,occurrenceKey,action.id);setMenu(null);}}>{action.label}</button>)}
       </div>
