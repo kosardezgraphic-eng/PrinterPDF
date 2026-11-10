@@ -542,5 +542,8 @@ export interface PageOverlayNumbering extends OverlayBase {
   kind: 'numbering'; enabled: boolean; fontSize: number; fontFamily: string; color: string;
   backgroundColor?: string; bold: boolean; italic: boolean;
   format: NumberingNumberFormat; template: string; startOffset: number; padZeros: number; customScript: string;
+  align?: 'left' | 'center' | 'right';
+  /** For sheet-targeted selected scope; undefined preserves legacy page-ID matching. */
+  targetSheetIndices?: number[];
 }
 export type PageOverlay = PageOverlayText | PageOverlayShape | PageOverlayNumbering;

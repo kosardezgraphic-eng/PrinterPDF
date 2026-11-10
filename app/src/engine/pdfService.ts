@@ -740,7 +740,7 @@ export async function exportImposedPdf(params: {
     for (const placement of textPlacements(sheetSide,totalSides,allPages,overlays,pageIndices)) {
       if (!Number.isFinite(placement.width) || !Number.isFinite(placement.height) || placement.width <= 0 || placement.height <= 0) continue;
       if (typeof document === 'undefined') throw new Error('Text overlay export requires a Canvas 2D renderer');
-      if (placement.formulaError) throw new Error(`Invalid text formula in overlay ${placement.text.id}`);
+      if (placement.formulaError) throw new Error(`Invalid ${placement.text.kind==='numbering'?'numbering formula or format':'text formula'} in overlay ${placement.text.id}`);
       const item=placement.renderText, w=placement.width*MM_TO_PT, h=placement.height*MM_TO_PT;
       const scale=Math.min(200/72,4096/w,4096/h);
       const key=JSON.stringify([item.text,item.fontFamily,item.fontSize,item.color,item.backgroundColor,item.bold,item.italic,item.underline,item.align,item.scriptRanges,item.lineHeight,item.letterSpacingPt,item.wordSpacingPt,w,h]);

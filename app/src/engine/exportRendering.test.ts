@@ -339,6 +339,24 @@ describe('real output rendering', () => {
     }finally{vi.unstubAllGlobals();}
   });
 
+  it('rasterizes editable numbering overlays with the same renderer as the preview',async()=>{
+    const src=await PDFDocument.create();src.addPage([100,100]);src.addPage([100,100]);src.addPage([100,100]);
+    const pages=[1,2,3].map(n=>({...page(0),id:`p${n}`,sourcePageNumber:n,widthMm:100*ptToMm}));
+    const numbering={id:'n',kind:'numbering' as const,enabled:true,target:'page' as const,targetScope:'odd' as const,targetPageIds:[],targetSheetIndex:1,xPercent:30,yPercent:88,widthPercent:40,heightPercent:7,opacity:1,rotation:0,fontSize:14,fontFamily:'Vazirmatn',color:'#000000',bold:false,italic:false,align:'center' as const,format:'english' as const,template:'{page} / {total}',startOffset:1,padZeros:0,customScript:'page+1000'};
+    const ctx={clearRect:vi.fn(),fillRect:vi.fn(),fillText:vi.fn(),measureText:()=>({width:0})};
+    const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRfoAAAAASUVORK5CYII=';
+    vi.stubGlobal('document',{createElement:()=>({width:1,height:1,getContext:()=>ctx,toDataURL:()=>png})});
+    try{
+      const params={documents:[{id:'d',fileType:'pdf',rawBytes:await src.save()} as SourceDocument],pages,allPages:pages,layout,effects:{...DEFAULT_EFFECTS,enabled:false},watermark:{...getDefaultWatermarkSettings(),enabled:false},pageNumbering:{...getDefaultPageNumberSettings(),enabled:false},overlays:[numbering],userName:'test'};
+      const bytes=await exportImposedPdf(params);const pdf=await PDFDocument.load(bytes);
+      expect(ctx.fillText.mock.calls.map(call=>call[0])).toEqual(['1001 / 3','1003 / 3']);
+      expect(pdf.getPageCount()).toBe(3);
+      expect(pdf.getPage(0).node.Resources()?.lookup(PDFName.of('XObject'),PDFDict)?.keys().length).toBe(1);
+      expect(pdf.getPage(1).node.Resources()?.lookup(PDFName.of('XObject'),PDFDict)?.keys().length??0).toBe(0);
+      await expect(exportImposedPdf({...params,pageNumbering:{...getDefaultPageNumberSettings(),enabled:true},overlays:[{...numbering,customScript:'page-'}]})).rejects.toThrow('Invalid numbering formula');
+    }finally{vi.unstubAllGlobals();}
+  });
+
   it('exports the base document plus chosen pages, and restores the base when disabled',async()=>{
     const pages=[1,2,3].map((n)=>({...page(0),id:`p${n}`,documentId:n===1?'a':'b',sourcePageNumber:0,widthMm:100*ptToMm,isBlankPage:true}));
     const overlay={id:'t',kind:'text' as const,target:'page' as const,targetScope:'document' as const,targetDocumentIds:['a'],targetPageIds:[],targetSheetIndex:1,xPercent:25,yPercent:25,widthPercent:50,heightPercent:50,opacity:1,rotation:0,text:'{page+1000}',fontSize:18,fontFamily:'Arial',color:'#000',bold:false,italic:false,underline:false,align:'left' as const,coverageMode:'selected' as const,coveragePageIds:['p3']};

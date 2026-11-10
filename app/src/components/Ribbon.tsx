@@ -73,6 +73,7 @@ export const Ribbon: React.FC = () => {
     updateWatermark,
     updatePageNumbering,
     addTextOverlay,
+    addNumberingOverlay,
     exportMergedOrImposedPdf,
     insertBlankPageAfter,
     reversePageOrder,
@@ -647,11 +648,15 @@ export const Ribbon: React.FC = () => {
                 </label>
               </div>
 
-              {/* F2: Page & Bates Numbering */}
+              <button type="button" disabled={!pages.length} onClick={()=>addNumberingOverlay()} aria-label={lang==='fa'?'افزودن شماره صفحه قابل ویرایش':'Add editable page number'} className="rounded-lg border border-emerald-500 bg-emerald-700 px-3 py-2 font-semibold text-white disabled:opacity-40">{lang==='fa'?'افزودن شماره صفحه':'Add page number'}</button>
+              {pageNumbering.enabled && <button type="button" disabled={!pages.length} onClick={()=>addNumberingOverlay(true)} className="rounded-lg border border-amber-500 bg-amber-800 px-3 py-2 text-white disabled:opacity-40">{lang==='fa'?'تبدیل شماره‌گذاری قدیمی به قابل ویرایش':'Convert legacy numbering to editable'}</button>}
+              <p className="text-xs text-slate-400">{lang === 'fa' ? 'شماره قابل ویرایش را روی صفحه بکشید و برای زوج/فرد و فرمول از پنل استفاده کنید.' : 'Drag the editable number on the page; use the panel for odd/even scopes and formulas.'}</p>
+              {/* F2: Legacy Page & Bates Numbering */}
               <div className="flex items-center gap-2">
                 <label className="flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 font-bold text-emerald-300 cursor-pointer">
                   <input
                     type="checkbox"
+                    aria-label={lang === 'fa' ? 'شماره‌گذاری قدیمی (فقط خروجی ثابت)' : 'Legacy numbering (fixed output only)'}
                     checked={pageNumbering.enabled}
                     onChange={(e) =>
                       updatePageNumbering({ enabled: e.target.checked })
@@ -659,7 +664,7 @@ export const Ribbon: React.FC = () => {
                     className="accent-emerald-500"
                   />
                   <Hash className="h-4 w-4" />
-                  <span>{lang === 'fa' ? 'شماره صفحه و Bates' : 'Page / Bates #'}</span>
+                  <span>{lang === 'fa' ? 'شماره‌گذاری قدیمی' : 'Page / Bates # (legacy)'}</span>
                 </label>
 
                 <select

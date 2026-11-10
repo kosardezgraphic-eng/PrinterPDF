@@ -1,15 +1,41 @@
-import type {ComputedSheetSide,PageItem,PageOverlay,PageOverlayText} from '@shared/models';
-import {matchesOverlayScope} from './overlayRenderUtils';
+import type {ComputedSheetSide,PageItem,PageOverlay,PageOverlayText,PageOverlayNumbering} from '@shared/models';
+import {matchesOverlayScope,formatOverlayNumber} from './overlayRenderUtils';
 import {resolveTextTemplate} from './textFormatting';
+import type {TextScriptRange} from '@shared/models';
 
 export interface TextPlacement {
-  text: PageOverlayText; renderText: PageOverlayText; formulaError?: string; key: string; x:number;y:number;width:number;height:number;
+  text: PageOverlayText | PageOverlayNumbering; renderText: PageOverlayText; formulaError?: string; key: string; x:number;y:number;width:number;height:number;
   parentX:number;parentY:number;parentWidth:number;parentHeight:number; parentRotation:number; pageId?:string; sheetIndex:number;
   clip?: {x:number;y:number;width:number;height:number};
 }
+/** `^{...}` raises and `_{...}` lowers a template segment; inner `{page}`-style tokens stay usable. */
+const NUMBERING_MARKER=/([\^_])\{((?:[^{}]|\{[^{}]*\})*)\}/;
+export function parseNumberingTemplate(template:string):{text:string;script?:'super'|'sub'}[]{
+  const spans:{text:string;script?:'super'|'sub'}[]=[];let rest=template;
+  for(;;){
+    const match=NUMBERING_MARKER.exec(rest);
+    if(!match){if(rest)spans.push({text:rest});break;}
+    if(match.index>0)spans.push({text:rest.slice(0,match.index)});
+    // The outer script wins: any nested marker inside a run only contributes its text, so no stray syntax prints.
+    if(match[2])spans.push({text:match[2].replace(NUMBERING_MARKER,'$2'),script:match[1]==='^'?'super':'sub'});
+    rest=rest.slice(match.index+match[0].length);
+  }
+  return spans;
+}
+/** Resolves a numbering template, including its script markers, for one page/sheet position. */
+export function resolveNumberingTemplate(item:PageOverlayNumbering,page:number,total:number):{text:string;ranges:TextScriptRange[]}{
+  let out='';const ranges:TextScriptRange[]=[];
+  for(const span of parseNumberingTemplate(item.template)){
+    const part=formatOverlayNumber({...item,template:span.text},page,total);
+    if(!part)continue;
+    if(span.script)ranges.push({start:out.length,end:out.length+part.length,script:span.script});
+    out+=part;
+  }
+  return {text:out,ranges};
+}
 /** Positions refer to the visible page box or the output sheet, measured in mm. */
 export function textPlacements(sheet:ComputedSheetSide,totalSheets:number,pages:PageItem[],overlays:PageOverlay[],pageIndices?:Map<string,number>):TextPlacement[] {
-  const texts=overlays.filter((o):o is PageOverlayText=>o.kind==='text');
+  const texts=overlays.filter((o):o is PageOverlayText|PageOverlayNumbering=>o.kind==='text'||(o.kind==='numbering' && o.enabled));
   if(!texts.length)return [];
   const indices=pageIndices ?? new Map(pages.map((page,i)=>[page.id,i+1]));
   const sheetPageIds=sheet.cells.flatMap(c=>c.page?[c.page.id]:[]);
@@ -17,9 +43,17 @@ export function textPlacements(sheet:ComputedSheetSide,totalSheets:number,pages:
   for(const item of texts){
     const add=(rect:{x:number;y:number;width:number;height:number},key:string,rotation:number,context:{page:number;total:number;sheet:number;file:string;docPage:number},clip?:TextPlacement['clip'],pageId?:string)=>{
       if(rect.width<=0||rect.height<=0||!Number.isFinite(item.xPercent)||!Number.isFinite(item.yPercent)||!Number.isFinite(item.widthPercent)||!Number.isFinite(item.heightPercent))return;
-      const resolved=resolveTextTemplate(item.text,item.scriptRanges,context);
-      const renderText={...item,text:resolved.text,scriptRanges:resolved.ranges};
-      result.push({text:item,renderText,formulaError:resolved.error,key,x:rect.x+rect.width*item.xPercent/100,y:rect.y+rect.height*item.yPercent/100,
+      let renderText:PageOverlayText, formulaError:string|undefined;
+      if(item.kind==='text'){
+        const resolved=resolveTextTemplate(item.text,item.scriptRanges,context);
+        renderText={...item,text:resolved.text,scriptRanges:resolved.ranges};formulaError=resolved.error;
+      } else {
+        let value:string,ranges:TextScriptRange[]=[];
+        try {const resolved=resolveNumberingTemplate(item,context.page,context.total);value=resolved.text;ranges=resolved.ranges;}
+        catch {value=item.template;formulaError='Invalid numbering formula or format';}
+        renderText={...item,kind:'text',text:value,scriptRanges:ranges,underline:false,align:item.align??'center'};
+      }
+      result.push({text:item,renderText,formulaError,key,x:rect.x+rect.width*item.xPercent/100,y:rect.y+rect.height*item.yPercent/100,
         width:rect.width*item.widthPercent/100,height:rect.height*item.heightPercent/100,
         parentX:rect.x,parentY:rect.y,parentWidth:rect.width,parentHeight:rect.height,parentRotation:rotation,pageId,sheetIndex:sheet.sideIndex,clip});
     };

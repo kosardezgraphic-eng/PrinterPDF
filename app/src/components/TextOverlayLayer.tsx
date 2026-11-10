@@ -66,27 +66,34 @@ function TextOccurrence({p,pxPerMm,selected,enabled}:{p:TextPlacement;pxPerMm:nu
  const finish=(e:React.PointerEvent<HTMLElement>,cancel=false)=>{const g=gesture.current;if(!g||g.pointer!==e.pointerId)return;
   e.preventDefault();e.stopPropagation();g.dx=e.clientX-g.x;g.dy=e.clientY-g.y;const next=geometry(g),moved=Math.hypot(g.dx,g.dy)>=3;cleanup(g);if(cancel||!moved)return;
   const live=useAppStore.getState().overlays.find(o=>o.id===p.text.id);if(!live || live!==p.text)return;
-  if(g.copy)add({...p.text,...next,id:newId(),syncGroupId:undefined});else update(p.text.id,next);
+  if(g.copy)add({...p.text,...next,id:newId()});else update(p.text.id,next);
  };
  const lang=useAppStore(s=>s.settings.language);
- return <div data-overlay-id={p.text.id} role="button" tabIndex={enabled?0:-1} aria-label={p.text.text || (lang==='fa'?'متن':'Text overlay')}
-   onDoubleClick={e=>{if(!enabled)return;e.stopPropagation();activate();beginEdit(p.text.id,p.key);}}
-   onKeyDown={e=>{if(enabled && (e.key==='Enter'||e.key===' ')){e.preventDefault();e.stopPropagation();activate();beginEdit(p.text.id,p.key);}}}
+ const editable=p.text.kind==='text'?p.text:null;
+ return <div data-overlay-id={p.text.id} role="button" tabIndex={enabled?0:-1} aria-label={p.renderText.text || (lang==='fa'?'نوشته':'Overlay')}
+   onDoubleClick={e=>{if(!enabled)return;e.stopPropagation();activate();if(editable)beginEdit(p.text.id,p.key);else{select(p.text.id);const el=document.querySelector<HTMLTextAreaElement>('[data-numbering-template]');if(el){el.focus();el.select();}}}}
+   onKeyDown={e=>{if(!enabled)return;
+   const arrows:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};
+   const step=arrows[e.key];
+   if(step){e.preventDefault();e.stopPropagation();activate();
+     const mm=(e.shiftKey?5:1),delta=rotateVector(step[0]*mm*pxPerMm,step[1]*mm*pxPerMm,-(p.parentRotation+p.text.rotation));
+     update(p.text.id,{xPercent:Math.max(0,Math.min(100-p.text.widthPercent,p.text.xPercent+delta.x/p.parentWidth*100)),yPercent:Math.max(0,Math.min(100-p.text.heightPercent,p.text.yPercent+delta.y/p.parentHeight*100))});return;}
+   if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();activate();if(editable)beginEdit(p.text.id,p.key);else select(p.text.id);}}}
    onPointerDown={e=>{if(!edit)start(e,'move');}} onPointerMove={move} onPointerUp={e=>finish(e)} onPointerCancel={e=>finish(e,true)} onLostPointerCapture={e=>finish(e,true)} onClick={e=>e.stopPropagation()}
    style={{position:'absolute',left:`${p.text.xPercent}%`,top:`${p.text.yPercent}%`,width:`${p.text.widthPercent}%`,height:`${p.text.heightPercent}%`,transform:`rotate(${p.text.rotation}deg)`,outline:selected?'2px solid #0ea5e9':'none',cursor:enabled?'move':'default',touchAction:'none',pointerEvents:enabled?'auto':'none'}}>
    {!edit && <TextCanvas item={p.renderText} width={p.width} height={p.height} pxPerMm={pxPerMm}/>}
    {p.formulaError && !edit && <span role="alert" className="absolute bottom-full left-0 whitespace-nowrap bg-red-800 px-1 text-white">{lang==='fa'?'فرمول نامعتبر':'Invalid formula'}</span>}
-   {edit && <textarea ref={textarea} data-inline-overlay-editor aria-label={lang==='fa'?'ویرایش متن روی صفحه':'Edit text on page'} value={edit.text}
+   {edit && editable && <textarea ref={textarea} data-inline-overlay-editor aria-label={lang==='fa'?'ویرایش متن روی صفحه':'Edit text on page'} value={edit.text}
       wrap="off" spellCheck={false} dir={/[\u0590-\u08ff]/.test(edit.text)?'rtl':'ltr'}
       onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()} onDoubleClick={e=>e.stopPropagation()}
       onChange={e=>useAppStore.getState().updateTextDraft(e.target.value,e.target.selectionStart,e.target.selectionEnd)}
       onSelect={e=>useAppStore.getState().selectTextDraft(e.currentTarget.selectionStart,e.currentTarget.selectionEnd)}
       onKeyDown={e=>{e.stopPropagation();if(e.nativeEvent.isComposing)return;if(e.key==='Escape'){e.preventDefault();useAppStore.getState().finishTextEdit(true);}else if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();useAppStore.getState().finishTextEdit();}}}
       onBlur={e=>{const related=e.relatedTarget instanceof Element?e.relatedTarget:null;if(!related?.closest('[data-text-control-panel]'))useAppStore.getState().finishTextEdit();}}
-      style={{width:'100%',height:'100%',resize:'none',border:0,padding:0,margin:0,outline:'none',overflow:'auto',background:p.text.backgroundColor||'transparent',color:p.text.color,
-        fontFamily:`"${p.text.fontFamily}", sans-serif`,fontWeight:p.text.bold?'bold':'normal',fontStyle:p.text.italic?'italic':'normal',textDecoration:p.text.underline?'underline':'none',
-        textAlign:p.text.align,fontSize:p.text.fontSize*pxPerMm/MM_TO_PT,lineHeight:p.text.lineHeight??1.25,wordSpacing:`${(p.text.wordSpacingPt??0)*pxPerMm/MM_TO_PT}px`,letterSpacing:`${(p.text.letterSpacingPt??0)*pxPerMm/MM_TO_PT}px`,opacity:p.text.opacity,touchAction:'auto'}} />}
-   {selected && enabled && !edit && HANDLES.map(h=><button key={h.id} type="button" aria-label={`${lang==='fa'?'تغییر اندازه متن':'Resize text'} ${h.id}`} data-text-resize={h.id}
+      style={{width:'100%',height:'100%',resize:'none',border:0,padding:0,margin:0,outline:'none',overflow:'auto',background:editable.backgroundColor||'transparent',color:editable.color,
+        fontFamily:`"${editable.fontFamily}", sans-serif`,fontWeight:editable.bold?'bold':'normal',fontStyle:editable.italic?'italic':'normal',textDecoration:editable.underline?'underline':'none',
+        textAlign:editable.align,fontSize:editable.fontSize*pxPerMm/MM_TO_PT,lineHeight:editable.lineHeight??1.25,wordSpacing:`${(editable.wordSpacingPt??0)*pxPerMm/MM_TO_PT}px`,letterSpacing:`${(editable.letterSpacingPt??0)*pxPerMm/MM_TO_PT}px`,opacity:editable.opacity,touchAction:'auto'}} />}
+   {selected && enabled && !edit && HANDLES.map(h=><button key={h.id} type="button" aria-label={`${p.text.kind==='numbering'?(lang==='fa'?'تغییر اندازه شماره':'Resize number'):(lang==='fa'?'تغییر اندازه متن':'Resize text')} ${h.id}`} data-text-resize={h.id}
       onPointerDown={e=>start(e,h.id)} onClick={e=>e.stopPropagation()} style={{position:'absolute',left:h.left,top:h.top,transform:'translate(-50%,-50%)',cursor:h.cursor,touchAction:'none'}}
       className="flex h-6 w-6 items-center justify-center"><span className="h-2.5 w-2.5 border border-white bg-sky-600"/></button>)}
  </div>;
