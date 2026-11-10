@@ -8,6 +8,7 @@ import { PreviewWorkspace } from './components/PreviewWorkspace';
 import { StatusBar } from './components/StatusBar';
 import { ModalsAndToasts } from './components/Modals';
 import { TextControlPanel } from './components/TextControlPanel';
+import { NumberingControlPanel } from './components/NumberingControlPanel';
 
 export const App: React.FC = () => {
   const {
@@ -178,6 +179,7 @@ export const App: React.FC = () => {
           <SidebarPages />
           <PreviewWorkspace onCursorMoveMm={setCursorPos} />
           {selectedOverlayId && overlays.some(o=>o.id===selectedOverlayId && o.kind==='text') && <TextControlPanel />}
+          {selectedOverlayId && overlays.some(o=>o.id===selectedOverlayId && o.kind==='numbering') && <NumberingControlPanel />}
         </div>
         <StatusBar cursorPos={cursorPos} />
         <ModalsAndToasts />

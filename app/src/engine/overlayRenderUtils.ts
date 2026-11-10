@@ -33,7 +33,7 @@ export function matchesOverlayScope(overlay: PageOverlay, context: OverlayContex
     case 'first': return n === 1;
     case 'last': return n === context.total;
     case 'current': return overlay.target === 'sheet' ? n === overlay.targetSheetIndex : !!context.pageId && containsTarget(overlay.targetPageIds,context.pageId);
-    case 'selected': return overlay.target === 'sheet' ? context.sheetPageIds.some(id => containsTarget(overlay.targetPageIds,id)) : !!context.pageId && containsTarget(overlay.targetPageIds,context.pageId);
+    case 'selected': return overlay.target === 'sheet' ? (overlay.kind==='numbering' && overlay.targetSheetIndices ? containsSheet(overlay.targetSheetIndices,context.sheetIndex) : context.sheetPageIds.some(id => containsTarget(overlay.targetPageIds,id))) : !!context.pageId && containsTarget(overlay.targetPageIds,context.pageId);
   }
 }
 
@@ -71,12 +71,13 @@ function abjad(value: number): string {
   let out=''; for (const [n,s] of [[1000,'غ'],[900,'ظ'],[800,'ض'],[700,'ذ'],[600,'خ'],[500,'ث'],[400,'ت'],[300,'ش'],[200,'ر'],[100,'ق'],[90,'ص'],[80,'ف'],[70,'ع'],[60,'س'],[50,'ن'],[40,'م'],[30,'ل'],[20,'ک'],[10,'ی'],[9,'ط'],[8,'ح'],[7,'ز'],[6,'و'],[5,'ه'],[4,'د'],[3,'ج'],[2,'ب'],[1,'ا']] as const) while(value >= n){out+=s;value-=n;} return out;
 }
 export function formatOverlayNumber(settings: PageOverlayNumbering, index: number, total: number): string {
-  const serial = evaluateNumberScript(settings.customScript, index) + settings.startOffset - 1;
+  const script=settings.customScript.replace(/[۰-۹٠-٩]/g,d=>String(d.charCodeAt(0)-(d<='٩'?0x660:0x6f0)));
+  const serial = evaluateNumberScript(script, index) + settings.startOffset - 1;
   if (!Number.isSafeInteger(serial) || Math.abs(serial)>999999999) throw new Error('Invalid serial number');
   const convert = (n:number) => settings.format === 'roman' ? roman(n) : settings.format === 'abjad' ? abjad(n) : settings.format === 'persian' ? persianDigits(String(n)) : String(n);
   const padded = (length:number) => { const v = (serial < 0 ? '-' : '') + String(Math.abs(serial)).padStart(length,'0'); return settings.format === 'persian' ? persianDigits(v) : v; };
-  return settings.template.replace(/\{(page|total|serial|pad[3-7])\}/gi, (_, tag:string) => {
-    const key=tag.toLowerCase(); return key === 'page' ? convert(serial) : key === 'serial' ? (settings.padZeros > 0 && (settings.format === 'english' || settings.format === 'persian') ? padded(Math.min(7, Math.max(3, settings.padZeros))) : convert(serial)) : key === 'total' ? convert(total) : padded(Number(key.slice(3)));
+  return settings.template.replace(/\{(page|total|serial|pad(?:[3-9]|10))\}/gi, (_, tag:string) => {
+    const key=tag.toLowerCase(); return key === 'page' ? convert(serial) : key === 'serial' ? (settings.padZeros > 0 && (settings.format === 'english' || settings.format === 'persian') ? padded(Math.min(10, Math.max(3, settings.padZeros))) : convert(serial)) : key === 'total' ? convert(total) : padded(Number(key.slice(3)));
   });
 }
 

@@ -21,6 +21,12 @@ describe('overlay number formatter',()=>{
   it.each(['globalThis.process.exit()', 'page.constructor', 'page / 0', '1.5', '(', '2 ** 3', 'page;alert(1)', 'page +', '1e30'])('rejects unsafe or invalid expression %s', expression=>{
     expect(()=>evaluateNumberScript(expression,2)).toThrow();
   });
+  it('accepts wider padding and Persian/Arabic digits inside the arithmetic script',()=>{
+    expect(formatOverlayNumber({...number,format:'persian',startOffset:1,padZeros:0,template:'{serial}'},1,5)).toBe('۱');
+    expect(formatOverlayNumber({...number,format:'english',startOffset:1,padZeros:0,template:'{pad10}'},1,5)).toBe('0000000001');
+    expect(formatOverlayNumber({...number,format:'english',startOffset:1,customScript:'۱۰۰۰ - page',template:'{serial}'},2,5)).toBe('0998');
+    expect(()=>evaluateNumberScript('page ** 2',2)).toThrow();
+  });
   it('rejects unsupported Roman and abjad values instead of silently misnumbering',()=>{
     expect(()=>formatOverlayNumber({...number,format:'roman',template:'{page}'},4000,1)).toThrow();
     expect(()=>formatOverlayNumber({...number,format:'abjad',template:'{page}',startOffset:0},1,1)).toThrow();
@@ -39,6 +45,8 @@ describe('overlay targeting and canvas',()=>{
     expect(matchesOverlayScope({...shape,target:'sheet',targetScope:'odd'},context)).toBe(true);
     expect(matchesOverlayScope({...shape,target:'sheet',targetScope:'selected'},context)).toBe(true);
     expect(matchesOverlayScope({...shape,target:'sheet',targetScope:'selected',targetPageIds:['other']},context)).toBe(false);
+    expect(matchesOverlayScope({...number,target:'sheet',targetScope:'selected',targetSheetIndices:[1]},context)).toBe(true);
+    expect(matchesOverlayScope({...number,target:'sheet',targetScope:'selected',targetSheetIndices:[2]},context)).toBe(false);
   });
   it('draws percentage geometry responsively and transparent fill does not cover underlying content',()=>{
     const canvas=createCanvas(200,200),ctx=canvas.getContext('2d');

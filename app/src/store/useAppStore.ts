@@ -12,6 +12,7 @@ import type {
   PageItem,
   PageOverlay,
   PageOverlayText,
+  PageOverlayNumbering,
   TextScriptRange,
   PageNumberSettings,
   PageRotation,
@@ -301,6 +302,7 @@ interface AppState {
   removeOverlay: (id: string) => void;
   selectOverlay: (id: string | null) => void;
   addTextOverlay: () => void;
+  addNumberingOverlay: (convertLegacy?: boolean) => void;
   beginTextEdit: (id: string, occurrenceKey: string) => void;
   updateTextDraft: (text: string, start: number, end: number) => void;
   selectTextDraft: (start: number, end: number) => void;
@@ -1299,9 +1301,18 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     updatePageNumbering: (patch) => {
+      const turningOn = patch.enabled === true && !get().pageNumbering.enabled;
       set((state) => ({
         pageNumbering: { ...state.pageNumbering, ...patch },
       }));
+      if (turningOn && get().overlays.some(item => item.kind === 'numbering' && item.enabled)) {
+        get().addToast({
+          type: 'warning',
+          title: get().settings.language === 'fa'
+            ? 'شماره‌گذاری قدیمی و شماره قابل ویرایش هم‌زمان روشن‌اند؛ برای جلوگیری از شماره تکراری یکی را خاموش یا از «تبدیل» استفاده کنید.'
+            : 'Legacy numbering and an editable page number are both active; disable one or use Convert to avoid duplicated numbers.',
+        });
+      }
     },
 
     addOverlay: (overlay) => {
@@ -1329,6 +1340,27 @@ export const useAppStore = create<AppState>((set, get) => {
     selectOverlay: id => {
       if (get().textEdit && get().textEdit?.overlayId !== id) get().finishTextEdit();
       set({selectedOverlayId:id});
+    },
+    addNumberingOverlay: (convertLegacy=false) => {
+      if(get().textEdit)get().finishTextEdit();
+      const state=get();if(!state.pages.length)return;
+      const legacy=state.pageNumbering;
+      const format=convertLegacy ? (legacy.format==='bates'?'english':legacy.format) : (state.settings.language==='fa'?'persian':'english');
+      const template=convertLegacy ? (legacy.format==='bates'?`${legacy.batesPrefix||'BATES-'}{serial}`:legacy.format==='persian'?'صفحه {page} از {total}':legacy.format==='english'?'Page {page} of {total}':'{page} / {total}') : '{page}';
+      const position=convertLegacy?legacy.position:'bottom-center';
+      const item:PageOverlayNumbering={id:globalThis.crypto?.randomUUID?.()??`number-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        kind:'numbering',enabled:true,target:convertLegacy?'sheet':'page',targetScope:'all',targetPageIds:[],targetSheetIndex:1,
+        xPercent:position.endsWith('left')?5:position.endsWith('right')?55:30,yPercent:position.startsWith('top')?5:88,widthPercent:40,heightPercent:7,opacity:1,rotation:0,
+        fontSize:convertLegacy?legacy.fontSizePt:14,fontFamily:'Vazirmatn',color:'#000000',bold:false,italic:false,align:'center',format,template,
+        startOffset:convertLegacy?legacy.startNumber:1,padZeros:convertLegacy&&legacy.format==='bates'?Math.max(3,Math.min(10,legacy.batesDigits)):0,customScript:''};
+      const before=captureSnapshot(state);
+      set({overlays:[...state.overlays,item],selectedOverlayId:item.id,...(convertLegacy?{pageNumbering:{...legacy,enabled:false}}:{})});
+      pushUndo('افزودن شماره صفحه','Add page numbering',before,captureSnapshot(get()));
+      if(!convertLegacy && legacy.enabled){
+        get().addToast({type:'warning',title:state.settings.language==='fa'
+          ?'شماره‌گذاری قدیمی همچنان روشن است و ممکن است شماره تکراری بزند. با «تبدیل شماره‌گذاری قدیمی» آن را قابل ویرایش کنید یا خاموشش کنید.'
+          :'The legacy numbering is still on and can print a duplicate number. Use Convert legacy numbering to make it editable, or turn it off.'});
+      }
     },
     addTextOverlay: () => {
       if(get().textEdit) get().finishTextEdit();
