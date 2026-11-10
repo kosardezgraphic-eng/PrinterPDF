@@ -33,7 +33,7 @@ export function matchesOverlayScope(overlay: PageOverlay, context: OverlayContex
     case 'first': return n === 1;
     case 'last': return n === context.total;
     case 'current': return overlay.target === 'sheet' ? n === overlay.targetSheetIndex : !!context.pageId && containsTarget(overlay.targetPageIds,context.pageId);
-    case 'selected': return overlay.target === 'sheet' ? (overlay.kind==='numbering' && overlay.targetSheetIndices ? containsSheet(overlay.targetSheetIndices,context.sheetIndex) : context.sheetPageIds.some(id => containsTarget(overlay.targetPageIds,id))) : !!context.pageId && containsTarget(overlay.targetPageIds,context.pageId);
+    case 'selected': return overlay.target === 'sheet' ? (overlay.targetSheetIndices ? containsSheet(overlay.targetSheetIndices,context.sheetIndex) : context.sheetPageIds.some(id => containsTarget(overlay.targetPageIds,id))) : !!context.pageId && containsTarget(overlay.targetPageIds,context.pageId);
   }
 }
 

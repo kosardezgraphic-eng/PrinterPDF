@@ -517,6 +517,10 @@ export interface OverlayBase {
   targetSheetIndex: number;
   xPercent: number; yPercent: number; widthPercent: number; heightPercent: number;
   opacity: number; rotation: number;
+  /** Keeps the visual width/height ratio while resizing. Shift always locks temporarily. */
+  lockAspect?: boolean;
+  /** One-based output side indexes captured by a sheet-targeted `selected` scope. */
+  targetSheetIndices?: number[];
 }
 export interface TextScriptRange { start: number; end: number; script: 'super' | 'sub' }
 export interface PageOverlayText extends OverlayBase {
@@ -543,7 +547,18 @@ export interface PageOverlayNumbering extends OverlayBase {
   backgroundColor?: string; bold: boolean; italic: boolean;
   format: NumberingNumberFormat; template: string; startOffset: number; padZeros: number; customScript: string;
   align?: 'left' | 'center' | 'right';
-  /** For sheet-targeted selected scope; undefined preserves legacy page-ID matching. */
-  targetSheetIndices?: number[];
 }
-export type PageOverlay = PageOverlayText | PageOverlayShape | PageOverlayNumbering;
+export interface PageOverlayImage extends OverlayBase {
+  kind: 'image';
+  /** data: URL of the picture; kept inside the project file so the overlay survives reloading. */
+  src: string;
+  /** Original file name, shown in the layer list and aria label. */
+  name: string;
+  /** Natural pixel size; zero when it could not be measured. */
+  naturalWidth: number; naturalHeight: number;
+  /** 'fill' stretches into the box, 'contain' letterboxes it inside the box. */
+  fit?: 'fill' | 'contain';
+  /** Mirrors the picture without touching the box geometry. */
+  flipHorizontal?: boolean; flipVertical?: boolean;
+}
+export type PageOverlay = PageOverlayText | PageOverlayShape | PageOverlayNumbering | PageOverlayImage;

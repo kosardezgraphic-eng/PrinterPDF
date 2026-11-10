@@ -13,6 +13,8 @@ import type {
   PageOverlay,
   PageOverlayText,
   PageOverlayNumbering,
+  PageOverlayImage,
+  ComputedSheetSide,
   TextScriptRange,
   PageNumberSettings,
   PageRotation,
@@ -39,6 +41,12 @@ import {
   importFilesBatch,
   triggerBlobDownload,
 } from '../engine/pdfService';
+import {
+  imageDropPlacement,
+  imageOverlayFromPlacement,
+  newOverlayId as newImageId,
+} from '../engine/imageOverlays';
+import { isImageFile, measureImage, readFileAsDataUrl } from '../engine/imageImport';
 import { centeredAspectCrop, cropToMm, IDENTITY_TRANSFORM, type Insets } from '../engine/pageGeometry';
 import { computeImpositionSheets, getSheetDimensionsMm, sortCellsByLayer } from '../engine/layoutEngine';
 import { ipcBridge, selectOptimalPrinter } from '../engine/ipcBridge';
@@ -303,6 +311,7 @@ interface AppState {
   selectOverlay: (id: string | null) => void;
   addTextOverlay: () => void;
   addNumberingOverlay: (convertLegacy?: boolean) => void;
+  addImageOverlayFiles: (files: File[], sheet?: ComputedSheetSide, point?: {xMm:number;yMm:number}) => Promise<number>;
   beginTextEdit: (id: string, occurrenceKey: string) => void;
   updateTextDraft: (text: string, start: number, end: number) => void;
   selectTextDraft: (start: number, end: number) => void;
@@ -1341,6 +1350,38 @@ export const useAppStore = create<AppState>((set, get) => {
       if (get().textEdit && get().textEdit?.overlayId !== id) get().finishTextEdit();
       set({selectedOverlayId:id});
     },
+    addImageOverlayFiles: async (files, sheet, point) => {
+      if(get().textEdit)get().finishTextEdit();
+      const state0=get();
+      const images=files.filter(file=>isImageFile(file));
+      if(!images.length)return 0;
+      const side=sheet??computeImpositionSheets(state0.pages,state0.layout)[Math.min(state0.activeSheetIndex,Math.max(0,computeImpositionSheets(state0.pages,state0.layout).length-1))];
+      if(!side)return 0;
+      // Without an explicit drop point (ribbon button, clipboard) the picture lands in the middle of the current page.
+      const fallbackCell=state0.pages.length ? side.cells.find(c=>c.page?.id===state0.activePageId)??side.cells.find(c=>c.page?.isHighlighted)??side.cells.find(c=>c.page) : undefined;
+      const target=point??(fallbackCell ? {xMm:fallbackCell.contentXMm+fallbackCell.contentWidthMm/2,yMm:fallbackCell.contentYMm+fallbackCell.contentHeightMm/2}
+        : {xMm:side.widthMm/2,yMm:side.heightMm/2});
+      const created:PageOverlayImage[]=[];
+      for(const file of images){
+        const src=await readFileAsDataUrl(file);
+        const natural=await measureImage(src);
+        const placement=imageDropPlacement(side,target,natural);
+        if(!placement)continue;
+        created.push(imageOverlayFromPlacement(newImageId(),src,(file.name?.replace(/\.[^.]+$/,''))||'تصویر',natural,placement));
+      }
+      if(!created.length)return 0;
+      const state=get();
+      const before=captureSnapshot(state);
+      const first=created[0];
+      set({overlays:[...state.overlays,...created],selectedOverlayId:first.id,
+        ...(first.target==='page'&&first.targetPageIds[0]?{activePageId:first.targetPageIds[0]}:{})});
+      pushUndo(created.length>1?`افزودن ${created.length} تصویر`:'افزودن تصویر روی صفحه',
+        created.length>1?`Add ${created.length} pictures to the page`:'Add picture to page',before,captureSnapshot(get()));
+      get().addToast({type:'success',title:state.settings.language==='fa'
+        ?`${created.length} تصویر روی صفحه قرار گرفت؛ با کشیدن جابه‌جا و با دستگیره‌ها تغییر اندازه می‌دهد.`
+        :`${created.length} picture(s) placed on the page. Drag to move, handles to resize.`});
+      return created.length;
+    },
     addNumberingOverlay: (convertLegacy=false) => {
       if(get().textEdit)get().finishTextEdit();
       const state=get();if(!state.pages.length)return;
@@ -1351,7 +1392,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const item:PageOverlayNumbering={id:globalThis.crypto?.randomUUID?.()??`number-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         kind:'numbering',enabled:true,target:convertLegacy?'sheet':'page',targetScope:'all',targetPageIds:[],targetSheetIndex:1,
         xPercent:position.endsWith('left')?5:position.endsWith('right')?55:30,yPercent:position.startsWith('top')?5:88,widthPercent:40,heightPercent:7,opacity:1,rotation:0,
-        fontSize:convertLegacy?legacy.fontSizePt:14,fontFamily:'Vazirmatn',color:'#000000',bold:false,italic:false,align:'center',format,template,
+        fontSize:convertLegacy?legacy.fontSizePt:14,fontFamily:'Vazirmatn',color:'#000000',bold:false,italic:false,align:'center',lockAspect:true,format,template,
         startOffset:convertLegacy?legacy.startNumber:1,padZeros:convertLegacy&&legacy.format==='bates'?Math.max(3,Math.min(10,legacy.batesDigits)):0,customScript:''};
       const before=captureSnapshot(state);
       set({overlays:[...state.overlays,item],selectedOverlayId:item.id,...(convertLegacy?{pageNumbering:{...legacy,enabled:false}}:{})});

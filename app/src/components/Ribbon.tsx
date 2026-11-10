@@ -43,6 +43,7 @@ import {
 } from '@shared/models';
 
 export const Ribbon: React.FC = () => {
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const {
     activeRibbonTab,
     ribbonCollapsed,
@@ -74,6 +75,7 @@ export const Ribbon: React.FC = () => {
     updatePageNumbering,
     addTextOverlay,
     addNumberingOverlay,
+    addImageOverlayFiles,
     exportMergedOrImposedPdf,
     insertBlankPageAfter,
     reversePageOrder,
@@ -648,6 +650,11 @@ export const Ribbon: React.FC = () => {
                 </label>
               </div>
 
+              <div className="flex items-center gap-2">
+                <button type="button" disabled={!pages.length} onClick={()=>imageInputRef.current?.click()} aria-label={lang==='fa'?'افزودن تصویر روی صفحه':'Add picture on the page'} className="rounded-lg border border-sky-500 bg-sky-700 px-3 py-2 font-semibold text-white disabled:opacity-40">{lang==='fa'?'افزودن تصویر':'Add picture'}</button>
+                <input ref={imageInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e=>{const files=e.target.files?Array.from(e.target.files):[];if(files.length)void addImageOverlayFiles(files);e.target.value='';}}/>
+                <span className="text-[11px] text-slate-400">{lang==='fa'?'یا فایل تصویر را مستقیم روی برگه در پیش‌نمایش رها کنید.' : 'Or drop an image file straight onto a sheet in the preview.'}</span>
+              </div>
               <button type="button" disabled={!pages.length} onClick={()=>addNumberingOverlay()} aria-label={lang==='fa'?'افزودن شماره صفحه قابل ویرایش':'Add editable page number'} className="rounded-lg border border-emerald-500 bg-emerald-700 px-3 py-2 font-semibold text-white disabled:opacity-40">{lang==='fa'?'افزودن شماره صفحه':'Add page number'}</button>
               {pageNumbering.enabled && <button type="button" disabled={!pages.length} onClick={()=>addNumberingOverlay(true)} className="rounded-lg border border-amber-500 bg-amber-800 px-3 py-2 text-white disabled:opacity-40">{lang==='fa'?'تبدیل شماره‌گذاری قدیمی به قابل ویرایش':'Convert legacy numbering to editable'}</button>}
               <p className="text-xs text-slate-400">{lang === 'fa' ? 'شماره قابل ویرایش را روی صفحه بکشید و برای زوج/فرد و فرمول از پنل استفاده کنید.' : 'Drag the editable number on the page; use the panel for odd/even scopes and formulas.'}</p>
