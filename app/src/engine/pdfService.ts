@@ -27,6 +27,8 @@ import type {
   WatermarkSettings,
 } from '@shared/models';
 import { drawOverlayText, textPlacements } from './textOverlays';
+import { imagePlacements, imageDrawRect } from './overlayPlacements';
+import { isDirectlyEmbeddable, rasterizeOverlayImage } from './imageImport';
 import { computeImpositionSheets, sortCellsByLayer } from './layoutEngine';
 import { normalizeAngle, pageCropFractions, rotateInsets } from './pageGeometry';
 import { shouldApplyEffectsToPage } from './effectsPipeline';
@@ -552,6 +554,7 @@ export async function exportImposedPdf(params: {
   const totalSides = Math.max(1, sheets.length);
   const pageIndices = new Map(allPages.map((page,index)=>[page.id,index+1]));
   const textImages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPng>>>();
+  const pictureImages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPng>>>();
   const loadedTextFonts = new Set<string>();
 
   for (let sIdx = 0; sIdx < sheets.length; sIdx++) {
@@ -763,6 +766,44 @@ export async function exportImposedPdf(params: {
       const cx=(placement.x+placement.width/2)*MM_TO_PT,cy=sheetHeightPt-(placement.y+placement.height/2)*MM_TO_PT;
       const angle=-item.rotation*Math.PI/180,c=Math.cos(angle),s=Math.sin(angle);
       outPage.drawImage(image,{x:cx-c*w/2+s*h/2,y:cy-s*w/2-c*h/2,width:w,height:h,rotate:degrees(-item.rotation),opacity:Math.max(.1,Math.min(1,item.opacity))});
+      outPage.pushOperators(popGraphicsState());
+    }
+
+    for (const placement of imagePlacements(sheetSide,totalSides,allPages,overlays,pageIndices)) {
+      const item=placement.image;
+      if (!Number.isFinite(placement.width) || !Number.isFinite(placement.height) || placement.width <= 0 || placement.height <= 0) continue;
+      if (!item.src) throw new Error(`Image overlay ${item.id} lost its picture data`);
+      const w=placement.width*MM_TO_PT, h=placement.height*MM_TO_PT;
+      const rect=imageDrawRect(item,w,h);
+      // Mirroring cannot be expressed with a plain rectangle, so those (and exotic formats) are rasterized once.
+      const needsRaster=!isDirectlyEmbeddable(item.src)||!!item.flipHorizontal||!!item.flipVertical;
+      const key=JSON.stringify([item.src.length,item.src.slice(0,64),item.fit,item.flipHorizontal,item.flipVertical,needsRaster,Math.round(w*10),Math.round(h*10)]);
+      let image=pictureImages.get(key);
+      if(!image){
+        if(needsRaster){
+          if (typeof document === 'undefined') throw new Error('Exporting a flipped or non PNG/JPEG picture needs a Canvas 2D renderer');
+          const scale=Math.min(300/72,4096/w,4096/h);
+          const png=await rasterizeOverlayImage(item.src,w*scale,h*scale,{fit:item.fit,naturalWidth:item.naturalWidth,naturalHeight:item.naturalHeight,
+            flipHorizontal:item.flipHorizontal,flipVertical:item.flipVertical,drawRect:{x:rect.x*scale,y:rect.y*scale,width:Math.max(1,rect.width*scale),height:Math.max(1,rect.height*scale)}});
+          image=await outPdf.embedPng(png);
+        } else {
+          image=/^data:image\/jpe?g;/i.test(item.src) ? await outPdf.embedJpg(item.src) : await outPdf.embedPng(item.src);
+        }
+        pictureImages.set(key,image);
+      }
+      outPage.pushOperators(pushGraphicsState());
+      if(placement.clip){const r=placement.clip;outPage.pushOperators(rectangle(r.x*MM_TO_PT,sheetHeightPt-(r.y+r.height)*MM_TO_PT,r.width*MM_TO_PT,r.height*MM_TO_PT),clip(),endPath());}
+      const parentAngle=-placement.parentRotation*Math.PI/180,pcx=(placement.parentX+placement.parentWidth/2)*MM_TO_PT,pcy=sheetHeightPt-(placement.parentY+placement.parentHeight/2)*MM_TO_PT;
+      if(parentAngle){const c=Math.cos(parentAngle),s=Math.sin(parentAngle);outPage.pushOperators(concatTransformationMatrix(c,s,-s,c,pcx-c*pcx+s*pcy,pcy-s*pcx-c*pcy));}
+      // The picture sits at its fit offset inside the box, and that offset rotates with the box.
+      const offsetX=needsRaster?0:rect.x+rect.width/2-w/2, offsetY=needsRaster?0:rect.y+rect.height/2-h/2;
+      const tilt=item.rotation*Math.PI/180,tc=Math.cos(tilt),ts=Math.sin(tilt);
+      const cx=(placement.x+placement.width/2)*MM_TO_PT+offsetX*tc-offsetY*ts;
+      const cy=sheetHeightPt-(placement.y+placement.height/2)*MM_TO_PT-(offsetX*ts+offsetY*tc);
+      const drawWidth=needsRaster?w:rect.width, drawHeight=needsRaster?h:rect.height;
+      const angle=-item.rotation*Math.PI/180,c=Math.cos(angle),s=Math.sin(angle);
+      outPage.drawImage(image,{x:cx-c*drawWidth/2+s*drawHeight/2,y:cy-s*drawWidth/2-c*drawHeight/2,width:drawWidth,height:drawHeight,
+        rotate:degrees(-item.rotation),opacity:Math.max(.1,Math.min(1,item.opacity))});
       outPage.pushOperators(popGraphicsState());
     }
 

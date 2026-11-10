@@ -25,6 +25,7 @@ import { PageCanvasCell, type CanvasTool } from './PageCanvasCell';
 import { LayoutGuides, MeasurementTool } from './SheetTools';
 import { RulerGuideProvider, SheetRuler, GuidePaperRef, UserGuideLines } from './RulerGuides';
 import { TextOverlayLayer } from './TextOverlayLayer';
+import { hasImageTransfer, routeDroppedFiles } from '../engine/imageImport';
 import { AspectCropControls } from './AspectCropControls';
 import { t } from '../i18n/translations';
 import {
@@ -78,6 +79,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     focusPageFromPreview,
     setZoomPercent,
     importFiles,
+    addImageOverlayFiles,
     loadSampleWorkspace,
     applyPageGeometry,
     applyAspectRatioCrop,
@@ -115,6 +117,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const [showPreflight, setShowPreflight] = useState(false);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [pictureDrop, setPictureDrop] = useState<{sheetIndex:number;xPercent:number;yPercent:number} | null>(null);
   const [loupeCoords, setLoupeCoords] = useState<{
     xPercent: number;
     yPercent: number;
@@ -130,9 +133,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     ? computeImpositionSheets([{ ...previewOnlyPage, selectedForPrint: true }], { ...layout, duplexMode:'none' })
     : outputSheets, [previewOnlyPage, layout, outputSheets]);
   const pageNumbers = useMemo(() => new Map(pages.map((page, index) => [page.id, index + 1])), [pages]);
-  const textEditing = useAppStore(s => !!s.textEdit || s.overlays.some(o=>o.id===s.selectedOverlayId && o.kind==='numbering'));
+  const textEditing = useAppStore(s => !!s.textEdit || s.overlays.some(o=>o.id===s.selectedOverlayId && (o.kind==='numbering'||o.kind==='image')));
   useEffect(() => { if (textEditing) setCanvasTool('move'); }, [textEditing]);
-  const hasTextOverlays = useMemo(() => overlays.some(item => item.kind === 'text' || item.kind === 'numbering' && item.enabled), [overlays]);
+  const hasTextOverlays = useMemo(() => overlays.some(item => item.kind === 'text' || item.kind === 'image' || item.kind === 'numbering' && item.enabled), [overlays]);
   useEffect(() => {
     if (!selectedOverlayId) return;
     const dismiss = (event: PointerEvent) => {
@@ -390,6 +393,32 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
             <div
               data-sheet-canvas-index={sheetSide.sideIndex - 1}
               data-color-accurate
+              onDragOver={(e) => {
+                if (previewOnlyPage || !hasImageTransfer(e.dataTransfer)) return;
+                e.preventDefault(); e.stopPropagation();
+                e.dataTransfer.dropEffect = 'copy';
+                const rect = e.currentTarget.getBoundingClientRect();
+                setPictureDrop({ sheetIndex: sheetSide.sideIndex - 1, xPercent: (e.clientX - rect.left) / rect.width * 100, yPercent: (e.clientY - rect.top) / rect.height * 100 });
+              }}
+              onDragLeave={(e) => {
+                if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return;
+                setPictureDrop(current => (current?.sheetIndex === sheetSide.sideIndex - 1 ? null : current));
+              }}
+              onDrop={(e) => {
+                const files = e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : [];
+                // A picture lands on the sheet as an overlay; a PDF dropped here still opens as a document.
+                const { images, documents: others } = routeDroppedFiles(files, !previewOnlyPage);
+                setPictureDrop(null);
+                if (!files.length) return;
+                // The sheet owns this drop either way, so the workspace-wide drop zone must not import it twice.
+                e.preventDefault(); e.stopPropagation();
+                if (others.length) void importFiles(others);
+                if (!images.length) return;
+                const rect = e.currentTarget.getBoundingClientRect();
+                const xMm = (e.clientX - rect.left) / rect.width * sheetSide.widthMm;
+                const yMm = (e.clientY - rect.top) / rect.height * sheetSide.heightMm;
+                void addImageOverlayFiles(images, sheetSide, { xMm, yMm });
+              }}
               onClick={e => {
                 if ((canvasTool === 'move' || canvasTool === 'layout') && !previewOnlyPage) {
                   e.stopPropagation(); setActiveGuideSheet(sheetSide.sideIndex - 1); setCurrentOccurrenceKey(null);
@@ -504,6 +533,14 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
               })}
 
               {hasTextOverlays && <TextOverlayLayer sheet={sheetSide} totalSheets={outputSheets.length} pages={pages} pageIndices={pageNumbers} pxPerMm={basePxPerMm} enabled={canvasTool==='move' && !spaceDown} previewOnly={!!previewOnlyPage}/>}
+              {pictureDrop?.sheetIndex === sheetSide.sideIndex - 1 && (
+                <div className="pointer-events-none absolute inset-0 z-20 bg-sky-500/10">
+                  <span className="absolute rounded border-2 border-dashed border-sky-400" style={{ left: `${pictureDrop.xPercent}%`, top: `${pictureDrop.yPercent}%`, width: '45%', height: '30%', transform: 'translate(-50%, -50%)' }} />
+                  <p className="absolute inset-x-0 bottom-2 text-center text-[11px] font-bold text-sky-200">
+                    {lang === 'fa' ? 'رها کنید تا تصویر روی همین صفحه بنشیند' : 'Release to drop the picture onto this page'}
+                  </p>
+                </div>
+              )}
 
               {/* F1: Watermark Overlay (Single or Tiled) */}
               {watermark.enabled && resolvedWatermarkText && (

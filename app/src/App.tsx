@@ -9,6 +9,8 @@ import { StatusBar } from './components/StatusBar';
 import { ModalsAndToasts } from './components/Modals';
 import { TextControlPanel } from './components/TextControlPanel';
 import { NumberingControlPanel } from './components/NumberingControlPanel';
+import { ImageControlPanel } from './components/ImageControlPanel';
+import { routeDroppedFiles } from './engine/imageImport';
 
 export const App: React.FC = () => {
   const {
@@ -135,6 +137,19 @@ export const App: React.FC = () => {
       }
     };
 
+    // A picture dropped on a sheet becomes an editable overlay; dropped anywhere else it is a new document/page.
+    const onWindowDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types && Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault();
+    };
+    const onWindowDrop = (e: DragEvent) => {
+      if (e.defaultPrevented) return; // the preview already routed this drop onto a page
+      const files = e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : [];
+      const { documents } = routeDroppedFiles(files, false); // outside the sheet even a picture is a new document
+      if (documents.length === 0) return;
+      e.preventDefault();
+      void importFiles(documents);
+    };
+
     const onPaste = (e: ClipboardEvent) => {
       const files = e.clipboardData?.files
         ? Array.from(e.clipboardData.files)
@@ -147,9 +162,13 @@ export const App: React.FC = () => {
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('paste', onPaste);
+    window.addEventListener('dragover', onWindowDragOver);
+    window.addEventListener('drop', onWindowDrop);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('paste', onPaste);
+      window.removeEventListener('dragover', onWindowDragOver);
+      window.removeEventListener('drop', onWindowDrop);
     };
   }, [
     pages,
@@ -180,6 +199,7 @@ export const App: React.FC = () => {
           <PreviewWorkspace onCursorMoveMm={setCursorPos} />
           {selectedOverlayId && overlays.some(o=>o.id===selectedOverlayId && o.kind==='text') && <TextControlPanel />}
           {selectedOverlayId && overlays.some(o=>o.id===selectedOverlayId && o.kind==='numbering') && <NumberingControlPanel />}
+          {selectedOverlayId && overlays.some(o=>o.id===selectedOverlayId && o.kind==='image') && <ImageControlPanel />}
         </div>
         <StatusBar cursorPos={cursorPos} />
         <ModalsAndToasts />
