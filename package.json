@@ -4,14 +4,16 @@
   "private": true,
   "description": "PrintStudio Pro - Enterprise Windows Print Previewer, Virtual Printer, PDF Merger & Imposition Suite",
   "type": "module",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/electron/main.js",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "tsc -b && vite build",
-    "build:electron": "tsc -p tsconfig.electron.json && vite build && electron-builder --win --x64",
+    "build:electron": "tsc -p tsconfig.electron.json && vite build && node scripts/prepare-win-build.mjs && electron-builder --win --x64",
     "preview": "vite preview --host 0.0.0.0 --port 4173",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:electron:nosidecar": "tsc -p tsconfig.electron.json && vite build && node scripts/prepare-win-build.mjs --allow-missing-sidecar && electron-builder --win --x64",
+    "sidecar:publish": "dotnet publish printer-service/PrinterService.csproj -c Release"
   },
   "dependencies": {
     "@fontsource/vazirmatn": "^5.3.0",

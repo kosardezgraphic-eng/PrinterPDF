@@ -107,7 +107,8 @@ async function createMainWindow(): Promise<void> {
   if (devServerUrl) {
     await mainWindow.loadURL(devServerUrl);
   } else {
-    await mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    // `__dirname` is <resources>/dist-electron/electron once packed, so the renderer is two up.
+    await mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
   }
 }
 

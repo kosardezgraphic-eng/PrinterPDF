@@ -109,9 +109,63 @@ npm test
 # ۴. بیلد نسخه وب و کامپایل TypeScript
 npm run build
 
-# ۵. کامپایل سرویس پرینتر C# (.NET 8) روی ویندوز
-dotnet publish printer-service/PrinterService.csproj -c Release -r win-x64 --self-contained true
+# ۵. کامپایل سرویس پرینتر C# (.NET 8) روی ویندوز (نیازمند .NET 8 SDK)
+npm run sidecar:publish
+# معادل: dotnet publish printer-service/PrinterService.csproj -c Release
 
 # ۶. ساخت فایل نصاب ویندوز (NSIS Installer + Portable .exe)
 npm run build:electron
 ```
+
+---
+
+## ۴. گرفتن خروجی ویندوز (NSIS + Portable)
+
+خروجی ویندوز فقط روی ویندوز (یا روی رانر `windows-latest` در GitHub Actions) ساخته می‌شود؛
+`electron-builder` برای بسته‌بندی به فایل‌های فشردهٔ Electron ویندوز و ابزار NSIS نیاز دارد که
+در محیط لینوکس/کانتینر قابل دریافت نیستند.
+
+**روش ۱ — روی ماشین ویندوزی:**
+
+```powershell
+npm ci
+npm test
+npm run sidecar:publish        # .NET 8 SDK لازم است
+npm run build:electron         # خروجی در پوشهٔ release/
+```
+
+اگر سرویس C# را publish نکنید، بیلد با پیام راهنما متوقف می‌شود. برای ساخت نسخه‌ای بدون سرویس
+چاپ (ادغام، ایمپوزیشن، خروجی PDF و پیش‌نمایش کامل کار می‌کند؛ فهرست چاپگرها، حاشیهٔ سخت دستگاه
+و ارسال کار به صف در دسترس نخواهند بود و «حاشیه چاپگر» به‌صورت unavailable گزارش می‌شود):
+
+```powershell
+npm run build:electron:nosidecar
+```
+
+پس از اتمام، دو فایل در `release/` ساخته می‌شود:
+
+- `PrintStudio Pro-1.0.0-x64.exe` — نصاب NSIS (قابل انتخاب محل نصب، میان‌بر دسکتاپ/استارت،
+  `perMachine: false` یعنی نصب برای کاربر جاری)
+- `PrintStudio Pro-1.0.0-Portable-x64.exe` — نسخهٔ قابل اجرا بدون نصب
+
+**روش ۲ — بدون ماشین ویندوزی (GitHub Actions):** فایل `.github/workflows/build-windows.yml`
+را باز کنید، **Run workflow** را بزنید (در صورت نیاز گزینهٔ `skip-sidecar` را روشن کنید). پس از
+موفق شدن، قطعهٔ `printstudio-windows-x64` در صفحهٔ Summary همان اجرا هر دو فایل `.exe` را دارد.
+این workflow ترتیبِ بالا را اجرا می‌کند: `npm ci` → `npm test` → `sidecar:publish` → `build:electron`.
+
+**نکات مهم دربارهٔ خروجی:**
+
+- **امضای کد (code signing) انجام نشده** — گواهی در مخزن نیست؛ ویندوز هنگام اولین اجرا احتمالاً
+  هشدار SmartScreen نشان می‌دهد (More info → Run anyway). برای توزیع عمومی باید `win.sign*` با
+  یک گواهی معتبر پیکربندی شود.
+- **آیکون سفارشی نیست** — پوشهٔ `build/` (buildResources) وجود ندارد، پس electron-builder از آیکون
+  پیش‌فرض Electron استفاده می‌کند و فقط هشدار می‌دهد. برای آیکون سفارشی، `build/icon.ico` را اضافه کنید.
+- **پیوند فایل‌ها** هنگام نصب ثبت می‌شود: `.pdf` (نمایش) و `.psp` (ویرایش). باز کردن فایل از
+  Explorer یا خط فرمان هم پشتیبانی می‌شود: مسیرها از طریق `cli:open-files` به رندرر می‌رسند و
+  به‌عنوان سند جدید وارد می‌شوند (سقف هر فایل ۱۲۸ مگابایت).
+- `publish` در `electron-builder.yml` به `https://updates.printstudiopro.local/releases` اشاره می‌کند؛
+  تا وقتی آن سرور وجود ندارد، **باید** بدون سوییچ `--publish` بیلد کنید (دستورهای بالا همین‌طورند).
+- قراردادهای مسیرِ بسته‌بندی (`main`، محل `dist/index.html`، پوشهٔ publish سرویس، قالب CommonJS
+  بودن خروجی `dist-electron`) با تست `app/src/engine/packaging.test.ts` پایش می‌شود تا اگر
+  تنظیمات از هم فاصله گرفتند، در CI بشکنند — چون این خطاها نصاب را می‌سازند ولی برنامه را روی
+  ماشین کاربر می‌خوابانند.

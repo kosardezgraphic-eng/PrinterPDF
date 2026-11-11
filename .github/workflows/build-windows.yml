@@ -1,0 +1,57 @@
+name: Windows build
+
+# Builds the NSIS installer and the portable .exe, and uploads them as artifacts, so a Windows
+# output does not require a Windows machine. Manual by default; tags publish the same artifacts.
+on:
+  workflow_dispatch:
+    inputs:
+      skip-sidecar:
+        description: 'Package without the C# print sidecar (printer features stay unavailable)'
+        type: boolean
+        default: false
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The suite is the only real gate on the placement engine, so it runs before packaging.
+      - name: Tests
+        run: npm test
+
+      - name: Set up .NET 8 (print sidecar)
+        if: ${{ !inputs.skip-sidecar }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish the print sidecar
+        if: ${{ !inputs.skip-sidecar }}
+        run: npm run sidecar:publish
+
+      - name: Build installer and portable exe
+        run: npm run ${{ inputs.skip-sidecar && 'build:electron:nosidecar' || 'build:electron' }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: printstudio-windows-x64
+          path: |
+            release/*.exe
+            release/*.exe.blockmap
+          if-no-files-found: error
+          retention-days: 30
