@@ -10,6 +10,7 @@ import {DEFAULT_LAYOUT,DEFAULT_SETTINGS,useAppStore} from '../store/useAppStore'
 import {getDefaultPageNumberSettings} from './watermarkEngine';
 import {computeImpositionSheets} from './layoutEngine';
 import {imagePlacements} from './overlayPlacements';
+import {jpegDataUrl, pngChunk, pngDataUrl, sof} from './imageFixtures';
 
 /** A 400×200 picture: 1 px = 1 mm on the mocked 200×300 sheet, so the expected box is 90×45 mm. */
 const PNG=new Uint8Array([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]);
@@ -52,6 +53,26 @@ afterEach(()=>{act(()=>root.unmount());host.remove();vi.restoreAllMocks();vi.uns
 
 function render(){act(()=>root.render(React.createElement(React.Fragment,null,
   React.createElement(PreviewWorkspace,{onCursorMoveMm:()=>{}}),React.createElement(ImageControlPanel))));rect(canvas(),200,300);}
+
+describe('picture format line',()=>{
+ it('shows what the file is and how the export will handle it',()=>{
+  useAppStore.setState({overlays:[image({src:pngDataUrl({width:12,height:6,colorType:6})})],selectedOverlayId:'i'});
+  render();
+  expect(host.querySelector('[data-picture-format]')!.textContent).toBe('File: PNG 12×6, RGB + alpha, 8-bit');
+ });
+ it('warns before an animation is flattened',()=>{
+  useAppStore.setState({overlays:[image({src:pngDataUrl({extra:pngChunk('acTL',[0,0,0,2])})})],selectedOverlayId:'i'});
+  render();
+  const note=host.querySelector('[data-picture-format]')!.textContent!;
+  expect(note).toContain('PNG 8×8');expect(note).toContain('the animation is flattened to its first frame');
+ });
+ it('names a CMYK file so the operator can expect a colour-managed print',()=>{
+  useAppStore.setState({overlays:[image({src:jpegDataUrl([sof(0xc0,30,20,4)])})],selectedOverlayId:'i'});
+  render();
+  const note=host.querySelector('[data-picture-format]')!.textContent!;
+  expect(note).toContain('JPEG 30×20, CMYK (unmarked)');expect(note).toContain('plain CMYK samples are stored as-is');
+ });
+});
 
 describe('picture drop and gestures',()=>{
  it('drops a picture on the sheet as a page overlay centred on the cursor',async()=>{

@@ -5,6 +5,10 @@
 
 import {
   BlendMode,
+  PDFArray,
+  PDFName,
+  PDFNumber,
+  PDFRawStream,
   clip,
   concatTransformationMatrix,
   endPath,
@@ -28,7 +32,8 @@ import type {
 } from '@shared/models';
 import { drawOverlayText, textPlacements } from './textOverlays';
 import { imagePlacements, imageDrawRect } from './overlayPlacements';
-import { isDirectlyEmbeddable, rasterizeOverlayImage } from './imageImport';
+import { rasterizeOverlayImage } from './imageImport';
+import { planPictureEmbedding } from './imageFormat';
 import { computeImpositionSheets, sortCellsByLayer } from './layoutEngine';
 import { normalizeAngle, pageCropFractions, rotateInsets } from './pageGeometry';
 import { shouldApplyEffectsToPage } from './effectsPipeline';
@@ -43,6 +48,25 @@ import type {
 } from './pdfRendererWorker';
 
 const MM_TO_PT = 72 / 25.4; // 1 mm = 2.83464567 pt
+
+/** The preview uses the model value directly, so the PDF must not clamp it differently. */
+function clampOpacity(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 1;
+}
+
+/**
+ * Overrides the `Decode` array pdf-lib puts on a CMYK JPEG image. `0 1 0 1 …` means "the samples
+ * already run from no ink to full ink", which is what a plain CMYK stream stores. pdf-lib only
+ * writes the stream when the image is first drawn, so the embed has to be forced here.
+ */
+async function applyCmykDecode(doc: PDFDocument, image: Awaited<ReturnType<PDFDocument['embedJpg']>>): Promise<void> {
+  await image.embed();
+  const stream = doc.context.lookup(image.ref);
+  if (!(stream instanceof PDFRawStream)) return;
+  const decode = PDFArray.withContext(doc.context);
+  for (const value of [0, 1, 0, 1, 0, 1, 0, 1]) decode.push(PDFNumber.of(value));
+  stream.dict.set(PDFName.of('Decode'), decode);
+}
 
 export interface ImportErrorItem {
   fileName: string;
@@ -765,7 +789,7 @@ export async function exportImposedPdf(params: {
       if(parentAngle){const c=Math.cos(parentAngle),s=Math.sin(parentAngle);outPage.pushOperators(concatTransformationMatrix(c,s,-s,c,pcx-c*pcx+s*pcy,pcy-s*pcx-c*pcy));}
       const cx=(placement.x+placement.width/2)*MM_TO_PT,cy=sheetHeightPt-(placement.y+placement.height/2)*MM_TO_PT;
       const angle=-item.rotation*Math.PI/180,c=Math.cos(angle),s=Math.sin(angle);
-      outPage.drawImage(image,{x:cx-c*w/2+s*h/2,y:cy-s*w/2-c*h/2,width:w,height:h,rotate:degrees(-item.rotation),opacity:Math.max(.1,Math.min(1,item.opacity))});
+      outPage.drawImage(image,{x:cx-c*w/2+s*h/2,y:cy-s*w/2-c*h/2,width:w,height:h,rotate:degrees(-item.rotation),opacity:clampOpacity(item.opacity)});
       outPage.pushOperators(popGraphicsState());
     }
 
@@ -775,19 +799,26 @@ export async function exportImposedPdf(params: {
       if (!item.src) throw new Error(`Image overlay ${item.id} lost its picture data`);
       const w=placement.width*MM_TO_PT, h=placement.height*MM_TO_PT;
       const rect=imageDrawRect(item,w,h);
-      // Mirroring cannot be expressed with a plain rectangle, so those (and exotic formats) are rasterized once.
-      const needsRaster=!isDirectlyEmbeddable(item.src)||!!item.flipHorizontal||!!item.flipVertical;
-      const key=JSON.stringify([item.src.length,item.src.slice(0,64),item.fit,item.flipHorizontal,item.flipVertical,needsRaster,Math.round(w*10),Math.round(h*10)]);
+      // The file's own bytes decide the route, never the declared MIME type: a JPEG saved as
+      // data:image/png would otherwise be handed to the PNG decoder. Mirroring cannot be expressed
+      // with a plain rectangle either, so those go through the same Canvas the preview composites on.
+      const plan=planPictureEmbedding(item.src);
+      const needsRaster=plan.route==='raster'||!!item.flipHorizontal||!!item.flipVertical;
+      // Raw embeds depend on the bytes alone, so the same picture at two sizes is stored once.
+      const key=needsRaster?JSON.stringify([item.src,item.fit,item.flipHorizontal,item.flipVertical,Math.round(w*10),Math.round(h*10)]):item.src;
       let image=pictureImages.get(key);
       if(!image){
         if(needsRaster){
-          if (typeof document === 'undefined') throw new Error('Exporting a flipped or non PNG/JPEG picture needs a Canvas 2D renderer');
+          if (typeof document === 'undefined') throw new Error('Exporting a flipped or unsupported picture needs a Canvas 2D renderer');
           const scale=Math.min(300/72,4096/w,4096/h);
           const png=await rasterizeOverlayImage(item.src,w*scale,h*scale,{fit:item.fit,naturalWidth:item.naturalWidth,naturalHeight:item.naturalHeight,
             flipHorizontal:item.flipHorizontal,flipVertical:item.flipVertical,drawRect:{x:rect.x*scale,y:rect.y*scale,width:Math.max(1,rect.width*scale),height:Math.max(1,rect.height*scale)}});
           image=await outPdf.embedPng(png);
         } else {
-          image=/^data:image\/jpe?g;/i.test(item.src) ? await outPdf.embedJpg(item.src) : await outPdf.embedPng(item.src);
+          image=plan.route==='jpeg' ? await outPdf.embedJpg(item.src) : await outPdf.embedPng(item.src);
+          // pdf-lib complements every CMYK stream it stores, which turns a plain CMYK file into a
+          // colour negative; the image dictionary is shared, so one patch covers all placements.
+          if (plan.patchDecode) await applyCmykDecode(outPdf, image);
         }
         pictureImages.set(key,image);
       }
@@ -803,7 +834,7 @@ export async function exportImposedPdf(params: {
       const drawWidth=needsRaster?w:rect.width, drawHeight=needsRaster?h:rect.height;
       const angle=-item.rotation*Math.PI/180,c=Math.cos(angle),s=Math.sin(angle);
       outPage.drawImage(image,{x:cx-c*drawWidth/2+s*drawHeight/2,y:cy-s*drawWidth/2-c*drawHeight/2,width:drawWidth,height:drawHeight,
-        rotate:degrees(-item.rotation),opacity:Math.max(.1,Math.min(1,item.opacity))});
+        rotate:degrees(-item.rotation),opacity:clampOpacity(item.opacity)});
       outPage.pushOperators(popGraphicsState());
     }
 

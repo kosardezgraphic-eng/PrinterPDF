@@ -23,6 +23,10 @@ export const IPC_CHANNELS = {
   PROJECT_OPEN_PSP: 'project:open-psp',
   PROJECT_LOAD_AUTOSAVE: 'project:load-autosave',
   PROJECT_WRITE_AUTOSAVE: 'project:write-autosave',
+  /** Reads a file the OS handed to the renderer (native drop / "Open with" / CLI arguments). */
+  FILE_READ_LOCAL: 'file:read-local',
+  /** Main → renderer notification for files passed on the command line by a second instance. */
+  CLI_OPEN_FILES: 'cli:open-files',
 
   // Printer Service Sidecar (Win32 Spooler / System.Printing via Named Pipe JSON-RPC)
   PRINTER_LIST: 'printer:list',
@@ -66,8 +70,21 @@ export interface JsonRpcResponse<TResult = unknown> {
   };
 }
 
+/** A file read in the main process and handed back to the renderer as bytes. */
+export interface LocalFilePayload {
+  name: string;
+  path: string;
+  size: number;
+  mimeType: string;
+  bytes: Uint8Array;
+}
+
 export interface PrintStudioElectronAPI {
   isElectron: boolean;
+  /** Reads a file the OS referred to by path (command line, "Open with…"). */
+  readLocalFile(path: string): Promise<LocalFilePayload>;
+  /** Subscribes to files passed to a second instance of the app; returns an unsubscribe. */
+  onCliOpenFiles(callback: (paths: string[]) => void): () => void;
   listPrinters(): Promise<PrinterInfo[]>;
   getPrinterMargins(request: PrinterMarginRequest): Promise<PrinterMarginResult>;
   updatePrinterProfile(printerName: string, profile: PrinterProfileSettings): Promise<PrinterInfo>;
