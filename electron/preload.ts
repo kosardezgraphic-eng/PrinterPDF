@@ -61,6 +61,16 @@ const api: PrintStudioElectronAPI = {
   loadSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_LOAD),
 
   clearCache: () => ipcRenderer.invoke(IPC_CHANNELS.CACHE_CLEAR),
+
+  readLocalFile: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.FILE_READ_LOCAL, path),
+
+  onCliOpenFiles: (callback: (paths: string[]) => void) => {
+    const listener = (_event: unknown, paths: string[]) => callback(Array.isArray(paths) ? paths : []);
+    ipcRenderer.on(IPC_CHANNELS.CLI_OPEN_FILES, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.CLI_OPEN_FILES, listener);
+    };
+  },
 };
 
 contextBridge.exposeInMainWorld('printStudioAPI', api);

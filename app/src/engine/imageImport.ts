@@ -1,11 +1,21 @@
+import { planPictureEmbedding } from './imageFormat';
 const IMAGE_NAME=/\.(jpe?g|png|webp|gif|bmp|tiff?|svg)$/i;
 /** Files that may become an on-page picture overlay rather than a new document. */
 export function isImageFile(file:File):boolean{
   return (file.type?.startsWith('image/')??false) || IMAGE_NAME.test(file.name??'');
 }
-/** Formats pdf-lib can embed without resampling. */
+/**
+ * Whether pdf-lib can store the bytes as they are. The decision comes from the file header — the
+ * same `planPictureEmbedding` the exporter follows — so a picture is never previewed as a raw
+ * embed and printed through Canvas, or the other way round, and a lying `data:image/png` prefix
+ * cannot send a JPEG stream to the PNG decoder.
+ */
 export function isDirectlyEmbeddable(src:string):boolean{
-  return /^data:image\/(png|jpe?g);/i.test(src);
+  return planPictureEmbedding(src).route!=='raster';
+}
+/** What the exporter will do with this picture, in one line for the panel. */
+export function pictureEmbeddingNote(src:string):string{
+  return planPictureEmbedding(src).notes.join('; ');
 }
 /** Drag-over data can only tell us a file is coming, not its type; that is enough for the hint. */
 export function hasImageTransfer(dataTransfer: DataTransfer | null | undefined): boolean {

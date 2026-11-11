@@ -1,5 +1,6 @@
 import {describe,expect,it} from 'vitest';
-import {hasImageTransfer,isDirectlyEmbeddable,isImageFile,measureImage,rasterizeOverlayImage,readFileAsDataUrl,routeDroppedFiles} from './imageImport';
+import {hasImageTransfer,isDirectlyEmbeddable,isImageFile,measureImage,pictureEmbeddingNote,rasterizeOverlayImage,readFileAsDataUrl,routeDroppedFiles} from './imageImport';
+import {jpegDataUrl, pngBytes, pngDataUrl, sof, toDataUrl} from './imageFixtures';
 
 const file=(name:string,type:string)=>({name,type}) as File;
 describe('picture import rules',()=>{
@@ -23,10 +24,17 @@ describe('picture import rules',()=>{
   expect(routeDroppedFiles([],true)).toEqual({images:[],documents:[]});
  });
  it('embeds only what pdf-lib can take as is',()=>{
-  expect(isDirectlyEmbeddable('data:image/png;base64,AAA')).toBe(true);
-  expect(isDirectlyEmbeddable('data:image/jpeg;base64,AAA')).toBe(true);
+  // Real headers: a base64 body that is not a PNG stream is not embeddable, however it is labelled.
+  expect(isDirectlyEmbeddable(pngDataUrl({colorType:2}))).toBe(true);
+  expect(isDirectlyEmbeddable(jpegDataUrl([sof(0xc0,30,20,3)]))).toBe(true);
+  expect(isDirectlyEmbeddable('data:image/png;base64,AAA')).toBe(false);
   expect(isDirectlyEmbeddable('data:image/webp;base64,AAA')).toBe(false);
   expect(isDirectlyEmbeddable('https://example.com/a.png')).toBe(false);
+  // The bytes win over the declared MIME type, which is what keeps preview and PDF on one route.
+  const mislabelled=toDataUrl('image/jpeg',pngBytes({colorType:2}));
+  expect(isDirectlyEmbeddable(mislabelled)).toBe(true);
+  expect(pictureEmbeddingNote(mislabelled)).toBe('');
+  expect(pictureEmbeddingNote('data:image/png;base64,AAA')).toBe('the overlay source is not a base64 image');
  });
  it('says what is missing instead of exporting a blank box',async()=>{
   await expect(rasterizeOverlayImage('data:image/png;base64,AAA',10,10,{fit:'contain'})).rejects.toThrow('Picture overlays need a Canvas 2D renderer');

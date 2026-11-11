@@ -1,4 +1,5 @@
 import {describe,expect,it} from 'vitest';
+import {adobeApp14, jpegBytes, jpegDataUrl, pngChunk, pngDataUrl, sof, toDataUrl} from './imageFixtures';
 import {PDFArray,PDFDict,PDFDocument,PDFName,PDFRawStream,decodePDFRawStream} from 'pdf-lib';
 import type {LayoutSettings,PageItem,PageOverlayImage,SourceDocument} from '@shared/models';
 import {DEFAULT_EFFECTS,DEFAULT_LAYOUT} from '../store/useAppStore';
@@ -28,10 +29,14 @@ async function exportWith(overlay:PageOverlayImage|PageOverlayImage[],options:{p
   const dict=(index:number)=>pdf.getPage(index).node.Resources()?.lookup(PDFName.of('XObject'),PDFDict);
   const images=Array.from({length:pdf.getPageCount()},(_,i)=>{const box=dict(i);if(!box)return [];
     return box.keys().map(key=>{const ref=box.lookup(key);const value=pdf.context.lookup(ref) as {dict?:PDFDict}|undefined;
-      return {ref:String(ref),image:String(value?.dict?.get(PDFName.of('Subtype'))??'')==='/Image'};}).filter(entry=>entry.image);});
+      return {ref:String(ref),dict:value?.dict,image:String(value?.dict?.get(PDFName.of('Subtype'))??'')==='/Image'};}).filter(entry=>entry.image);});
   const xobjects=images.map(list=>list.length);
   const refs=images.map(list=>list.map(entry=>entry.ref));
-  return {pdf,streams,xobjects,refs};
+  const dicts=images.map(list=>list.map(entry=>entry.dict));
+  // ExtGState dicts hold the transparency each placement was drawn with.
+  const states=Array.from({length:pdf.getPageCount()},(_,i)=>{const box=pdf.getPage(i).node.Resources()?.lookup(PDFName.of('ExtGState'),PDFDict);
+    return box?box.keys().map(key=>box.lookup(key,PDFDict)):[];});
+  return {pdf,streams,xobjects,refs,dicts,states};
 }
 
 describe('picture export',()=>{
@@ -71,9 +76,42 @@ describe('picture export',()=>{
   await expect(exportWith(image({src:''}))).rejects.toThrow('Image overlay i lost its picture data');
  });
  it('asks for a Canvas renderer before it can mirror a picture',async()=>{
-  await expect(exportWith(image({flipHorizontal:true}))).rejects.toThrow('Exporting a flipped or non PNG/JPEG picture needs a Canvas 2D renderer');
+  await expect(exportWith(image({flipHorizontal:true}))).rejects.toThrow('Exporting a flipped or unsupported picture needs a Canvas 2D renderer');
   await expect(exportWith(image({src:'data:image/webp;base64,AAAA'}))).rejects.toThrow('Canvas 2D renderer');
  });
+ it('patches the colour Decode only when the CMYK samples are not Adobe-complemented', async () => {
+  const plain = await exportWith(image({src: jpegDataUrl([sof(0xc0, 10, 20, 4)])}));
+  const dict = plain.dicts[0][0]!;
+  expect(String(dict?.get(PDFName.of('ColorSpace')))).toBe('/DeviceCMYK');
+  expect(String(dict?.get(PDFName.of('Filter')))).toBe('/DCTDecode');
+  expect(String(dict?.get(PDFName.of('Decode')))).toBe('[ 0 1 0 1 0 1 0 1 ]');   // full ink stays full ink
+  const adobe = await exportWith(image({src: jpegDataUrl([adobeApp14(2), sof(0xc0, 10, 20, 4)])}));
+  expect(String(adobe.dicts[0][0]?.get(PDFName.of('Decode')))).toBe('[ 1 0 1 0 1 0 1 0 ]');  // pdf-lib's hedge kept
+ });
+
+ it('picks the decoder from the bytes, not from the declared MIME type', async () => {
+  const mislabelled = await exportWith(image({src: toDataUrl('image/png', jpegBytes([sof(0xc0, 10, 20, 3)]))}));
+  expect(String(mislabelled.dicts[0][0]?.get(PDFName.of('Filter')))).toBe('/DCTDecode');
+ });
+
+ it('stores one copy of a picture that is drawn at two sizes', async () => {
+  const two = await exportWith([image({id:'a',widthPercent:30}), image({id:'b',widthPercent:60})]);
+  expect(two.xobjects).toEqual([2,2]);                     // drawn twice per sheet…
+  expect(two.refs[0][0]).toBe(two.refs[0][1]);             // …but embedded once
+ });
+
+ it('writes the opacity the model holds instead of flooring it', async () => {
+  const faint = await exportWith(image({opacity:0.05}));
+  const state = faint.states[0][0]!;
+  expect(String(state?.get(PDFName.of('ca')))).toBe('0.05');
+  expect(state?.get(PDFName.of('CA'))).toBeUndefined();       // images only take fill opacity
+ });
+
+ it('refuses to flatten an animated picture without a Canvas renderer', async () => {
+  const animated = image({src: pngDataUrl({extra: pngChunk('acTL', [0, 0, 0, 2])})});
+  await expect(exportWith(animated)).rejects.toThrow('needs a Canvas 2D renderer');
+ });
+
  it('skips a box that collapsed and keeps the rest of the sheet',async()=>{
   const {streams,xobjects}=await exportWith([image({widthPercent:0,heightPercent:0}),image({id:'j',xPercent:5,yPercent:5,widthPercent:10,heightPercent:10})]);
   expect(xobjects).toEqual([1,1]);                                                // the collapsed box drew nothing

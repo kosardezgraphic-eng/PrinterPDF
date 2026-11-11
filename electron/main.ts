@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, session } from 'electron';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
-import { IPC_CHANNELS } from '../shared/ipc-channels';
+import { IPC_CHANNELS, type LocalFilePayload } from '../shared/ipc-channels';
 import { PrinterSidecarClient } from './printerSidecarClient';
 import { SessionStore } from './sessionStore';
 import type {
@@ -13,9 +13,22 @@ import type {
   PspProjectFile,
 } from '../shared/models';
 
+/** Anything bigger than this is not something a preview app should hold in memory twice. */
+const MAX_NATIVE_FILE_BYTES = 128 * 1024 * 1024;
+/** Extensions the import pipeline can read; used to ignore stray arguments. */
+const NATIVE_FILE_EXTENSIONS = /\.(pdf|png|jpe?g|webp|gif|bmp|tiff?|svg)$/i;
+
+const MIME_BY_EXTENSION: Record<string, string> = {
+  pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+  webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff',
+  svg: 'image/svg+xml',
+};
+
 const sidecar = new PrinterSidecarClient();
 let mainWindow: BrowserWindow | null = null;
 let sessionStore: SessionStore;
+/** Files that arrived before the renderer had a listener, flushed once it does. */
+let pendingOpenFiles: string[] = [];
 
 // Enforce Single-Instance Lock (K3)
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -23,15 +36,26 @@ if (!gotSingleInstanceLock) {
   app.quit();
 }
 
+/** Only existing files with a document extension count; switches and the app path do not. */
+function fileArguments(argv: string[]): string[] {
+  return argv.filter((arg) => NATIVE_FILE_EXTENSIONS.test(arg) && path.isAbsolute(arg));
+}
+
+function sendOpenFiles(paths: string[]): void {
+  if (!paths.length) return;
+  if (!mainWindow || mainWindow.webContents.isLoadingMainFrame()) {
+    pendingOpenFiles = [...pendingOpenFiles, ...paths];
+    return;
+  }
+  mainWindow.webContents.send(IPC_CHANNELS.CLI_OPEN_FILES, paths);
+}
+
 app.on('second-instance', (_event, commandLine) => {
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.focus();
     // Forward CLI file paths (A2: Open with Windows / Command Line)
-    const fileArgs = commandLine.slice(2).filter((arg) => !arg.startsWith('--'));
-    if (fileArgs.length > 0) {
-      mainWindow.webContents.send('cli:open-files', fileArgs);
-    }
+    sendOpenFiles(fileArguments(commandLine.slice(1)));
   }
 });
 
@@ -65,6 +89,18 @@ async function createMainWindow(): Promise<void> {
       sandbox: true,
       spellcheck: false,
     },
+  });
+
+  // Files given to the *first* instance (`PrintStudio.exe scan.png`, Explorer "Open with…").
+  const startupFiles = fileArguments(process.argv.slice(1));
+
+  mainWindow.webContents.once('did-finish-load', () => {
+    if (startupFiles.length) sendOpenFiles(startupFiles);
+    else if (pendingOpenFiles.length) {
+      const queued = pendingOpenFiles;
+      pendingOpenFiles = [];
+      mainWindow?.webContents.send(IPC_CHANNELS.CLI_OPEN_FILES, queued);
+    }
   });
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
@@ -116,7 +152,13 @@ function registerIpcHandlers(): void {
         );
         await fs.writeFile(tempPdfPath, Buffer.from(payload.pdfBytes));
       }
-      return sidecar.submitPrintJob(payload.request, tempPdfPath);
+      try {
+        return await sidecar.submitPrintJob(payload.request, tempPdfPath);
+      } finally {
+        // The spooler has the bytes by the time the RPC answers, so the job file must not stay
+        // behind: one per print job in a directory nobody cleans would fill the disk.
+        if (tempPdfPath) await fs.rm(tempPdfPath, { force: true }).catch(() => undefined);
+      }
     }
   );
 
@@ -162,6 +204,23 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS_LOAD, async () => {
     return sessionStore.loadSettings();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.FILE_READ_LOCAL, async (_e, filePath: unknown): Promise<LocalFilePayload> => {
+    if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) throw new Error('Invalid file path');
+    const resolved = path.resolve(filePath);
+    const stats = await fs.stat(resolved);
+    if (!stats.isFile()) throw new Error('Not a file');
+    if (stats.size > MAX_NATIVE_FILE_BYTES) throw new Error(`File is larger than ${Math.floor(MAX_NATIVE_FILE_BYTES / (1024 * 1024))} MB`);
+    const bytes = await fs.readFile(resolved);
+    const extension = path.extname(resolved).slice(1).toLowerCase();
+    return {
+      name: path.basename(resolved),
+      path: resolved,
+      size: stats.size,
+      mimeType: MIME_BY_EXTENSION[extension] ?? 'application/octet-stream',
+      bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+    };
   });
 
   ipcMain.handle(IPC_CHANNELS.CACHE_CLEAR, async () => {

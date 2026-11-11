@@ -5,6 +5,7 @@ import {parseCoverageSelection,formatCoverageSelection} from '../engine/coverage
 import {isImageFile,measureImage,readFileAsDataUrl} from '../engine/imageImport';
 import {newOverlayId} from '../engine/imageOverlays';
 import {useAppStore} from '../store/useAppStore';
+import { describePictureFormat, planPictureEmbedding } from '../engine/imageFormat';
 
 const input='w-full rounded border border-slate-600 bg-slate-800 p-1 text-xs text-white';
 const MM_TO_PT=72/25.4;
@@ -79,6 +80,12 @@ export function ImageControlPanel(){
    </div>
    <label className="block">{fa?'چرخش':'Rotation'} {item.rotation}°<input aria-label={fa?'چرخش تصویر':'Image rotation'} type="range" min="0" max="360" step="0.1" value={item.rotation} onChange={e=>patch({rotation:+e.target.value})} className="w-full"/></label>
    <label className="block">{fa?'شفافیت':'Opacity'} {Math.round(item.opacity*100)}%<input aria-label={fa?'شفافیت تصویر':'Image opacity'} type="range" min="10" max="100" value={item.opacity*100} onChange={e=>patch({opacity:+e.target.value/100})} className="w-full"/></label>
+   {(() => {
+     // One line that says what the file is and what the exporter will do with it.
+     const plan = planPictureEmbedding(item.src);
+     return <p className="text-slate-400" data-picture-format="">{fa ? 'فایل' : 'File'}: {describePictureFormat(item.src, { width: item.naturalWidth, height: item.naturalHeight })}
+       {plan.notes.length ? <span className="text-amber-300"> · {plan.notes.join(' · ')}</span> : null}</p>;
+   })()}
    <label className="block">{fa?'مبنا':'Attach to'}<select aria-label={fa?'مبنای تصویر':'Image target'} className={input} value={item.target} onChange={e=>setScope(item.targetScope,e.target.value as OverlayTarget)}>
      <option value="page">{fa?'صفحه سند':'Document page'}</option><option value="sheet">{fa?'برگه خروجی':'Output sheet'}</option></select></label>
    <label className="block">{fa?'دامنه':'Scope'}<select aria-label={fa?'دامنه تصویر':'Image scope'} className={input} value={item.targetScope} onChange={e=>setScope(e.target.value as OverlayScope)}>{scopes.map((scope,i)=><option key={scope} value={scope}>{labels[i]}</option>)}</select></label>

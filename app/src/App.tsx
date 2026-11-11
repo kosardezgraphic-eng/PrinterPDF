@@ -11,6 +11,7 @@ import { TextControlPanel } from './components/TextControlPanel';
 import { NumberingControlPanel } from './components/NumberingControlPanel';
 import { ImageControlPanel } from './components/ImageControlPanel';
 import { routeDroppedFiles } from './engine/imageImport';
+import { listenForNativeOpenFiles } from './engine/nativeFiles';
 
 export const App: React.FC = () => {
   const {
@@ -40,6 +41,24 @@ export const App: React.FC = () => {
   useEffect(() => {
     void initializeWorkspace();
   }, [initializeWorkspace]);
+
+  // A file opened from Explorer or the command line reaches the app as a path only, so it is read
+  // through the desktop bridge. In a browser there is no bridge and nothing subscribes at all.
+  useEffect(() => {
+    const stop = listenForNativeOpenFiles(
+      files => {
+        const { documents } = routeDroppedFiles(files, false); // a file from Explorer is a new document, never an overlay
+        if (documents.length) void importFiles(documents);
+      },
+      error =>
+        addToast({
+          type: 'warning',
+          title: settings.language === 'fa' ? 'فایل باز نشد' : 'Cannot open the file',
+          message: error instanceof Error ? error.message : String(error),
+        }),
+    );
+    return stop;
+  }, [importFiles, addToast, settings.language]);
 
   // Synchronize HTML dir (RTL/LTR) and lang
   useEffect(() => {
