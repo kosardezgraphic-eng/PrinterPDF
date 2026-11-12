@@ -101,12 +101,12 @@ export class PrinterSidecarClient {
         activeClient = client;
 
         client.once('connect', () => {
-          client.write(JSON.stringify(payload) + '\\n', 'utf8');
+          client.write(JSON.stringify(payload) + '\n', 'utf8');
         });
 
         client.on('data', (chunk: Buffer) => {
           responseBuffer += chunk.toString('utf8');
-          const newlineIndex = responseBuffer.indexOf('\\n');
+          const newlineIndex = responseBuffer.indexOf('\n');
           if (newlineIndex === -1) return;
           const line = responseBuffer.slice(0, newlineIndex).trim();
           client.end();
