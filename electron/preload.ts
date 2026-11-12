@@ -2,14 +2,14 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   IPC_CHANNELS,
   type PrintStudioElectronAPI,
-} from '../shared/ipc-channels';
+} from '../shared/ipc-channels.js';
 import type {
   AppSettings,
   PrinterProfileSettings,
   PrinterMarginRequest,
   PrintJobRequest,
   PspProjectFile,
-} from '../shared/models';
+} from '../shared/models.js';
 
 /**
  * Secure Preload Bridge with contextIsolation: true and nodeIntegration: false.
@@ -52,8 +52,7 @@ const api: PrintStudioElectronAPI = {
   saveAutoSaveSession: (project: PspProjectFile) =>
     ipcRenderer.invoke(IPC_CHANNELS.PROJECT_WRITE_AUTOSAVE, project),
 
-  loadAutoSaveSession: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.PROJECT_LOAD_AUTOSAVE),
+  loadAutoSaveSession: () => ipcRenderer.invoke(IPC_CHANNELS.PROJECT_LOAD_AUTOSAVE),
 
   saveSettings: (settings: AppSettings) =>
     ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SAVE, settings),
