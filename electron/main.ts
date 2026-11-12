@@ -1,10 +1,14 @@
 import { app, BrowserWindow, ipcMain, session } from 'electron';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import fs from 'node:fs/promises';
 import { IPC_CHANNELS, type LocalFilePayload } from '../shared/ipc-channels.js';
 import { PrinterSidecarClient } from './printerSidecarClient.js';
 import { SessionStore } from './sessionStore.js';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 import type {
   AppSettings,
   PrinterProfileSettings,
