@@ -107,7 +107,7 @@ async function createMainWindow(): Promise<void> {
   if (devServerUrl) {
     await mainWindow.loadURL(devServerUrl);
   } else {
-    await mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    await mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
   }
 }
 
