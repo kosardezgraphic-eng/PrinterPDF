@@ -26,6 +26,7 @@ export const App: React.FC = () => {
     toggleGlobalInvert,
     duplicatePages,
     deletePages,
+    removeOverlay,
     selectAllForPrint,
     setZoomPercent,
     setModalState,
@@ -139,7 +140,13 @@ export const App: React.FC = () => {
         selectAllForPrint(true);
         return;
       }
-      if (e.key === 'Delete') {
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const selectedOverlay = useAppStore.getState().selectedOverlayId;
+        if (selectedOverlay) {
+          e.preventDefault();
+          removeOverlay(selectedOverlay);
+          return;
+        }
         e.preventDefault();
         const highlighted = pages.filter((p) => p.isHighlighted).map((p) => p.id);
         deletePages(highlighted);
@@ -197,6 +204,7 @@ export const App: React.FC = () => {
     toggleGlobalInvert,
     duplicatePages,
     deletePages,
+    removeOverlay,
     selectAllForPrint,
     setZoomPercent,
     setModalState,
