@@ -107,7 +107,7 @@ export const DEFAULT_LAYOUT: LayoutSettings = {
   duplexMode: 'long-edge',
   sheetOrder: 'rtl',
   manualDuplex: false,
-  showCellBorders: true,
+  showCellBorders: false,
   showCropMarks: false,
 };
 
