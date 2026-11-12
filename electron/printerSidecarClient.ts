@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import type {
   JsonRpcRequest,
   JsonRpcResponse,
-} from '../shared/ipc-channels';
+} from '../shared/ipc-channels.js';
 import type {
   PrinterInfo,
   PrinterMarginRequest,
@@ -13,7 +13,7 @@ import type {
   PrinterProfileSettings,
   PrintJobRequest,
   SpoolerJobInfo,
-} from '../shared/models';
+} from '../shared/models.js';
 
 const PIPE_PATH = '\\\\.\\pipe\\PrintStudioPrinterService';
 
