@@ -55,7 +55,7 @@ public sealed class PrinterSpoolerService
                     result.Add(new PrinterInfoDto(
                         Name: name, DriverName: driver, PortName: port,
                         IsDefault: string.Equals(name, defaultQueueName, StringComparison.OrdinalIgnoreCase),
-                        IsNetwork: name.StartsWith(@"\\\\", StringComparison.Ordinal) || port.StartsWith("IP_", StringComparison.OrdinalIgnoreCase),
+                        IsNetwork: name.StartsWith(@"\\", StringComparison.Ordinal) || port.StartsWith("IP_", StringComparison.OrdinalIgnoreCase),
                         IsVirtual: IsVirtualPrinter(name), Status: status,
                         JobsInQueue: queue.NumberOfJobs, TonerLevelPercent: null, TotalPageCounter: null,
                         Location: queue.Location, Capabilities: caps, ActiveProfile: profile
