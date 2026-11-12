@@ -4,7 +4,7 @@
   "private": true,
   "description": "PrintStudio Pro - Enterprise Windows Print Previewer, Virtual Printer, PDF Merger & Imposition Suite",
   "type": "module",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/electron/main.js",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "tsc -b && vite build",
