@@ -25,6 +25,16 @@ public static class WinSpoolInterop
     public const int JOB_CONTROL_DELETE = 5;
 
     public const int PRINTER_CONTROL_PURGE = 3;
+    public const uint PRINTER_ENUM_LOCAL = 0x00000002;
+    public const uint PRINTER_ENUM_CONNECTIONS = 0x00000004;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct PRINTER_INFO_4
+    {
+        public IntPtr pPrinterName;
+        public IntPtr pServerName;
+        public uint Attributes;
+    }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct PRINTER_DEFAULTS
@@ -33,6 +43,12 @@ public static class WinSpoolInterop
         public IntPtr pDevMode;
         public int DesiredAccess;
     }
+
+    [DllImport("winspool.drv", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool EnumPrinters(uint flags, string? name, uint level, IntPtr buffer, uint bufferSize, out uint needed, out uint returned);
+
+    [DllImport("winspool.drv", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool GetDefaultPrinter(System.Text.StringBuilder? buffer, ref uint bufferSize);
 
     [DllImport("winspool.drv", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern bool OpenPrinter(
