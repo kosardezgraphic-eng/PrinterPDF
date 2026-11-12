@@ -2,16 +2,16 @@ import { app, BrowserWindow, ipcMain, session } from 'electron';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
-import { IPC_CHANNELS, type LocalFilePayload } from '../shared/ipc-channels';
-import { PrinterSidecarClient } from './printerSidecarClient';
-import { SessionStore } from './sessionStore';
+import { IPC_CHANNELS, type LocalFilePayload } from '../shared/ipc-channels.js';
+import { PrinterSidecarClient } from './printerSidecarClient.js';
+import { SessionStore } from './sessionStore.js';
 import type {
   AppSettings,
   PrinterProfileSettings,
   PrinterMarginRequest,
   PrintJobRequest,
   PspProjectFile,
-} from '../shared/models';
+} from '../shared/models.js';
 
 /** Anything bigger than this is not something a preview app should hold in memory twice. */
 const MAX_NATIVE_FILE_BYTES = 128 * 1024 * 1024;
