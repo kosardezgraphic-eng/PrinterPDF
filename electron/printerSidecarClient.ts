@@ -68,48 +68,69 @@ export class PrinterSidecarClient {
 
   public async callRpc<TResult>(method: string, params: unknown = {}): Promise<TResult> {
     const id = this.reqCounter++;
-    const payload: JsonRpcRequest = {
-      jsonrpc: '2.0',
-      id,
-      method,
-      params,
-    };
+    const payload: JsonRpcRequest = { jsonrpc: '2.0', id, method, params };
 
+    // The renderer can request printers immediately after Electron spawns the .NET sidecar.
+    // Retry transient named-pipe connection errors while the service creates its pipe.
     return new Promise<TResult>((resolve, reject) => {
-      const client = net.connect(PIPE_PATH, () => {
-        client.write(JSON.stringify(payload) + '\n', 'utf8');
-      });
+      let attempt = 0;
+      let settled = false;
+      let activeClient: net.Socket | null = null;
+      let responseBuffer = '';
+      const maxAttempts = 24;
+      const retryDelayMs = 150;
+      const timeout = setTimeout(() => {
+        settled = true;
+        activeClient?.destroy();
+        reject(new Error(`Printer service did not respond to ${method} within 8 seconds`));
+      }, 8000);
 
-      let buffer = '';
-      const timer = setTimeout(() => {
-        client.destroy();
-        reject(new Error(`Named pipe RPC timeout on method ${method}`));
-      }, 4000);
+      const finish = (error?: Error, value?: TResult) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        if (error) reject(error);
+        else resolve(value as TResult);
+      };
 
-      client.on('data', (chunk: Buffer) => {
-        buffer += chunk.toString('utf8');
-        const newlineIndex = buffer.indexOf('\n');
-        if (newlineIndex !== -1) {
-          clearTimeout(timer);
-          const line = buffer.slice(0, newlineIndex).trim();
+      const connect = () => {
+        if (settled) return;
+        attempt += 1;
+        responseBuffer = '';
+        const client = net.connect(PIPE_PATH);
+        activeClient = client;
+
+        client.once('connect', () => {
+          client.write(JSON.stringify(payload) + '\\n', 'utf8');
+        });
+
+        client.on('data', (chunk: Buffer) => {
+          responseBuffer += chunk.toString('utf8');
+          const newlineIndex = responseBuffer.indexOf('\\n');
+          if (newlineIndex === -1) return;
+          const line = responseBuffer.slice(0, newlineIndex).trim();
           client.end();
           try {
             const parsed = JSON.parse(line) as JsonRpcResponse<TResult>;
-            if (parsed.error) {
-              reject(new Error(parsed.error.message));
-            } else {
-              resolve(parsed.result as TResult);
-            }
-          } catch (err) {
-            reject(err);
+            if (parsed.error) finish(new Error(parsed.error.message));
+            else finish(undefined, parsed.result as TResult);
+          } catch (error) {
+            finish(error instanceof Error ? error : new Error(String(error)));
           }
-        }
-      });
+        });
 
-      client.on('error', (err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
+        client.once('error', (error) => {
+          client.destroy();
+          if (settled) return;
+          if (attempt < maxAttempts) {
+            setTimeout(connect, retryDelayMs);
+          } else {
+            finish(new Error(`Cannot connect to Windows Print Spooler service: ${error.message}`));
+          }
+        });
+      };
+
+      connect();
     });
   }
 
