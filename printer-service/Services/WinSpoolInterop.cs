@@ -9,6 +9,7 @@ namespace PrintStudio.PrinterService.Services;
 public static class WinSpoolInterop
 {
     public const int DC_PAPERS = 2;
+    public const int DC_PAPERSIZE = 3;
     public const int DC_BINS = 6;
     public const int DC_DUPLEX = 7;
     public const int DC_COPIES = 18;
@@ -27,6 +28,13 @@ public static class WinSpoolInterop
     public const int PRINTER_CONTROL_PURGE = 3;
     public const uint PRINTER_ENUM_LOCAL = 0x00000002;
     public const uint PRINTER_ENUM_CONNECTIONS = 0x00000004;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT
+    {
+        public int X;
+        public int Y;
+    }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct PRINTER_INFO_4
