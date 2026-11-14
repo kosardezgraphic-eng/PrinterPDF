@@ -82,6 +82,7 @@ export const Ribbon: React.FC = () => {
     insertBlankPageAfter,
     reversePageOrder,
     setModalState,
+    openPrinterPreferences,
     addCurrentWorkspaceToBatch,
     runBatchQueue,
     pauseBatchQueue,
@@ -876,6 +877,14 @@ export const Ribbon: React.FC = () => {
                   ? 'پنل کامل مدیریت پرینترهای ویندوز و صف Spooler در پایین همین بخش باز شده است.'
                   : 'Full Windows Printer & Spooler Queue Manager is displayed below.'}
               </span>
+              <button
+                type="button"
+                disabled={!selectedPrinterName}
+                onClick={() => void openPrinterPreferences(selectedPrinterName)}
+                className="flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-600/15 px-3.5 py-2 font-semibold text-emerald-300 hover:bg-emerald-600/25 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {lang === 'fa' ? 'تنظیمات درایور ویندوز و همگام‌سازی شیت' : 'Windows Driver Preferences'}
+              </button>
             </div>
           )}
 
