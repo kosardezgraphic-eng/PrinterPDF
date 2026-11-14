@@ -494,7 +494,8 @@ export const useAppStore = create<AppState>((set, get) => {
         bookmarks: sample?.bookmarks ?? [],
         overlays: [], selectedOverlayId: null, textEdit: null, activePageId: null,
       });
-      if (marginKey(get()) === previousMarginKey) refreshPrinterMargins();
+      if (defaultPrinter) get().selectPrinter(defaultPrinter);
+      else if (marginKey(get()) === previousMarginKey) refreshPrinterMargins();
     },
 
     loadSampleWorkspace: async () => {
