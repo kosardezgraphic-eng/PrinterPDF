@@ -50,6 +50,7 @@ export const Ribbon: React.FC = () => {
     layout,
     printers,
     selectedPrinterName,
+    printerMargins,
     effects,
     watermark,
     pageNumbering,
@@ -70,6 +71,8 @@ export const Ribbon: React.FC = () => {
     updateLayout,
     setNUpMatrix,
     updateMargins,
+    resetMarginsToPrinter,
+    refreshPrinterMargins,
     updateEffects,
     toggleGlobalInvert,
     resetEffects,
@@ -738,6 +741,27 @@ export const Ribbon: React.FC = () => {
                 <span>{lang === 'fa' ? 'علائم برش چاپخانه (Crop Marks)' : 'Print Crop Marks'}</span>
               </label>
 
+              <div className="flex flex-col gap-1 border-e border-slate-800 pe-3 text-[11px]">
+                <span className="font-semibold text-slate-300">{lang === 'fa' ? 'حاشیه واقعی پرینتر' : 'Driver imageable margins'}</span>
+                <span className={printerMargins.status === 'available' ? 'text-emerald-300' : 'text-amber-300'}>
+                  {printerMargins.status === 'available'
+                    ? (lang === 'fa'
+                      ? `بالا ${printerMargins.marginsMm.top} · راست ${printerMargins.marginsMm.right} · پایین ${printerMargins.marginsMm.bottom} · چپ ${printerMargins.marginsMm.left} میلی‌متر`
+                      : `T ${printerMargins.marginsMm.top} · R ${printerMargins.marginsMm.right} · B ${printerMargins.marginsMm.bottom} · L ${printerMargins.marginsMm.left} mm`)
+                    : (printerMargins.status === 'loading'
+                      ? (lang === 'fa' ? 'در حال دریافت از درایور...' : 'Reading driver...')
+                      : (lang === 'fa' ? 'اطلاعات محدوده چاپ در دسترس نیست' : 'Driver imageable area unavailable'))}
+                </span>
+                <div className="flex gap-1">
+                  <button type="button" onClick={refreshPrinterMargins} className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-slate-200">
+                    {lang === 'fa' ? 'به‌روزرسانی' : 'Refresh'}
+                  </button>
+                  <button type="button" disabled={printerMargins.status !== 'available'} onClick={resetMarginsToPrinter}
+                    className="rounded border border-emerald-600/50 bg-emerald-600/15 px-2 py-1 text-emerald-300 disabled:opacity-40">
+                    {lang === 'fa' ? 'اعمال حاشیه درایور' : 'Use driver margins'}
+                  </button>
+                </div>
+              </div>
               <div className="flex items-center gap-2 text-slate-300">
                 <span>{lang === 'fa' ? 'حاشیه‌های چهارگانه شیت (mm):' : 'Sheet Margins (mm):'}</span>
                 {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
