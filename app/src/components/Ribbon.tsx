@@ -48,6 +48,8 @@ export const Ribbon: React.FC = () => {
     activeRibbonTab,
     ribbonCollapsed,
     layout,
+    printers,
+    selectedPrinterName,
     effects,
     watermark,
     pageNumbering,
@@ -94,6 +96,10 @@ export const Ribbon: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lang = settings.language;
   const tr = t(lang);
+  const selectedPrinter = printers.find((printer) => printer.name === selectedPrinterName);
+  const driverPaperOptions = selectedPrinter?.capabilities.supportedPapers?.length
+    ? selectedPrinter.capabilities.supportedPapers
+    : Object.keys(STANDARD_PAPER_SIZES);
 
   const tabs: Array<{ id: RibbonTabId; label: string; icon: React.ReactNode }> = [
     { id: 'file', label: tr.ribbonTabs.file, icon: <FolderOpen className="h-3.5 w-3.5" /> },
@@ -293,12 +299,15 @@ export const Ribbon: React.FC = () => {
                     }
                     className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-100"
                   >
-                    {Object.keys(STANDARD_PAPER_SIZES).map((sizeKey) => (
+                    {driverPaperOptions.map((sizeKey) => (
                       <option key={sizeKey} value={sizeKey}>
                         {sizeKey}
                       </option>
                     ))}
-                    <option value="Custom">Custom</option>
+                    {!driverPaperOptions.includes(layout.paperSize) && (
+                      <option value={layout.paperSize}>{layout.paperSize} ({lang === 'fa' ? 'درایور فعلی گزارش نکرده' : 'not reported by driver'})</option>
+                    )}
+                    {!driverPaperOptions.includes('Custom') && <option value="Custom">Custom</option>}
                   </select>
                   {layout.paperSize === 'Custom' && (['customWidthMm', 'customHeightMm'] as const).map((field) => (
                     <label key={field} className="flex items-center gap-1 text-slate-300">
