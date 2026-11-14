@@ -28,6 +28,9 @@ const api: PrintStudioElectronAPI = {
   setDefaultPrinter: (printerName: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.PRINTER_SET_DEFAULT, printerName),
 
+  openPrinterPreferences: (printerName: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PRINTER_OPEN_PREFERENCES, printerName),
+
   submitPrintJob: (request: PrintJobRequest, pdfBytes?: Uint8Array) =>
     ipcRenderer.invoke(IPC_CHANNELS.PRINTER_PRINT_JOB, { request, pdfBytes }),
 

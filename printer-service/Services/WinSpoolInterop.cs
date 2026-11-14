@@ -9,6 +9,7 @@ namespace PrintStudio.PrinterService.Services;
 public static class WinSpoolInterop
 {
     public const int DC_PAPERS = 2;
+    public const int DC_PAPERSIZE = 3;
     public const int DC_BINS = 6;
     public const int DC_DUPLEX = 7;
     public const int DC_COPIES = 18;
@@ -25,6 +26,49 @@ public static class WinSpoolInterop
     public const int JOB_CONTROL_DELETE = 5;
 
     public const int PRINTER_CONTROL_PURGE = 3;
+    public const uint PRINTER_ENUM_LOCAL = 0x00000002;
+    public const uint PRINTER_ENUM_CONNECTIONS = 0x00000004;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct PRINTER_INFO_4
+    {
+        public IntPtr pPrinterName;
+        public IntPtr pServerName;
+        public uint Attributes;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct PRINTER_INFO_2
+    {
+        public IntPtr pServerName;
+        public IntPtr pPrinterName;
+        public IntPtr pShareName;
+        public IntPtr pPortName;
+        public IntPtr pDriverName;
+        public IntPtr pComment;
+        public IntPtr pLocation;
+        public IntPtr pDevMode;
+        public IntPtr pSepFile;
+        public IntPtr pPrintProcessor;
+        public IntPtr pDatatype;
+        public IntPtr pParameters;
+        public IntPtr pSecurityDescriptor;
+        public uint Attributes;
+        public uint Priority;
+        public uint DefaultPriority;
+        public uint StartTime;
+        public uint UntilTime;
+        public uint Status;
+        public uint cJobs;
+        public uint AveragePPM;
+    }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct PRINTER_DEFAULTS
@@ -33,6 +77,12 @@ public static class WinSpoolInterop
         public IntPtr pDevMode;
         public int DesiredAccess;
     }
+
+    [DllImport("winspool.drv", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool EnumPrinters(uint flags, string? name, uint level, IntPtr buffer, uint bufferSize, out uint needed, out uint returned);
+
+    [DllImport("winspool.drv", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool GetDefaultPrinter(System.Text.StringBuilder? buffer, ref uint bufferSize);
 
     [DllImport("winspool.drv", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern bool OpenPrinter(

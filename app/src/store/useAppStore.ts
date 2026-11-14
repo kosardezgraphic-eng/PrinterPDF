@@ -107,7 +107,7 @@ export const DEFAULT_LAYOUT: LayoutSettings = {
   duplexMode: 'long-edge',
   sheetOrder: 'rtl',
   manualDuplex: false,
-  showCellBorders: true,
+  showCellBorders: false,
   showCropMarks: false,
 };
 
@@ -337,6 +337,7 @@ interface AppState {
   retryPrinters: () => Promise<void>;
   updatePrinterProfile: (printerName: string, profile: PrinterProfileSettings) => Promise<void>;
   setDefaultPrinter: (printerName: string) => Promise<void>;
+  openPrinterPreferences: (printerName: string) => Promise<void>;
   simulatePrinterStatusChange: (printerName: string, status: PrinterInfo['status']) => Promise<void>;
   submitPrintJob: (request: PrintJobRequest) => Promise<void>;
   silentPrintNow: () => Promise<void>;
@@ -507,7 +508,8 @@ export const useAppStore = create<AppState>((set, get) => {
         bookmarks: sample?.bookmarks ?? [],
         overlays: [], selectedOverlayId: null, textEdit: null, activePageId: null,
       });
-      if (marginKey(get()) === previousMarginKey) refreshPrinterMargins();
+      if (defaultPrinter) get().selectPrinter(defaultPrinter);
+      else if (marginKey(get()) === previousMarginKey) refreshPrinterMargins();
     },
 
     loadSampleWorkspace: async () => {
@@ -1601,7 +1603,27 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     selectPrinter: (printerName) => {
-      set({ selectedPrinterName: printerName });
+      const printer = get().printers.find((item) => item.name === printerName);
+      const profile = printer?.activeProfile;
+      if (!printer || !profile) {
+        set({ selectedPrinterName: printerName });
+        return;
+      }
+
+      const supported = printer.capabilities.supportedPapers;
+      const paperSize = supported.includes(profile.paperSize) ? profile.paperSize : get().layout.paperSize;
+      const nextLayout = {
+        ...get().layout,
+        paperSize,
+        orientation: profile.orientation,
+        ...(profile.paperWidthMm && profile.paperHeightMm
+          ? {
+              customWidthMm: Math.min(profile.paperWidthMm, profile.paperHeightMm),
+              customHeightMm: Math.max(profile.paperWidthMm, profile.paperHeightMm),
+            }
+          : {}),
+      };
+      set({ selectedPrinterName: printerName, layout: nextLayout });
     },
 
     retryPrinters: async () => {
@@ -1620,7 +1642,9 @@ export const useAppStore = create<AppState>((set, get) => {
           printerServiceNote: await safePrinterStatusNote(),
           isRefreshingPrinters: false,
         });
-        if (fallback !== selected) refreshPrinterMargins();
+        // Re-selecting through selectPrinter also re-applies the driver's paper and orientation,
+        // which is what a "retry" should do after the queue or the driver changed.
+        if (fallback && fallback !== selected) get().selectPrinter(fallback);
         get().addToast({
           type: printers.length ? 'info' : 'warning',
           title: get().settings.language === 'fa' ? 'فهرست پرینترها تازه شد' : 'Printer list refreshed',
@@ -1641,6 +1665,29 @@ export const useAppStore = create<AppState>((set, get) => {
           title: get().settings.language === 'fa' ? 'خواندن فهرست پرینترها ناموفق بود' : 'Could not read the printer list',
           // A toast is the only thing many users read, so it carries the fix, not just the symptom.
           message: note ? `${message}\n${note}` : message,
+        });
+      }
+    },
+
+    openPrinterPreferences: async (printerName) => {
+      try {
+        const printers = await ipcBridge.openPrinterPreferences(printerName);
+        set({ printers });
+        get().selectPrinter(printerName);
+        get().addToast({
+          type: 'success',
+          title: get().settings.language === 'fa'
+            ? 'تنظیمات درایور به‌روزرسانی شد'
+            : 'Printer driver settings refreshed',
+          message: get().settings.language === 'fa'
+            ? 'اندازه کاغذ و جهت صفحه از تنظیمات ویندوز خوانده شد.'
+            : 'Paper size and orientation were read again from Windows.',
+        });
+      } catch (error) {
+        get().addToast({
+          type: 'error',
+          title: get().settings.language === 'fa' ? 'بازکردن تنظیمات پرینتر ناموفق بود' : 'Could not open printer preferences',
+          message: error instanceof Error ? error.message : String(error),
         });
       }
     },

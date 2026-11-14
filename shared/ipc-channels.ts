@@ -33,9 +33,12 @@ export const IPC_CHANNELS = {
   PRINTER_GET_CAPABILITIES: 'printer:get-capabilities',
   PRINTER_GET_MARGINS: 'printer:get-margins',
   /** Why the print sidecar cannot answer, or null when it is healthy. */
+  /** Why the print sidecar cannot answer, or null when it is healthy. */
   PRINTER_STATUS_NOTE: 'printer:status-note',
   PRINTER_UPDATE_PROFILE: 'printer:update-profile',
   PRINTER_SET_DEFAULT: 'printer:set-default',
+  /** Opens the native Windows driver preferences dialog for a queue. */
+  PRINTER_OPEN_PREFERENCES: 'printer:open-preferences',
   PRINTER_PRINT_JOB: 'printer:print-job',
   PRINTER_SILENT_PRINT: 'printer:silent-print',
 
@@ -93,6 +96,8 @@ export interface PrintStudioElectronAPI {
   getPrinterMargins(request: PrinterMarginRequest): Promise<PrinterMarginResult>;
   updatePrinterProfile(printerName: string, profile: PrinterProfileSettings): Promise<PrinterInfo>;
   setDefaultPrinter(printerName: string): Promise<boolean>;
+  /** Opens the native Windows driver preferences and returns refreshed printer profiles. */
+  openPrinterPreferences(printerName: string): Promise<PrinterInfo[]>;
   submitPrintJob(request: PrintJobRequest, pdfBytes?: Uint8Array): Promise<SpoolerJobInfo>;
   listSpoolerJobs(printerName?: string): Promise<SpoolerJobInfo[]>;
   controlSpoolerJob(

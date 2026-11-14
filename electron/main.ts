@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, session } from 'electron';
+import { execFile } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
@@ -158,6 +159,19 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.PRINTER_SET_DEFAULT, async (_e, printerName: string) => {
     return sidecar.setDefaultPrinter(printerName);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PRINTER_OPEN_PREFERENCES, async (_e, printerName: string) => {
+    if (process.platform !== 'win32') throw new Error('Windows printer preferences are only available on Windows');
+    if (typeof printerName !== 'string' || !printerName.trim()) throw new Error('A printer must be selected');
+    await new Promise<void>((resolve, reject) => {
+      execFile('rundll32.exe', ['printui.dll,PrintUIEntry', '/e', '/n', printerName], { windowsHide: false }, (error) => {
+        if (error) reject(new Error(`Could not open Windows printer preferences: ${error.message}`));
+        else resolve();
+      });
+    });
+    // Refresh after the native dialog closes so paper size and orientation reflect the driver.
+    return withSidecarDiagnostics(sidecar.listPrinters());
   });
 
   ipcMain.handle(

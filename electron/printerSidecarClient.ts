@@ -18,6 +18,19 @@ import type {
 const PIPE_PATH = '\\\\.\\pipe\\PrintStudioPrinterService';
 /** How many stderr chunks of the child process are remembered for diagnostics. */
 const STDERR_TAIL_LINES = 40;
+/** Total time a call may spend connecting and waiting for the reply. */
+const RPC_TIMEOUT_MS = 8000;
+/** Gap between named-pipe connect attempts while the service is still starting. */
+const CONNECT_RETRY_DELAY_MS = 150;
+
+/** Worded for the user: the pipe has no owner, which is a setup problem, not a bug in the app. */
+function connectFailure(method: string, attempts: number, error: NodeJS.ErrnoException): string {
+  const unwritable = error.code === 'ENOENT' || error.code === 'EACCES' || error.code === 'EPERM';
+  const what = unwritable
+    ? `no process is listening on ${PIPE_PATH}`
+    : `cannot reach ${PIPE_PATH}`;
+  return `${method} failed after ${attempts} attempt(s): ${what} (${error.message})`;
+}
 
 /**
  * Manages the lifecycle of the C# (.NET 8) PrinterService.exe sidecar
@@ -33,6 +46,8 @@ export class PrinterSidecarClient {
   private startupError: string | null = null;
   /** A reason that makes the named pipe pointless to try: wrong OS, or no executable to run. */
   private blocked: string | null = null;
+  /** Set once the app asked the sidecar to stop, so a normal quit is not read as a crash. */
+  private stopping = false;
   private readonly stderrTail: string[] = [];
 
   /** The places PrinterService.exe is looked for, kept in one place for the messages. */
@@ -55,6 +70,8 @@ export class PrinterSidecarClient {
   public startSidecar(resourcesPath: string): void {
     this.startupError = null;
     this.blocked = null;
+    this.stopping = false;
+    this.stderrTail.length = 0;
 
     if (process.platform !== 'win32') {
       this.blocked = `The print sidecar only runs on Windows (this system reports "${process.platform}").`;
@@ -90,6 +107,10 @@ export class PrinterSidecarClient {
     });
 
     this.child.on('exit', (code, signal) => {
+      if (this.stopping) {
+        this.child = null;
+        return;
+      }
       const tail = this.stderrTail.join('').trim();
       this.startupError =
         `PrinterService.exe stopped before the app connected (exit code ${code ?? 'unknown'}${signal ? `, signal ${signal}` : ''}).` +
@@ -99,6 +120,7 @@ export class PrinterSidecarClient {
   }
 
   public stopSidecar(): void {
+    this.stopping = true;
     if (this.child && !this.child.killed) {
       this.child.kill();
       this.child = null;
@@ -112,7 +134,7 @@ export class PrinterSidecarClient {
 
   /**
    * Set when asking the sidecar anything is known to be futile, so the app answers immediately
-   * instead of waiting four seconds for a pipe that nobody owns.
+   * instead of spending the whole retry window on a pipe that nobody owns.
    */
   public get blockedReason(): string | null {
     return this.blocked;
@@ -131,58 +153,79 @@ export class PrinterSidecarClient {
 
   /** The same message on its own, for the status panel when no call has failed yet. */
   public statusNote(): string | null {
-    if (this.isRunning) return null;
+    if (this.isRunning || this.stopping) return null;
     return this.startupError ?? 'The print sidecar is not running.';
   }
 
   public async callRpc<TResult>(method: string, params: unknown = {}): Promise<TResult> {
+    // Answer with the reason instead of a four-second wait when the service cannot possibly reply.
+    if (this.blocked) throw new Error(this.blocked);
+    if (this.startupError) throw new Error(this.startupError);
+    if (!this.child || this.child.exitCode !== null) {
+      throw new Error('PrinterService.exe is not running. Restart PrintStudio Pro after rebuilding the printer service.');
+    }
+
     const id = this.reqCounter++;
-    const payload: JsonRpcRequest = {
-      jsonrpc: '2.0',
-      id,
-      method,
-      params,
-    };
+    const payload: JsonRpcRequest = { jsonrpc: '2.0', id, method, params };
 
+    // The renderer asks for printers as soon as it mounts, which is often before the .NET process
+    // has created its pipe, so transient connect errors are retried. The deadline is absolute:
+    // retrying without one turns a dead service into a hang.
     return new Promise<TResult>((resolve, reject) => {
-      const client = net.connect(PIPE_PATH, () => {
-        client.write(JSON.stringify(payload) + '\n', 'utf8');
-      });
+      let attempt = 0;
+      let settled = false;
+      let activeClient: net.Socket | null = null;
+      let responseBuffer = '';
+      const deadline = Date.now() + RPC_TIMEOUT_MS;
+      const timer = setTimeout(() => finish(new Error(this.describeFailure(`Named pipe RPC timeout on method ${method} after ${attempt} attempt(s)`))), RPC_TIMEOUT_MS);
 
-      let buffer = '';
-      const timer = setTimeout(() => {
-        client.destroy();
-        reject(new Error(`Named pipe RPC timeout on method ${method}`));
-      }, 4000);
+      const finish = (error?: Error, value?: TResult) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        activeClient?.destroy();
+        if (error) reject(error);
+        else resolve(value as TResult);
+      };
 
-      client.on('data', (chunk: Buffer) => {
-        buffer += chunk.toString('utf8');
-        const newlineIndex = buffer.indexOf('\n');
-        if (newlineIndex !== -1) {
-          clearTimeout(timer);
-          const line = buffer.slice(0, newlineIndex).trim();
+      const connect = () => {
+        if (settled) return;
+        attempt += 1;
+        responseBuffer = '';
+        const client = net.connect(PIPE_PATH);
+        activeClient = client;
+
+        client.once('connect', () => {
+          client.write(JSON.stringify(payload) + '\n', 'utf8');
+        });
+
+        client.on('data', (chunk: Buffer) => {
+          responseBuffer += chunk.toString('utf8');
+          const newlineIndex = responseBuffer.indexOf('\n');
+          if (newlineIndex === -1) return;
+          const line = responseBuffer.slice(0, newlineIndex).trim();
           client.end();
           try {
             const parsed = JSON.parse(line) as JsonRpcResponse<TResult>;
-            if (parsed.error) {
-              reject(new Error(parsed.error.message));
-            } else {
-              resolve(parsed.result as TResult);
-            }
-          } catch (err) {
-            reject(err);
+            if (parsed.error) finish(new Error(parsed.error.message));
+            else finish(undefined, parsed.result as TResult);
+          } catch (error) {
+            finish(error instanceof Error ? error : new Error(String(error)));
           }
-        }
-      });
+        });
 
-      client.on('error', (err: NodeJS.ErrnoException) => {
-        clearTimeout(timer);
-        // EPIPE/ENOENT both mean nobody owns the pipe: say so, and keep the underlying code.
-        const hint = err.code === 'ENOENT' || err.code === 'EACCES' || err.code === 'EPERM'
-          ? `no process is listening on ${PIPE_PATH}`
-          : `cannot reach ${PIPE_PATH}`;
-        reject(new Error(`${hint} (${err.message})`));
-      });
+        client.once('error', (error: NodeJS.ErrnoException) => {
+          client.destroy();
+          if (settled) return;
+          if (Date.now() + CONNECT_RETRY_DELAY_MS < deadline) {
+            setTimeout(connect, CONNECT_RETRY_DELAY_MS);
+            return;
+          }
+          finish(new Error(this.describeFailure(connectFailure(method, attempt, error))));
+        });
+      };
+
+      connect();
     });
   }
 

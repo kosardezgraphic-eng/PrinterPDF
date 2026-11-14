@@ -48,6 +48,9 @@ export const Ribbon: React.FC = () => {
     activeRibbonTab,
     ribbonCollapsed,
     layout,
+    printers,
+    selectedPrinterName,
+    printerMargins,
     effects,
     watermark,
     pageNumbering,
@@ -68,6 +71,8 @@ export const Ribbon: React.FC = () => {
     updateLayout,
     setNUpMatrix,
     updateMargins,
+    resetMarginsToPrinter,
+    refreshPrinterMargins,
     updateEffects,
     toggleGlobalInvert,
     resetEffects,
@@ -80,6 +85,7 @@ export const Ribbon: React.FC = () => {
     insertBlankPageAfter,
     reversePageOrder,
     setModalState,
+    openPrinterPreferences,
     addCurrentWorkspaceToBatch,
     runBatchQueue,
     pauseBatchQueue,
@@ -94,6 +100,10 @@ export const Ribbon: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lang = settings.language;
   const tr = t(lang);
+  const selectedPrinter = printers.find((printer) => printer.name === selectedPrinterName);
+  const driverPaperOptions = selectedPrinter?.capabilities.supportedPapers?.length
+    ? selectedPrinter.capabilities.supportedPapers
+    : Object.keys(STANDARD_PAPER_SIZES);
 
   const tabs: Array<{ id: RibbonTabId; label: string; icon: React.ReactNode }> = [
     { id: 'file', label: tr.ribbonTabs.file, icon: <FolderOpen className="h-3.5 w-3.5" /> },
@@ -293,12 +303,15 @@ export const Ribbon: React.FC = () => {
                     }
                     className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-100"
                   >
-                    {Object.keys(STANDARD_PAPER_SIZES).map((sizeKey) => (
+                    {driverPaperOptions.map((sizeKey) => (
                       <option key={sizeKey} value={sizeKey}>
                         {sizeKey}
                       </option>
                     ))}
-                    <option value="Custom">Custom</option>
+                    {!driverPaperOptions.includes(layout.paperSize) && (
+                      <option value={layout.paperSize}>{layout.paperSize} ({lang === 'fa' ? 'درایور فعلی گزارش نکرده' : 'not reported by driver'})</option>
+                    )}
+                    {!driverPaperOptions.includes('Custom') && <option value="Custom">Custom</option>}
                   </select>
                   {layout.paperSize === 'Custom' && (['customWidthMm', 'customHeightMm'] as const).map((field) => (
                     <label key={field} className="flex items-center gap-1 text-slate-300">
@@ -728,6 +741,27 @@ export const Ribbon: React.FC = () => {
                 <span>{lang === 'fa' ? 'علائم برش چاپخانه (Crop Marks)' : 'Print Crop Marks'}</span>
               </label>
 
+              <div className="flex flex-col gap-1 border-e border-slate-800 pe-3 text-[11px]">
+                <span className="font-semibold text-slate-300">{lang === 'fa' ? 'حاشیه واقعی پرینتر' : 'Driver imageable margins'}</span>
+                <span className={printerMargins.status === 'available' ? 'text-emerald-300' : 'text-amber-300'}>
+                  {printerMargins.status === 'available'
+                    ? (lang === 'fa'
+                      ? `بالا ${printerMargins.marginsMm.top} · راست ${printerMargins.marginsMm.right} · پایین ${printerMargins.marginsMm.bottom} · چپ ${printerMargins.marginsMm.left} میلی‌متر`
+                      : `T ${printerMargins.marginsMm.top} · R ${printerMargins.marginsMm.right} · B ${printerMargins.marginsMm.bottom} · L ${printerMargins.marginsMm.left} mm`)
+                    : (printerMargins.status === 'loading'
+                      ? (lang === 'fa' ? 'در حال دریافت از درایور...' : 'Reading driver...')
+                      : (lang === 'fa' ? 'اطلاعات محدوده چاپ در دسترس نیست' : 'Driver imageable area unavailable'))}
+                </span>
+                <div className="flex gap-1">
+                  <button type="button" onClick={refreshPrinterMargins} className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-slate-200">
+                    {lang === 'fa' ? 'به‌روزرسانی' : 'Refresh'}
+                  </button>
+                  <button type="button" disabled={printerMargins.status !== 'available'} onClick={resetMarginsToPrinter}
+                    className="rounded border border-emerald-600/50 bg-emerald-600/15 px-2 py-1 text-emerald-300 disabled:opacity-40">
+                    {lang === 'fa' ? 'اعمال حاشیه درایور' : 'Use driver margins'}
+                  </button>
+                </div>
+              </div>
               <div className="flex items-center gap-2 text-slate-300">
                 <span>{lang === 'fa' ? 'حاشیه‌های چهارگانه شیت (mm):' : 'Sheet Margins (mm):'}</span>
                 {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
@@ -867,6 +901,14 @@ export const Ribbon: React.FC = () => {
                   ? 'پنل کامل مدیریت پرینترهای ویندوز و صف Spooler در پایین همین بخش باز شده است.'
                   : 'Full Windows Printer & Spooler Queue Manager is displayed below.'}
               </span>
+              <button
+                type="button"
+                disabled={!selectedPrinterName}
+                onClick={() => void openPrinterPreferences(selectedPrinterName)}
+                className="flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-600/15 px-3.5 py-2 font-semibold text-emerald-300 hover:bg-emerald-600/25 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {lang === 'fa' ? 'تنظیمات درایور ویندوز و همگام‌سازی شیت' : 'Windows Driver Preferences'}
+              </button>
             </div>
           )}
 

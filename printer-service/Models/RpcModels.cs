@@ -64,7 +64,9 @@ public sealed record PrinterProfileDto(
     [property: JsonPropertyName("orientation")] string Orientation,
     [property: JsonPropertyName("colorMode")] string ColorMode,
     [property: JsonPropertyName("dpi")] int Dpi,
-    [property: JsonPropertyName("quality")] string Quality
+    [property: JsonPropertyName("quality")] string Quality,
+    [property: JsonPropertyName("paperWidthMm"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? PaperWidthMm = null,
+    [property: JsonPropertyName("paperHeightMm"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? PaperHeightMm = null
 );
 
 public sealed record PrinterInfoDto(

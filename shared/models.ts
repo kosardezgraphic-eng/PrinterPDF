@@ -381,6 +381,9 @@ export interface PrinterProfileSettings {
   colorMode: 'color' | 'grayscale' | 'monochrome';
   dpi: number;
   quality: 'draft' | 'normal' | 'high';
+  /** Physical media dimensions reported by the selected Windows printer driver. */
+  paperWidthMm?: number;
+  paperHeightMm?: number;
 }
 
 export interface PrinterInfo {
