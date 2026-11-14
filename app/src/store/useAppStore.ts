@@ -330,6 +330,7 @@ interface AppState {
   autoSelectBestPrinter: () => void;
   updatePrinterProfile: (printerName: string, profile: PrinterProfileSettings) => Promise<void>;
   setDefaultPrinter: (printerName: string) => Promise<void>;
+  openPrinterPreferences: (printerName: string) => Promise<void>;
   simulatePrinterStatusChange: (printerName: string, status: PrinterInfo['status']) => Promise<void>;
   submitPrintJob: (request: PrintJobRequest) => Promise<void>;
   silentPrintNow: () => Promise<void>;
@@ -1642,6 +1643,29 @@ export const useAppStore = create<AppState>((set, get) => {
       const previousName = get().selectedPrinterName;
       set({ printers, selectedPrinterName: printerName });
       if (previousName === printerName) refreshPrinterMargins();
+    },
+
+    openPrinterPreferences: async (printerName) => {
+      try {
+        const printers = await ipcBridge.openPrinterPreferences(printerName);
+        set({ printers });
+        get().selectPrinter(printerName);
+        get().addToast({
+          type: 'success',
+          title: get().settings.language === 'fa'
+            ? 'تنظیمات درایور به‌روزرسانی شد'
+            : 'Printer driver settings refreshed',
+          message: get().settings.language === 'fa'
+            ? 'اندازه کاغذ و جهت صفحه از تنظیمات ویندوز خوانده شد.'
+            : 'Paper size and orientation were read again from Windows.',
+        });
+      } catch (error) {
+        get().addToast({
+          type: 'error',
+          title: get().settings.language === 'fa' ? 'بازکردن تنظیمات پرینتر ناموفق بود' : 'Could not open printer preferences',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
     },
 
     simulatePrinterStatusChange: async (printerName, status) => {
