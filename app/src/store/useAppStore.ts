@@ -1588,7 +1588,27 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     selectPrinter: (printerName) => {
-      set({ selectedPrinterName: printerName });
+      const printer = get().printers.find((item) => item.name === printerName);
+      const profile = printer?.activeProfile;
+      if (!printer || !profile) {
+        set({ selectedPrinterName: printerName });
+        return;
+      }
+
+      const supported = printer.capabilities.supportedPapers;
+      const paperSize = supported.includes(profile.paperSize) ? profile.paperSize : get().layout.paperSize;
+      const nextLayout = {
+        ...get().layout,
+        paperSize,
+        orientation: profile.orientation,
+        ...(profile.paperWidthMm && profile.paperHeightMm
+          ? {
+              customWidthMm: Math.min(profile.paperWidthMm, profile.paperHeightMm),
+              customHeightMm: Math.max(profile.paperWidthMm, profile.paperHeightMm),
+            }
+          : {}),
+      };
+      set({ selectedPrinterName: printerName, layout: nextLayout });
     },
 
     autoSelectBestPrinter: () => {
