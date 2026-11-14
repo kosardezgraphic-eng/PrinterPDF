@@ -71,13 +71,16 @@ public sealed class PrinterSpoolerService
         // device-specific media capabilities reliably.
         var flags = WinSpoolInterop.PRINTER_ENUM_LOCAL | WinSpoolInterop.PRINTER_ENUM_CONNECTIONS;
         WinSpoolInterop.EnumPrinters(flags, null, 2, IntPtr.Zero, 0, out var needed, out _);
-        if (needed == 0) return Array.Empty<PrinterInfoDto>();
+        if (needed == 0)
+            return ListPrintersByNameOnly(flags);
 
         var buffer = Marshal.AllocHGlobal((int)needed);
         try
         {
             if (!WinSpoolInterop.EnumPrinters(flags, null, 2, buffer, needed, out _, out var returned))
-                return Array.Empty<PrinterInfoDto>();
+                return ListPrintersByNameOnly(flags);
+            if (returned == 0)
+                return ListPrintersByNameOnly(flags);
 
             var defaultSize = 0u;
             WinSpoolInterop.GetDefaultPrinter(null, ref defaultSize);
@@ -126,6 +129,72 @@ public sealed class PrinterSpoolerService
             return result;
         }
         finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private IReadOnlyList<PrinterInfoDto> ListPrintersByNameOnly(uint flags)
+    {
+        // Some Windows print providers do not return PRINTER_INFO_2 data to a
+        // non-elevated desktop process. PRINTER_INFO_4 is a lighter enumeration
+        // that still exposes every locally installed and connected queue name.
+        WinSpoolInterop.EnumPrinters(flags, null, 4, IntPtr.Zero, 0, out var needed, out _);
+        if (needed == 0) return Array.Empty<PrinterInfoDto>();
+
+        var buffer = Marshal.AllocHGlobal((int)needed);
+        try
+        {
+            if (!WinSpoolInterop.EnumPrinters(flags, null, 4, buffer, needed, out _, out var returned) || returned == 0)
+                return Array.Empty<PrinterInfoDto>();
+
+            uint defaultSize = 0;
+            WinSpoolInterop.GetDefaultPrinter(null, ref defaultSize);
+            var defaultBuffer = new System.Text.StringBuilder((int)Math.Max(1, defaultSize));
+            var defaultName = WinSpoolInterop.GetDefaultPrinter(defaultBuffer, ref defaultSize)
+                ? defaultBuffer.ToString() : string.Empty;
+
+            var result = new List<PrinterInfoDto>();
+            int stride = Marshal.SizeOf<WinSpoolInterop.PRINTER_INFO_4>();
+            for (var i = 0; i < returned; i++)
+            {
+                var info = Marshal.PtrToStructure<WinSpoolInterop.PRINTER_INFO_4>(IntPtr.Add(buffer, i * stride));
+                var name = Marshal.PtrToStringUni(info.pPrinterName);
+                if (string.IsNullOrWhiteSpace(name)) continue;
+
+                // Port and driver details are not part of level 4. Passing an empty
+                // port lets the driver/provider decide whether it can report capabilities.
+                var caps = QueryCapabilities(name, string.Empty, null);
+                var profile = new PrinterProfileDto(
+                    name,
+                    caps.SupportedPapers.FirstOrDefault() ?? "Custom",
+                    caps.SupportedTrays.FirstOrDefault() ?? "Auto Select",
+                    caps.SupportedMediaTypes.FirstOrDefault() ?? "Plain Paper",
+                    caps.SupportsDuplex ? "long-edge" : "none",
+                    "portrait",
+                    caps.SupportsColor ? "color" : "monochrome",
+                    caps.SupportedDpi.FirstOrDefault(300),
+                    "normal");
+                _profiles[name] = profile;
+
+                result.Add(new PrinterInfoDto(
+                    Name: name,
+                    DriverName: "Windows installed printer",
+                    PortName: string.Empty,
+                    IsDefault: string.Equals(name, defaultName, StringComparison.OrdinalIgnoreCase),
+                    IsNetwork: (info.Attributes & 0x10) != 0 || name.StartsWith(@"\\", StringComparison.Ordinal),
+                    IsVirtual: IsVirtualPrinter(name),
+                    Status: "Unknown",
+                    JobsInQueue: 0,
+                    TonerLevelPercent: null,
+                    TotalPageCounter: null,
+                    Location: null,
+                    Capabilities: caps,
+                    ActiveProfile: profile));
+            }
+            return result;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
     }
 
     // The existing queue list uses this name-based classification. Virtual queues
