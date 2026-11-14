@@ -61,7 +61,13 @@ public sealed class PrinterSpoolerService
             // System.Printing can fail on some Windows installations; use the native spooler API below.
         }
 
-        return result.Count > 0 ? result : ListPrintersWithWin32();
+        if (result.Count > 0) return result;
+
+        var nativePrinters = ListPrintersWithWin32();
+        if (nativePrinters.Count > 0) return nativePrinters;
+
+        throw new InvalidOperationException(
+            "Windows returned no printer queues. Check that the Print Spooler service is running and that at least one printer is installed for this Windows account.");
     }
 
     private IReadOnlyList<PrinterInfoDto> ListPrintersWithWin32()
