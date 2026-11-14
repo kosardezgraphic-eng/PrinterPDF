@@ -23,6 +23,24 @@ const RPC_TIMEOUT_MS = 8000;
 /** Gap between named-pipe connect attempts while the service is still starting. */
 const CONNECT_RETRY_DELAY_MS = 150;
 
+/**
+ * Where the sidecar writes its own log: `%APPDATA%\PrintStudioPro\printer-service.log`
+ * (see printer-service/Program.cs). The service is spawned without a console, so this file is the
+ * only record of a crash nobody was watching — an exit code alone tells an operator nothing.
+ */
+function serviceLogPath(): string | null {
+  if (process.platform !== 'win32') return null;
+  const appData = process.env.APPDATA;
+  if (!appData) return null;
+  return path.join(appData, 'PrintStudioPro', 'printer-service.log');
+}
+
+/** Appended to every failure message: the file that has the full stack trace. */
+function logHint(): string {
+  const log = serviceLogPath();
+  return log ? `\nService log: ${log}` : '';
+}
+
 /** Worded for the user: the pipe has no owner, which is a setup problem, not a bug in the app. */
 function connectFailure(method: string, attempts: number, error: NodeJS.ErrnoException): string {
   const unwritable = error.code === 'ENOENT' || error.code === 'EACCES' || error.code === 'EPERM';
@@ -114,7 +132,11 @@ export class PrinterSidecarClient {
       const tail = this.stderrTail.join('').trim();
       this.startupError =
         `PrinterService.exe stopped before the app connected (exit code ${code ?? 'unknown'}${signal ? `, signal ${signal}` : ''}).` +
-        (tail ? ` Last output:\n${tail}` : ' It wrote nothing to stderr.');
+        (tail
+          ? ` Last output:\n${tail}`
+          : // A native crash (0xC000041D from a missing WPF DLL, for instance) dies before the
+            // runtime can print anything, so the file written by the process itself is the lead.
+            ` Nothing was written to stderr; check ${serviceLogPath() ?? 'the sidecar log file'} for the crash record.`);
       this.child = null;
     });
   }
@@ -148,13 +170,13 @@ export class PrinterSidecarClient {
     else if (this.isRunning) lines.push('Sidecar: process is running but the named pipe did not answer.');
     const tail = this.stderrTail.join('').trim();
     if (tail && !this.startupError) lines.push(`Service output:\n${tail}`);
-    return lines.join('\n');
+    return lines.join('\n') + logHint();
   }
 
   /** The same message on its own, for the status panel when no call has failed yet. */
   public statusNote(): string | null {
     if (this.isRunning || this.stopping) return null;
-    return this.startupError ?? 'The print sidecar is not running.';
+    return (this.startupError ?? 'The print sidecar is not running.') + logHint();
   }
 
   public async callRpc<TResult>(method: string, params: unknown = {}): Promise<TResult> {

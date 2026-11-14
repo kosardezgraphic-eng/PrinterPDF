@@ -212,6 +212,8 @@ npm run build:electron:nosidecar
 | `no process is listening on \\.\pipe\PrintStudioPrinterService` | سرویس بالا نیامده یا Pipe بسته شده | `PrinterService.exe` را دستی اجرا کنید و `npm run test:sidecar` را بزنید. |
 | `PrinterService.exe stopped before the app connected (exit code N)` + آخرین خروجی stderr | سرویس هنگام استارت crash کرده (Spooler خاموش، دسترسی Pipe) | متن stderr در پنل چاپ می‌شود؛ با `Get-Service Spooler` وضعیت سرویس چاپ ویندوز را ببینید. |
 | `Windows reported no printers installed` | ویندوز واقعاً پرینتری گزارش نکرده | در `Printers & scanners` پرینتر نصب کنید، سپس «تلاش مجدد». |
+| `DllNotFoundException` در `MS.Win32.HwndSubclass` / کرش با کد `0xC000041D` | در publish تک‌فایل، DLLهای native مربوط به WPF (`PresentationNative_cor3.dll`، `wpfgfx_cor3.dll`، `D3DCompiler_47_cor3.dll`) بیرون از باندل می‌مانند و هر تماس با `System.Printing` پروسه را می‌اندازد | `IncludeNativeLibrariesForSelfExtract=true` در `printer-service/PrinterService.csproj` این را حل می‌کند (در مخزن تنظیم شده)؛ بعد از هر تغییر در سرویس `npm run build:service` را دوباره اجرا کنید |
+| هر خطای دیگر از سرویس | — | آخرین خطاها در `%APPDATA%\PrintStudioPro\printer-service.log` نوشته می‌شوند و مسیر همین فایل در پیام UI چاپ می‌شود (`Service log: …`) |
 
 ترتیب بررسی روی ویندوز:
 
@@ -228,4 +230,31 @@ npm run test:sidecar          # ۵. اگر فهرست خالی ماند: تست 
 سایدکار از کانال `printer:status-note` (هرچه `PrinterSidecarClient.describeFailure` می‌سازد). اگر
 هیچ‌کدام نباشد و فهرست خالی بماند، متن جایگزین «ویندوز پرینتری گزارش نکرد» نمایش داده می‌شود —
 فهرست خالی هرگز بدون توضیح نمی‌ماند. قراردادها در
-`app/src/engine/printerListDiagnostics.test.ts` و `app/src/engine/packaging.test.ts` تست شده‌اند.
+`app/src/engine/printerListDiagnostics.test.ts`، `app/src/engine/sidecarLog.test.ts` و
+`app/src/engine/packaging.test.ts` تست شده‌اند.
+
+### ترتیب خواندن پرینترها و لاگ سرویس
+
+`PrinterService.exe` فهرست را این‌طور می‌سازد (در `PrinterSpoolerService.ListPrinters`):
+
+۱. `EnumPrinters` از `winspool.drv` (بدون هیچ وابستگی به WPF) — اگر پرینتری برگرداند، همین جواب
+   نهایی است و `System.Printing` اصلاً صدا زده نمی‌شود. پرینتر پیش‌فرض هم با `GetDefaultPrinter`
+   خوانده می‌شود، نه با property وابسته‌به‌WPF.
+۲. فقط اگر مرحلهٔ اول خالی بود، `LocalPrintServer`/`System.Printing` برای گرفتن اطلاعات کامل‌تر
+   (محل صف، PrintTicket زندهٔ درایور) امتحان می‌شود.
+۳. هر دو خالی بود → خطای `Windows returned no printer queues …` که در UI همان پنل علت را نشان
+   می‌دهد.
+
+هر تماس `System.Printing` (شامل شمارش کارهای صف در `ListJobs`) داخل `try/catch` است و خطایش با
+`Program.Log` نوشته می‌شود، چون یک درایور بدنباید پروسه را بکشد: اگر پروسه بمیرد، پیام بعدی که
+کاربر می‌بیند یک خطای Pipe بی‌ربط است، نه علت واقعی. `Program.Log` هر خط را هم روی stderr می‌نویسد
+(که `printerSidecarClient.ts` دنبالهٔ آن را در پنل نشان می‌دهد) و هم در
+`%APPDATA%\PrintStudioPro\printer-service.log` ذخیره می‌کند؛ `AppDomain.CurrentDomain.UnhandledException`
+و `TaskScheduler.UnobservedTaskException` هم به همین فایل می‌نویسند تا کرش‌های بدون console قابل
+ردیابی بمانند. فایل در ۱ مگابایت چرخش می‌کند (truncate هنگام استارت).
+
+برای دیدن لاگ از خط فرمان:
+
+```powershell
+Get-Content "$env:APPDATA\PrintStudioPro\printer-service.log" -Tail 40
+```

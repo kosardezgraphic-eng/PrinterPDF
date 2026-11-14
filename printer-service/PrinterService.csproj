@@ -10,6 +10,15 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
+    <!--
+      PublishSingleFile + SelfContained + UseWPF otherwise leaves the native WPF DLLs
+      (PresentationNative_cor3.dll, wpfgfx_cor3.dll, D3DCompiler_47_cor3.dll) outside the bundle.
+      They are then missing at run time and the process dies inside MS.Win32.HwndSubclass with a
+      DllNotFoundException / 0xC000041D crash as soon as anything touches System.Printing, which is
+      what this service does for a living. Bundling them and letting the host self-extract is the
+      supported fix for that combination.
+    -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <AssemblyName>PrinterService</AssemblyName>
     <RootNamespace>PrintStudio.PrinterService</RootNamespace>
   </PropertyGroup>

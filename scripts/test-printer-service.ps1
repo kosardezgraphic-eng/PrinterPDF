@@ -81,7 +81,8 @@ try {
 
     $line = ($text -split "`r?`n" | Where-Object { $_.Trim().Length -gt 0 } | Select-Object -First 1)
     if (-not $line) {
-      throw "The service owns the pipe but answered nothing within ${TimeoutMs}ms — the spooler call is probably hanging (check the Print Spooler service: Get-Service Spooler)."
+      throw ("The service owns the pipe but answered nothing within ${TimeoutMs}ms - the spooler call is probably hanging. " +
+        "Check the Print Spooler service (Get-Service Spooler) and read the sidecar log at $env:APPDATA\PrintStudioPro\printer-service.log")
     }
 
     Write-Step 'raw response:'
@@ -96,7 +97,7 @@ try {
     if ($parsed.error) {
       Fail 4 "service error $($parsed.error.code): $($parsed.error.message)"
       if ($Method -eq 'printer:list') {
-        Write-Step 'printer:list failed in the service itself; look at System.Printing access and the Print Spooler service state.'
+        Write-Step "printer:list failed inside the service; the stack trace is in $env:APPDATA\PrintStudioPro\printer-service.log"
       }
       exit $script:exitCode
     }

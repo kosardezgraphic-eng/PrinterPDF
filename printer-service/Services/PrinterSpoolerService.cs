@@ -14,11 +14,37 @@ public sealed class PrinterSpoolerService
 
     public IReadOnlyList<PrinterInfoDto> ListPrinters()
     {
+        // Order matters. EnumPrinters (winspool.drv) needs no WPF assemblies, and in a single-file
+        // self-contained publish System.Printing/ReachFramework is exactly what throws
+        // DllNotFoundException — so ask the dependency-free API first. System.Printing is used only
+        // when the native pass found nothing, because it adds queue location and the driver's live
+        // PrintTicket but can also be the thing that kills the process.
+        IReadOnlyList<PrinterInfoDto> native;
+        try
+        {
+            native = ListPrintersWithWin32();
+        }
+        catch (Exception ex)
+        {
+            Program.Log($"winspool enumeration failed: {ex}");
+            native = Array.Empty<PrinterInfoDto>();
+        }
+        if (native.Count > 0) return native;
+
+        var queues = ListPrintersWithSystemPrinting();
+        if (queues.Count > 0) return queues;
+
+        throw new InvalidOperationException(
+            "Windows returned no printer queues. Check that the Print Spooler service is running and that at least one printer is installed for this Windows account.");
+    }
+
+    private List<PrinterInfoDto> ListPrintersWithSystemPrinting()
+    {
         var result = new List<PrinterInfoDto>();
         try
         {
             using var server = new LocalPrintServer();
-            var defaultQueueName = server.DefaultPrintQueue?.FullName ?? string.Empty;
+            var defaultQueueName = ReadDefaultPrinterName();
             var flags = new[]
             {
                 EnumeratedPrintQueueTypes.Local,
@@ -54,22 +80,41 @@ public sealed class PrinterSpoolerService
                 {
                     // A single unavailable queue must not hide other installed printers, but it must
                     // not be silent either: the Electron host forwards stderr into the printer panel.
-                    Console.Error.WriteLine($"Skipping printer queue '{queue.FullName}': {ex.Message}");
+                    Program.Log($"Skipping printer queue '{SafeQueueName(queue)}': {ex.Message}");
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // System.Printing can fail on some Windows installations; use the native spooler API below.
+            // System.Printing is unavailable on some installations (and in a single-file publish
+            // without extracted WPF natives). The winspool pass already ran, so report and continue.
+            Program.Log($"System.Printing enumeration failed: {ex.Message}");
         }
 
-        if (result.Count > 0) return result;
+        return result;
+    }
 
-        var nativePrinters = ListPrintersWithWin32();
-        if (nativePrinters.Count > 0) return nativePrinters;
+    /// <summary>
+    /// The per-user default queue, read straight from the spooler. Used instead of
+    /// the WPF-backed default-queue property of LocalPrintServer, so a single call that can fail
+    /// in a single-file publish never decides whether the app highlights a default printer.
+    /// </summary>
+    private static string ReadDefaultPrinterName()
+    {
+        uint size = 0;
+        WinSpoolInterop.GetDefaultPrinter(null, ref size);
+        if (size == 0) return string.Empty;
+        var buffer = new System.Text.StringBuilder((int)size);
+        if (!WinSpoolInterop.GetDefaultPrinter(buffer, ref size)) return string.Empty;
+        return buffer.ToString().TrimEnd('\0').Trim();
+    }
 
-        throw new InvalidOperationException(
-            "Windows returned no printer queues. Check that the Print Spooler service is running and that at least one printer is installed for this Windows account.");
+    private static string SafeQueueName(PrintQueue queue)
+    {
+        // Reading FullName is itself a spooler call: an inaccessible queue throws here, and the
+        // diagnostic must not be the thing that takes the request down.
+        try { return queue.FullName; }
+        catch { return "<inaccessible queue>"; }
     }
 
     private IReadOnlyList<PrinterInfoDto> ListPrintersWithWin32()
@@ -90,11 +135,7 @@ public sealed class PrinterSpoolerService
             if (returned == 0)
                 return ListPrintersByNameOnly(flags);
 
-            var defaultSize = 0u;
-            WinSpoolInterop.GetDefaultPrinter(null, ref defaultSize);
-            var defaultBuffer = new System.Text.StringBuilder((int)Math.Max(1, defaultSize));
-            var defaultName = WinSpoolInterop.GetDefaultPrinter(defaultBuffer, ref defaultSize)
-                ? defaultBuffer.ToString() : string.Empty;
+            var defaultName = ReadDefaultPrinterName();
             var result = new List<PrinterInfoDto>();
             int stride = Marshal.SizeOf<WinSpoolInterop.PRINTER_INFO_2>();
 
@@ -153,11 +194,7 @@ public sealed class PrinterSpoolerService
             if (!WinSpoolInterop.EnumPrinters(flags, null, 4, buffer, needed, out _, out var returned) || returned == 0)
                 return Array.Empty<PrinterInfoDto>();
 
-            uint defaultSize = 0;
-            WinSpoolInterop.GetDefaultPrinter(null, ref defaultSize);
-            var defaultBuffer = new System.Text.StringBuilder((int)Math.Max(1, defaultSize));
-            var defaultName = WinSpoolInterop.GetDefaultPrinter(defaultBuffer, ref defaultSize)
-                ? defaultBuffer.ToString() : string.Empty;
+            var defaultName = ReadDefaultPrinterName();
 
             var result = new List<PrinterInfoDto>();
             int stride = Marshal.SizeOf<WinSpoolInterop.PRINTER_INFO_4>();
@@ -436,6 +473,49 @@ public sealed class PrinterSpoolerService
     public IReadOnlyList<SpoolerJobDto> ListJobs(string? printerFilter = null)
     {
         var jobs = new List<SpoolerJobDto>();
+        // Every call below is System.Printing, so the whole enumeration is guarded: a driver that
+        // throws while its queue is read has to leave the sidecar alive and answer with the jobs it
+        // could read, instead of killing the process and turning the next request into a pipe error.
+        try
+        {
+            foreach (var queue in OpenQueues(printerFilter))
+            {
+                try
+                {
+                    queue.Refresh();
+                    var queueName = queue.FullName;
+                    foreach (var job in queue.GetPrintJobInfoCollection())
+                    {
+                        jobs.Add(new SpoolerJobDto(
+                            JobId: job.JobIdentifier,
+                            PrinterName: queueName,
+                            DocumentTitle: job.Name ?? "PrintStudio Document",
+                            UserName: job.Submitter ?? Environment.UserName,
+                            Status: MapJobStatus(job.JobStatus),
+                            TotalPages: Math.Max(1, job.NumberOfPages),
+                            PagesPrinted: Math.Max(0, job.NumberOfPagesPrinted),
+                            SizeBytes: job.JobSize,
+                            Priority: (int)job.Priority,
+                            SubmittedAt: job.TimeJobSubmitted.ToString("O")
+                        ));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Program.Log($"Skipping jobs of queue '{SafeQueueName(queue)}': {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Program.Log($"spooler job enumeration failed: {ex.Message}");
+        }
+
+        return jobs;
+    }
+
+    private static IEnumerable<PrintQueue> OpenQueues(string? printerFilter)
+    {
         using var server = new LocalPrintServer();
         var queues = server.GetPrintQueues(new[]
         {
@@ -445,39 +525,20 @@ public sealed class PrinterSpoolerService
 
         foreach (var queue in queues)
         {
+            // Reading FullName is a spooler round-trip and can throw for a shared queue whose
+            // remote server is offline; that queue is simply not filterable, so skip it.
+            string fullName;
+            try { fullName = queue.FullName; }
+            catch { continue; }
+
             if (!string.IsNullOrWhiteSpace(printerFilter) &&
-                !string.Equals(queue.FullName, printerFilter, StringComparison.OrdinalIgnoreCase))
+                !string.Equals(fullName, printerFilter, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            try
-            {
-                queue.Refresh();
-                var jobCollection = queue.GetPrintJobInfoCollection();
-                foreach (var job in jobCollection)
-                {
-                    jobs.Add(new SpoolerJobDto(
-                        JobId: job.JobIdentifier,
-                        PrinterName: queue.FullName,
-                        DocumentTitle: job.Name ?? "PrintStudio Document",
-                        UserName: job.Submitter ?? Environment.UserName,
-                        Status: MapJobStatus(job.JobStatus),
-                        TotalPages: Math.Max(1, job.NumberOfPages),
-                        PagesPrinted: Math.Max(0, job.NumberOfPagesPrinted),
-                        SizeBytes: job.JobSize,
-                        Priority: (int)job.Priority,
-                        SubmittedAt: job.TimeJobSubmitted.ToString("O")
-                    ));
-                }
-            }
-            catch
-            {
-                // Ignore inaccessible queue
-            }
+            yield return queue;
         }
-
-        return jobs;
     }
 
     public bool ControlJob(ControlJobParams request)
