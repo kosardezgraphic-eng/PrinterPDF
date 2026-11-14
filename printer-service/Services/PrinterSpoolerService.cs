@@ -36,11 +36,10 @@ public sealed class PrinterSpoolerService
                     var status = MapQueueStatus(queue);
                     var caps = QueryCapabilities(name, port, queue);
 
-                    if (!_profiles.TryGetValue(name, out var profile))
-                    {
-                        profile = ReadActiveProfile(name, caps, queue);
-                        _profiles[name] = profile;
-                    }
+                    // Re-read the driver's current user ticket on every refresh. This is
+                    // important after the user changes paper/orientation in Windows Preferences.
+                    var profile = ReadActiveProfile(name, caps, queue);
+                    _profiles[name] = profile;
 
                     result.Add(new PrinterInfoDto(
                         Name: name, DriverName: driver, PortName: port,
