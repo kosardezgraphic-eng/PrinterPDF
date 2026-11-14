@@ -24,6 +24,7 @@ const PIPE_PATH = '\\\\.\\pipe\\PrintStudioPrinterService';
 export class PrinterSidecarClient {
   private child: ChildProcess | null = null;
   private reqCounter = 1;
+  private startupError: string | null = null;
 
   public startSidecar(resourcesPath: string): void {
     if (process.platform !== 'win32') {
@@ -46,16 +47,30 @@ export class PrinterSidecarClient {
 
     const exePath = exeCandidates.find((candidate) => fs.existsSync(candidate));
     if (!exePath) {
+      this.startupError = [
+        'PrinterService.exe was not found.',
+        'Expected it in the packaged resources/printer-service folder or printer-service/bin/Release/net8.0-windows/win-x64/publish.',
+        'Run dotnet publish before building the installer and rebuild the application.',
+      ].join(' ');
       return;
     }
+
+    this.startupError = null;
 
     this.child = spawn(exePath, [], {
       stdio: 'ignore',
       windowsHide: true,
     });
 
-    this.child.on('error', () => {
+    this.child.on('error', (error) => {
+      this.startupError = `Could not start PrinterService.exe: ${error.message}`;
       this.child = null;
+    });
+    this.child.on('exit', (code, signal) => {
+      if (this.child) {
+        this.startupError = `PrinterService.exe stopped (code=${code ?? 'null'}, signal=${signal ?? 'none'}).`;
+        this.child = null;
+      }
     });
   }
 
@@ -67,6 +82,10 @@ export class PrinterSidecarClient {
   }
 
   public async callRpc<TResult>(method: string, params: unknown = {}): Promise<TResult> {
+    if (this.startupError) throw new Error(this.startupError);
+    if (!this.child || this.child.exitCode !== null) {
+      throw new Error('PrinterService.exe is not running. Restart PrintStudio Pro after rebuilding the printer service.');
+    }
     const id = this.reqCounter++;
     const payload: JsonRpcRequest = { jsonrpc: '2.0', id, method, params };
 
