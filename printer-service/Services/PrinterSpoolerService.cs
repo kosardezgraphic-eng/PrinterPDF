@@ -105,7 +105,7 @@ public sealed class PrinterSpoolerService
                         caps.SupportedMediaTypes.FirstOrDefault() ?? "Plain Paper",
                         caps.SupportsDuplex ? "long-edge" : "none",
                         "portrait", caps.SupportsColor ? "color" : "monochrome",
-                        caps.SupportedDpi.FirstOrDefault(), "normal");
+                        caps.SupportedDpi.FirstOrDefault(300), "normal");
                     _profiles[name] = profile;
                 }
 
@@ -242,7 +242,7 @@ public sealed class PrinterSpoolerService
             DuplexMode: caps.SupportsDuplex ? "long-edge" : "none",
             Orientation: orientation,
             ColorMode: caps.SupportsColor ? "color" : "monochrome",
-            Dpi: caps.SupportedDpi.Contains(600) ? 600 : caps.SupportedDpi.FirstOrDefault(),
+            Dpi: caps.SupportedDpi.Contains(600) ? 600 : caps.SupportedDpi.FirstOrDefault(300),
             Quality: "normal",
             PaperWidthMm: widthMm,
             PaperHeightMm: heightMm
@@ -286,7 +286,7 @@ public sealed class PrinterSpoolerService
                 var size = Marshal.PtrToStructure<WinSpoolInterop.POINT>(IntPtr.Add(sizeBuffer, i * Marshal.SizeOf<WinSpoolInterop.POINT>()));
                 string? mapped = paperId switch
                 {
-                    1 => "Letter", 5 => "Legal", 8 => "A3", 9 => "A4", 10 => "A2",
+                    1 => "Letter", 5 => "Legal", 8 => "A3", 9 => "A4",
                     11 => "A5", 12 => "B4", 13 => "B5", 66 => "A2", 67 => "A1",
                     68 => "A0", 70 => "A6", _ => null
                 };
