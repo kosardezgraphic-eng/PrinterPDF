@@ -38,17 +38,7 @@ public sealed class PrinterSpoolerService
 
                     if (!_profiles.TryGetValue(name, out var profile))
                     {
-                        profile = new PrinterProfileDto(
-                            PrinterName: name,
-                            PaperSize: caps.SupportedPapers.Contains("A4") ? "A4" : caps.SupportedPapers.FirstOrDefault() ?? "A4",
-                            Tray: caps.SupportedTrays.FirstOrDefault() ?? "Auto Select",
-                            MediaType: caps.SupportedMediaTypes.FirstOrDefault() ?? "Plain Paper",
-                            DuplexMode: caps.SupportsDuplex ? "long-edge" : "none",
-                            Orientation: "portrait",
-                            ColorMode: caps.SupportsColor ? "color" : "monochrome",
-                            Dpi: caps.SupportedDpi.Contains(600) ? 600 : caps.SupportedDpi.FirstOrDefault(300),
-                            Quality: "normal"
-                        );
+                        profile = ReadActiveProfile(name, caps, queue);
                         _profiles[name] = profile;
                     }
 
@@ -207,31 +197,129 @@ public sealed class PrinterSpoolerService
 
     public PrinterCapabilitiesDto QueryCapabilities(string printerName, string portName, PrintQueue queue)
     {
+        // Query the selected device/port. Do not advertise generic paper sizes, trays or DPI
+        // values that the installed driver has not reported.
+        var papers = ReadSupportedPaperSizes(printerName, portName);
         var trays = ReadCapabilityStrings(printerName, portName, WinSpoolInterop.DC_BINNAMES, 24);
-        if (trays.Count == 0)
-        {
-            trays.AddRange(new[] { "Auto Select", "Tray 1", "Manual Feed" });
-        }
-
         var mediaTypes = ReadCapabilityStrings(printerName, portName, WinSpoolInterop.DC_MEDIATYPENAMES, 64);
-        if (mediaTypes.Count == 0)
-        {
-            mediaTypes.AddRange(new[] { "Plain Paper", "Heavyweight 120g", "Glossy Photo", "Recycled" });
-        }
+        var dpi = ReadSupportedDpi(printerName, portName);
 
         bool supportsDuplex = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_DUPLEX, IntPtr.Zero, IntPtr.Zero) == 1;
         bool supportsColor = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_COLORDEVICE, IntPtr.Zero, IntPtr.Zero) == 1;
-        int maxCopies = Math.Max(1, WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_COPIES, IntPtr.Zero, IntPtr.Zero));
+        int copies = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_COPIES, IntPtr.Zero, IntPtr.Zero);
 
         return new PrinterCapabilitiesDto(
-            SupportedPapers: new[] { "A4", "A3", "A5", "B4", "B5", "Letter", "Legal", "Custom" },
-            SupportedTrays: trays,
+            SupportedPapers: papers,
+            SupportedTrays: trays.Count > 0 ? trays : new List<string> { "Auto Select" },
             SupportedMediaTypes: mediaTypes,
             SupportsDuplex: supportsDuplex,
             SupportsColor: supportsColor,
-            SupportedDpi: new[] { 300, 600, 1200 },
-            MaxCopies: maxCopies > 999 ? 999 : maxCopies
+            SupportedDpi: dpi,
+            MaxCopies: copies > 0 ? Math.Min(999, copies) : 1
         );
+    }
+
+    private static PrinterProfileDto ReadActiveProfile(string printerName, PrinterCapabilitiesDto caps, PrintQueue queue)
+    {
+        const double dipPerMm = 96.0 / 25.4;
+        var ticket = queue.UserPrintTicket ?? queue.DefaultPrintTicket;
+        var media = ticket?.PageMediaSize;
+        double? widthMm = media?.Width is double width && width > 0 ? width / dipPerMm : null;
+        double? heightMm = media?.Height is double height && height > 0 ? height / dipPerMm : null;
+        var paper = widthMm.HasValue && heightMm.HasValue
+            ? MatchPaperSize(widthMm.Value, heightMm.Value)
+            : caps.SupportedPapers.FirstOrDefault() ?? "Custom";
+        var orientation = ticket?.PageOrientation == PageOrientation.Landscape ? "landscape" : "portrait";
+
+        return new PrinterProfileDto(
+            PrinterName: printerName,
+            PaperSize: paper,
+            Tray: caps.SupportedTrays.FirstOrDefault() ?? "Auto Select",
+            MediaType: caps.SupportedMediaTypes.FirstOrDefault() ?? "Plain Paper",
+            DuplexMode: caps.SupportsDuplex ? "long-edge" : "none",
+            Orientation: orientation,
+            ColorMode: caps.SupportsColor ? "color" : "monochrome",
+            Dpi: caps.SupportedDpi.Contains(600) ? 600 : caps.SupportedDpi.FirstOrDefault(),
+            Quality: "normal",
+            PaperWidthMm: widthMm,
+            PaperHeightMm: heightMm
+        );
+    }
+
+    private static string MatchPaperSize(double widthMm, double heightMm)
+    {
+        var shortSide = Math.Min(widthMm, heightMm);
+        var longSide = Math.Max(widthMm, heightMm);
+        (string Id, double W, double H)[] standards =
+        {
+            ("A0", 841, 1189), ("A1", 594, 841), ("A2", 420, 594),
+            ("A3", 297, 420), ("A4", 210, 297), ("A5", 148, 210),
+            ("A6", 105, 148), ("B4", 250, 353), ("B5", 176, 250),
+            ("Letter", 215.9, 279.4), ("Legal", 215.9, 355.6)
+        };
+        foreach (var item in standards)
+            if (Math.Abs(shortSide - Math.Min(item.W, item.H)) < 1.5 &&
+                Math.Abs(longSide - Math.Max(item.W, item.H)) < 1.5)
+                return item.Id;
+        return "Custom";
+    }
+
+    private static List<string> ReadSupportedPaperSizes(string printerName, string portName)
+    {
+        int count = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_PAPERS, IntPtr.Zero, IntPtr.Zero);
+        if (count <= 0) return new List<string>();
+
+        var idBuffer = Marshal.AllocHGlobal(count * sizeof(short));
+        var sizeBuffer = Marshal.AllocHGlobal(count * Marshal.SizeOf<WinSpoolInterop.POINT>());
+        try
+        {
+            int idsRead = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_PAPERS, idBuffer, IntPtr.Zero);
+            int sizesRead = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_PAPERSIZE, sizeBuffer, IntPtr.Zero);
+            int total = Math.Min(count, Math.Min(idsRead, sizesRead));
+            var result = new List<string>();
+            for (int i = 0; i < total; i++)
+            {
+                short paperId = Marshal.ReadInt16(idBuffer, i * sizeof(short));
+                var size = Marshal.PtrToStructure<WinSpoolInterop.POINT>(IntPtr.Add(sizeBuffer, i * Marshal.SizeOf<WinSpoolInterop.POINT>()));
+                string? mapped = paperId switch
+                {
+                    1 => "Letter", 5 => "Legal", 8 => "A3", 9 => "A4", 10 => "A2",
+                    11 => "A5", 12 => "B4", 13 => "B5", 66 => "A2", 67 => "A1",
+                    68 => "A0", 70 => "A6", _ => null
+                };
+                if (mapped == null && size.X > 0 && size.Y > 0)
+                    mapped = MatchPaperSize(size.X / 10.0, size.Y / 10.0) == "Custom" ? "Custom" :
+                        MatchPaperSize(size.X / 10.0, size.Y / 10.0);
+                if (mapped != null && !result.Contains(mapped, StringComparer.OrdinalIgnoreCase))
+                    result.Add(mapped);
+            }
+            return result;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(idBuffer);
+            Marshal.FreeHGlobal(sizeBuffer);
+        }
+    }
+
+    private static List<int> ReadSupportedDpi(string printerName, string portName)
+    {
+        int count = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_ENUMRESOLUTIONS, IntPtr.Zero, IntPtr.Zero);
+        if (count <= 0) return new List<int>();
+        var buffer = Marshal.AllocHGlobal(count * Marshal.SizeOf<WinSpoolInterop.POINT>());
+        try
+        {
+            int fetched = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_ENUMRESOLUTIONS, buffer, IntPtr.Zero);
+            var result = new SortedSet<int>();
+            for (int i = 0; i < Math.Min(count, fetched); i++)
+            {
+                var resolution = Marshal.PtrToStructure<WinSpoolInterop.POINT>(IntPtr.Add(buffer, i * Marshal.SizeOf<WinSpoolInterop.POINT>()));
+                int value = Math.Max(resolution.X, resolution.Y);
+                if (value > 0 && value <= 9600) result.Add(value);
+            }
+            return result.ToList();
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
     }
 
     private static List<string> ReadCapabilityStrings(string printerName, string portName, short capability, int charWidth)
@@ -239,27 +327,18 @@ public sealed class PrinterSpoolerService
         var items = new List<string>();
         int count = WinSpoolInterop.DeviceCapabilities(printerName, portName, capability, IntPtr.Zero, IntPtr.Zero);
         if (count <= 0) return items;
-
-        int bytesPerEntry = charWidth * 2; // Unicode chars
+        int bytesPerEntry = charWidth * 2;
         IntPtr buffer = Marshal.AllocHGlobal(count * bytesPerEntry);
         try
         {
             int fetched = WinSpoolInterop.DeviceCapabilities(printerName, portName, capability, buffer, IntPtr.Zero);
-            for (int i = 0; i < fetched; i++)
+            for (int i = 0; i < Math.Min(count, fetched); i++)
             {
-                IntPtr itemPtr = IntPtr.Add(buffer, i * bytesPerEntry);
-                string? text = Marshal.PtrToStringUni(itemPtr)?.TrimEnd('\0').Trim();
-                if (!string.IsNullOrWhiteSpace(text))
-                {
-                    items.Add(text);
-                }
+                string? text = Marshal.PtrToStringUni(IntPtr.Add(buffer, i * bytesPerEntry), charWidth)?.TrimEnd('\0').Trim();
+                if (!string.IsNullOrWhiteSpace(text)) items.Add(text);
             }
         }
-        finally
-        {
-            Marshal.FreeHGlobal(buffer);
-        }
-
+        finally { Marshal.FreeHGlobal(buffer); }
         return items;
     }
 
