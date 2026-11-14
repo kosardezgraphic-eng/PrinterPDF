@@ -67,19 +67,17 @@ public sealed class PrinterSpoolerService
 
     private IReadOnlyList<PrinterInfoDto> ListPrintersWithWin32()
     {
-        var needed = 0u;
-        var returned = 0u;
-        WinSpoolInterop.EnumPrinters(
-            WinSpoolInterop.PRINTER_ENUM_LOCAL | WinSpoolInterop.PRINTER_ENUM_CONNECTIONS,
-            null, 4, IntPtr.Zero, 0, out needed, out returned);
+        // Level 2 includes the actual driver and port names, which are required by
+        // DeviceCapabilities. Level 4 only returns printer names and cannot query
+        // device-specific media capabilities reliably.
+        var flags = WinSpoolInterop.PRINTER_ENUM_LOCAL | WinSpoolInterop.PRINTER_ENUM_CONNECTIONS;
+        WinSpoolInterop.EnumPrinters(flags, null, 2, IntPtr.Zero, 0, out var needed, out _);
         if (needed == 0) return Array.Empty<PrinterInfoDto>();
 
         var buffer = Marshal.AllocHGlobal((int)needed);
         try
         {
-            if (!WinSpoolInterop.EnumPrinters(
-                WinSpoolInterop.PRINTER_ENUM_LOCAL | WinSpoolInterop.PRINTER_ENUM_CONNECTIONS,
-                null, 4, buffer, needed, out _, out returned))
+            if (!WinSpoolInterop.EnumPrinters(flags, null, 2, buffer, needed, out _, out var returned))
                 return Array.Empty<PrinterInfoDto>();
 
             var defaultSize = 0u;
@@ -87,43 +85,48 @@ public sealed class PrinterSpoolerService
             var defaultBuffer = new System.Text.StringBuilder((int)Math.Max(1, defaultSize));
             var defaultName = WinSpoolInterop.GetDefaultPrinter(defaultBuffer, ref defaultSize)
                 ? defaultBuffer.ToString() : string.Empty;
-
-            var caps = new PrinterCapabilitiesDto(
-                SupportedPapers: new[] { "A4", "A3", "A5", "B4", "B5", "Letter", "Legal", "Custom" },
-                SupportedTrays: new[] { "Auto Select" },
-                SupportedMediaTypes: new[] { "Plain Paper" },
-                SupportsDuplex: false, SupportsColor: true,
-                SupportedDpi: new[] { 300, 600 }, MaxCopies: 1);
             var result = new List<PrinterInfoDto>();
+            int stride = Marshal.SizeOf<WinSpoolInterop.PRINTER_INFO_2>();
 
             for (var i = 0; i < returned; i++)
             {
-                var info = Marshal.PtrToStructure<WinSpoolInterop.PRINTER_INFO_4>(
-                    IntPtr.Add(buffer, i * Marshal.SizeOf<WinSpoolInterop.PRINTER_INFO_4>()));
+                var info = Marshal.PtrToStructure<WinSpoolInterop.PRINTER_INFO_2>(IntPtr.Add(buffer, i * stride));
                 var name = Marshal.PtrToStringUni(info.pPrinterName);
                 if (string.IsNullOrWhiteSpace(name)) continue;
-                var serverName = Marshal.PtrToStringUni(info.pServerName) ?? string.Empty;
+                var port = Marshal.PtrToStringUni(info.pPortName) ?? string.Empty;
+                var driver = Marshal.PtrToStringUni(info.pDriverName) ?? "Windows printer driver";
+                var caps = QueryCapabilities(name, port, null!);
+
                 if (!_profiles.TryGetValue(name, out var profile))
                 {
-                    profile = new PrinterProfileDto(name, "A4", "Auto Select", "Plain Paper",
-                        "none", "portrait", "color", 300, "normal");
+                    profile = new PrinterProfileDto(name,
+                        caps.SupportedPapers.FirstOrDefault() ?? "Custom",
+                        caps.SupportedTrays.FirstOrDefault() ?? "Auto Select",
+                        caps.SupportedMediaTypes.FirstOrDefault() ?? "Plain Paper",
+                        caps.SupportsDuplex ? "long-edge" : "none",
+                        "portrait", caps.SupportsColor ? "color" : "monochrome",
+                        caps.SupportedDpi.FirstOrDefault(), "normal");
                     _profiles[name] = profile;
                 }
 
+                string status = (info.Status & 0x00000080) != 0 ? "Offline" :
+                    (info.Status & 0x00000002) != 0 ? "Error" :
+                    (info.Status & 0x00000008) != 0 ? "PaperJam" :
+                    (info.Status & 0x00000010) != 0 ? "OutOfPaper" :
+                    (info.Status & 0x00000001) != 0 ? "Paused" : "Ready";
+
                 result.Add(new PrinterInfoDto(
-                    Name: name, DriverName: "Windows printer driver", PortName: "Windows Spooler",
+                    Name: name, DriverName: driver, PortName: port,
                     IsDefault: string.Equals(name, defaultName, StringComparison.OrdinalIgnoreCase),
-                    IsNetwork: !string.IsNullOrWhiteSpace(serverName) || (info.Attributes & 0x10) != 0,
-                    IsVirtual: IsVirtualPrinter(name), Status: "Ready", JobsInQueue: 0,
-                    TonerLevelPercent: null, TotalPageCounter: null, Location: null,
+                    IsNetwork: (info.Attributes & 0x10) != 0 || name.StartsWith(@"\\", StringComparison.Ordinal),
+                    IsVirtual: IsVirtualPrinter(name), Status: status,
+                    JobsInQueue: (int)info.cJobs, TonerLevelPercent: null, TotalPageCounter: null,
+                    Location: Marshal.PtrToStringUni(info.pLocation),
                     Capabilities: caps, ActiveProfile: profile));
             }
             return result;
         }
-        finally
-        {
-            Marshal.FreeHGlobal(buffer);
-        }
+        finally { Marshal.FreeHGlobal(buffer); }
     }
 
     // The existing queue list uses this name-based classification. Virtual queues
@@ -195,7 +198,7 @@ public sealed class PrinterSpoolerService
         }
     }
 
-    public PrinterCapabilitiesDto QueryCapabilities(string printerName, string portName, PrintQueue queue)
+    public PrinterCapabilitiesDto QueryCapabilities(string printerName, string portName, PrintQueue? queue)
     {
         // Query the selected device/port. Do not advertise generic paper sizes, trays or DPI
         // values that the installed driver has not reported.
