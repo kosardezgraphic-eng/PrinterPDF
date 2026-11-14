@@ -315,6 +315,12 @@ export const ipcBridge = {
     return true;
   },
 
+  async openPrinterPreferences(printerName: string): Promise<PrinterInfo[]> {
+    const api = electronApi();
+    if (!api) throw new Error('Native Windows printer preferences are available only in the desktop app');
+    return api.openPrinterPreferences(printerName);
+  },
+
   async setSimulatedPrinterStatus(
     printerName: string,
     status: PrinterInfo['status']
