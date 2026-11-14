@@ -67,9 +67,11 @@ public sealed class PrinterSpoolerService
                     ActiveProfile: profile
                 ));
             }
-            catch
+            catch (Exception ex)
             {
-                // Skip inaccessible queue without crashing sidecar
+                // One inaccessible queue must not lose the whole list, but it must not be silent
+                // either: the Electron host forwards this stream into the printer status panel.
+                Console.Error.WriteLine($"Skipping printer queue '{queue.FullName}': {ex.Message}");
             }
         }
 

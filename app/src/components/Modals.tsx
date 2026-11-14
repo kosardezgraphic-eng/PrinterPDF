@@ -13,6 +13,7 @@ import {
   Info,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
+import { PrinterRetryButton, PrinterServiceStatus } from './PrinterStatus';
 import { computeCounterSummary } from '../engine/counterEngine';
 import {
   computeImpositionSheets,
@@ -343,18 +344,27 @@ export const ModalsAndToasts: React.FC = () => {
                   <label className="mb-1 block text-slate-400">
                     {isFa ? 'انتخاب پرینتر (محلی / شبکه / مجازی):' : 'Printer:'}
                   </label>
-                  <select
-                    value={selectedPrinter?.name ?? ''}
-                    onChange={(e) => selectPrinter(e.target.value)}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-white"
-                  >
-                    {printers.map((p) => (
-                      <option key={p.name} value={p.name}>
-                        {p.name} [{p.status}]
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center gap-2">
+                    <select
+                      aria-label={isFa ? 'انتخاب پرینتر' : 'Select printer'}
+                      value={selectedPrinter?.name ?? ''}
+                      onChange={(e) => selectPrinter(e.target.value)}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-white"
+                    >
+                      {printers.length === 0 && (
+                        <option value="">{isFa ? '— پرینتری خوانده نشد —' : '— no printers read —'}</option>
+                      )}
+                      {printers.map((p) => (
+                        <option key={p.name} value={p.name}>
+                          {p.name} [{p.status}]
+                        </option>
+                      ))}
+                    </select>
+                    <PrinterRetryButton />
+                  </div>
                 </div>
+
+                <PrinterServiceStatus />
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>

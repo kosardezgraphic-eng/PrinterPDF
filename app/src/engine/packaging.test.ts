@@ -37,7 +37,19 @@ describe('windows packaging layout', () => {
 
   it('resolves the renderer and the preload from the packed layout', () => {
     const mainDir = path.posix.dirname(pkg.main);
-    expect(mainProcess).toContain(`path.join(__dirname, 'preload.js')`);
+    // A sandboxed renderer can only load a bundled CommonJS preload, never a .js emitted as ESM.
+    expect(mainProcess).toContain(`path.join(__dirname, 'preload.cjs')`);
+    expect(mainProcess).toContain('sandbox: true');
+    expect(mainProcess).toContain('contextIsolation: true');
+    const preloadBuild = pkg.scripts['build:preload'];
+    expect(preloadBuild).toContain('electron/preload.ts');
+    expect(preloadBuild).toContain('--format=cjs');
+    expect(preloadBuild).toContain('--bundle');
+    expect(preloadBuild).toContain('--external:electron');
+    expect(preloadBuild).toContain(path.posix.join('dist-electron', 'electron', 'preload.cjs'));
+    for (const script of ['build:electron', 'build:electron:nosidecar']) {
+      expect(pkg.scripts[script]).toContain('build:preload');
+    }
     const index = /loadFile\(path\.join\(__dirname, '([^']+)'\)\)/.exec(mainProcess)?.[1];
     expect(path.posix.normalize(path.posix.join(mainDir, index!))).toBe('dist/index.html');
     const files = /files:\s*\n((?:\s*-\s*\S+\n)+)/.exec(builder)?.[1] ?? '';
@@ -46,6 +58,8 @@ describe('windows packaging layout', () => {
   });
 
   it('copies the sidecar from the folder the C# project publishes to', () => {
+    expect(pkg.scripts['build:service']).toContain('-r win-x64');
+    expect(pkg.scripts['build:service']).toContain('--self-contained true');
     const csproj = read('../../../printer-service/PrinterService.csproj');
     const framework = /<TargetFramework>([^<]+)</.exec(csproj)?.[1];
     const rid = /<RuntimeIdentifier>([^<]+)</.exec(csproj)?.[1];
@@ -54,8 +68,10 @@ describe('windows packaging layout', () => {
     expect(from).toBe(`printer-service/bin/Release/${framework}/${rid}/publish`);
     // Losing the sidecar must be a loud build error, never a silent runtime surprise.
     const prepare = read('../../../scripts/prepare-win-build.mjs');
-    expect(prepare).toContain('sidecar:publish');
-    expect(pkg.scripts['sidecar:publish']).toContain('dotnet publish printer-service/PrinterService.csproj');
+    // The pre-flight refuses to package without the CommonJS preload bundle, not the tsc .js.
+    expect(prepare).toContain('build:preload');
+    expect(prepare).toContain("electron', 'preload.cjs'");
+    expect(pkg.scripts['build:service']).toContain('dotnet publish printer-service/PrinterService.csproj');
   });
 
   it('keeps the icon and association setup out of the way of a first build', () => {

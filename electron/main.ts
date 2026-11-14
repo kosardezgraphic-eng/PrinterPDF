@@ -83,7 +83,9 @@ async function createMainWindow(): Promise<void> {
     title: 'PrintStudio Pro',
     backgroundColor: '#020617',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      // The preload is a single CommonJS bundle (`npm run build:preload`): a sandboxed renderer
+      // cannot load an ESM preload script, and silently loses window.printStudioAPI if it is tried.
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -112,9 +114,28 @@ async function createMainWindow(): Promise<void> {
   }
 }
 
+/**
+ * Runs a sidecar call with a message the operator can act on: the raw pipe error alone says
+ * nothing about a missing executable or a service that died on startup, which is exactly what an
+ * empty printer list otherwise hides.
+ */
+async function withSidecarDiagnostics<TResult>(action: Promise<TResult>): Promise<TResult> {
+  const blocked = sidecar.blockedReason;
+  if (blocked) throw new Error(blocked);
+  try {
+    return await action;
+  } catch (error) {
+    throw new Error(sidecar.describeFailure(error));
+  }
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.PRINTER_LIST, async () => {
-    return sidecar.listPrinters();
+    return withSidecarDiagnostics(sidecar.listPrinters());
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PRINTER_STATUS_NOTE, async () => {
+    return sidecar.statusNote();
   });
 
   ipcMain.handle(IPC_CHANNELS.PRINTER_GET_MARGINS, async (_e, request: PrinterMarginRequest) => {
@@ -122,7 +143,7 @@ function registerIpcHandlers(): void {
       !Number.isFinite(request.widthMm) || !Number.isFinite(request.heightMm) ||
       request.widthMm <= 0 || request.heightMm <= 0 || request.widthMm > 2000 || request.heightMm > 2000 ||
       !['portrait','landscape'].includes(request.orientation)) throw new Error('Invalid printer margin request');
-    return sidecar.getPrinterMargins(request);
+    return withSidecarDiagnostics(sidecar.getPrinterMargins(request));
   });
 
   ipcMain.handle(

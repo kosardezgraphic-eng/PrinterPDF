@@ -42,7 +42,7 @@ jobs:
 
       - name: Publish the print sidecar
         if: ${{ !inputs.skip-sidecar }}
-        run: npm run sidecar:publish
+        run: npm run build:service
 
       - name: Build installer and portable exe
         run: npm run ${{ inputs.skip-sidecar && 'build:electron:nosidecar' || 'build:electron' }}

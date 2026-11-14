@@ -19,6 +19,7 @@ const api: PrintStudioElectronAPI = {
   isElectron: true,
 
   listPrinters: () => ipcRenderer.invoke(IPC_CHANNELS.PRINTER_LIST),
+  getPrinterStatusNote: () => ipcRenderer.invoke(IPC_CHANNELS.PRINTER_STATUS_NOTE),
   getPrinterMargins: (request: PrinterMarginRequest) => ipcRenderer.invoke(IPC_CHANNELS.PRINTER_GET_MARGINS, request),
 
   updatePrinterProfile: (printerName: string, profile: PrinterProfileSettings) =>

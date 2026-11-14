@@ -10,6 +10,9 @@
  * 2. `electron-builder.yml` copies the published .NET sidecar out of `printer-service`, which is a
  *    build artefact and is not in Git. Without it the copy step fails with a bare ENOENT, so we
  *    print the exact command instead — and only skip the sidecar when that was asked for.
+ * 3. A sandboxed BrowserWindow loads a bundled CommonJS preload only. The tsc output for
+ *    electron/preload.ts is ESM with extension-less relative imports, so it must never be the
+ *    file referenced by `webPreferences.preload` — esbuild's preload.cjs is.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -26,8 +29,10 @@ const mainEntry = 'dist-electron/electron/main.js';
 if (!existsSync(path.join(root, mainEntry))) {
   fail(`no ${mainEntry} — run "tsc -p tsconfig.electron.json" first (npm run build:electron does it for you)`);
 }
-if (!existsSync(path.join(distElectron, 'electron', 'preload.js'))) {
-  fail('no dist-electron/electron/preload.js — the preload script is not compiled, the window would start with no printStudioAPI');
+// The preload is not tsc output: it must be the esbuild CommonJS bundle, because a sandboxed
+// renderer cannot load an ESM preload (and reports no printStudioAPI at all if it tries).
+if (!existsSync(path.join(distElectron, 'electron', 'preload.cjs'))) {
+  fail('no dist-electron/electron/preload.cjs — run "npm run build:preload" (npm run build:electron does it for you); without it the window has no printStudioAPI and every printer call fails');
 }
 const pkgMain = JSON.parse(read('package.json')).main;
 if (pkgMain !== mainEntry) {
@@ -47,7 +52,7 @@ if (!existsSync(sidecarExe)) {
   if (!allowMissing) {
     fail(`no PrinterService.exe in ${from}
   build it first (Windows + .NET 8 SDK):
-    npm run sidecar:publish
+    npm run build:service
   or skip the sidecar to produce an app that merges, imposes and exports PDF but cannot
   query printers or spool jobs — it reports margins as "unavailable":
     npm run build:electron:nosidecar`);
@@ -57,7 +62,7 @@ if (!existsSync(sidecarExe)) {
     path.join(sidecarDir, 'PRINTSTUDIO-NO-SIDECAR.txt'),
     'Placeholder created by scripts/prepare-win-build.mjs (--allow-missing-sidecar).\n' +
     'The C# print sidecar was not published, so printer enumeration, hard margins and job\n' +
-    'spooling stay unavailable at runtime. Run "npm run sidecar:publish" and rebuild for them.\n',
+    'spooling stay unavailable at runtime. Run "npm run build:service" and rebuild for them.\n',
   );
   console.warn(`[win-build] packaging without the print sidecar (${from})`);
 } else {

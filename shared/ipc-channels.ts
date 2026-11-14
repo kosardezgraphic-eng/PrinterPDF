@@ -32,6 +32,8 @@ export const IPC_CHANNELS = {
   PRINTER_LIST: 'printer:list',
   PRINTER_GET_CAPABILITIES: 'printer:get-capabilities',
   PRINTER_GET_MARGINS: 'printer:get-margins',
+  /** Why the print sidecar cannot answer, or null when it is healthy. */
+  PRINTER_STATUS_NOTE: 'printer:status-note',
   PRINTER_UPDATE_PROFILE: 'printer:update-profile',
   PRINTER_SET_DEFAULT: 'printer:set-default',
   PRINTER_PRINT_JOB: 'printer:print-job',
@@ -86,6 +88,8 @@ export interface PrintStudioElectronAPI {
   /** Subscribes to files passed to a second instance of the app; returns an unsubscribe. */
   onCliOpenFiles(callback: (paths: string[]) => void): () => void;
   listPrinters(): Promise<PrinterInfo[]>;
+  /** `null` when the sidecar is running; otherwise the reason an operator has to fix. */
+  getPrinterStatusNote(): Promise<string | null>;
   getPrinterMargins(request: PrinterMarginRequest): Promise<PrinterMarginResult>;
   updatePrinterProfile(printerName: string, profile: PrinterProfileSettings): Promise<PrinterInfo>;
   setDefaultPrinter(printerName: string): Promise<boolean>;

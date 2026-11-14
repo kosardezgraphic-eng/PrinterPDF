@@ -215,6 +215,11 @@ interface AppState {
   selectedPrinterName: string;
   printerMargins: PrinterMarginResult | { status: 'loading' };
   spoolerJobs: SpoolerJobInfo[];
+  /** Why the real printer list could not be read, or null when the last attempt worked. */
+  printerServiceError: string | null;
+  /** What the desktop app says about its print sidecar when no call has failed (e.g. it died). */
+  printerServiceNote: string | null;
+  isRefreshingPrinters: boolean;
 
   // Batch Queue
   batchQueue: BatchJobItem[];
@@ -328,6 +333,8 @@ interface AppState {
   // Printers & Spooler
   selectPrinter: (printerName: string) => void;
   autoSelectBestPrinter: () => void;
+  /** Asks the sidecar for the printer list again and reports exactly why it failed if it does. */
+  retryPrinters: () => Promise<void>;
   updatePrinterProfile: (printerName: string, profile: PrinterProfileSettings) => Promise<void>;
   setDefaultPrinter: (printerName: string) => Promise<void>;
   simulatePrinterStatusChange: (printerName: string, status: PrinterInfo['status']) => Promise<void>;
@@ -427,6 +434,9 @@ export const useAppStore = create<AppState>((set, get) => {
     selectedPrinterName: '',
     printerMargins: { status: 'unavailable', reason: 'No printer selected' },
     spoolerJobs: [],
+    printerServiceError: null,
+    printerServiceNote: null,
+    isRefreshingPrinters: false,
 
     batchQueue: INITIAL_BATCH_QUEUE,
     isBatchRunning: false,
@@ -482,6 +492,9 @@ export const useAppStore = create<AppState>((set, get) => {
           message: error instanceof Error ? error.message : String(error),
         });
       }
+      // An empty list is never an explanation on its own, so the reason is kept in the store.
+      set({ printerServiceError: error ? (error instanceof Error ? error.message : String(error)) : null,
+        printerServiceNote: printerResult.error ? null : await safePrinterStatusNote() });
       const previousMarginKey = marginKey(get());
       const defaultPrinter =
         printers.find((p) => p.isDefault)?.name ?? printers[0]?.name ?? '';
@@ -1591,6 +1604,47 @@ export const useAppStore = create<AppState>((set, get) => {
       set({ selectedPrinterName: printerName });
     },
 
+    retryPrinters: async () => {
+      if (get().isRefreshingPrinters) return;
+      set({ isRefreshingPrinters: true });
+      try {
+        const printers = await ipcBridge.listPrinters();
+        const selected = get().selectedPrinterName;
+        const fallback = printers.some((p) => p.name === selected)
+          ? selected
+          : printers.find((p) => p.isDefault)?.name ?? printers[0]?.name ?? '';
+        set({
+          printers,
+          selectedPrinterName: fallback,
+          printerServiceError: null,
+          printerServiceNote: await safePrinterStatusNote(),
+          isRefreshingPrinters: false,
+        });
+        if (fallback !== selected) refreshPrinterMargins();
+        get().addToast({
+          type: printers.length ? 'info' : 'warning',
+          title: get().settings.language === 'fa' ? 'فهرست پرینترها تازه شد' : 'Printer list refreshed',
+          message: printers.length
+            ? (get().settings.language === 'fa'
+                ? `${printers.length} پرینتر از ویندوز خوانده شد.`
+                : `Read ${printers.length} printer(s) from Windows.`)
+            : (get().settings.language === 'fa'
+                ? 'ویندوز هیچ پرینتری گزارش نکرد؛ بررسی کنید در «Printers & scanners» چیزی نصب باشد.'
+                : 'Windows reported no printers installed.'),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const note = await safePrinterStatusNote();
+        set({ printerServiceError: message, printerServiceNote: note, isRefreshingPrinters: false });
+        get().addToast({
+          type: 'error',
+          title: get().settings.language === 'fa' ? 'خواندن فهرست پرینترها ناموفق بود' : 'Could not read the printer list',
+          // A toast is the only thing many users read, so it carries the fix, not just the symptom.
+          message: note ? `${message}\n${note}` : message,
+        });
+      }
+    },
+
     autoSelectBestPrinter: () => {
       const state = get();
       const needsColor = state.pages.some(
@@ -1805,6 +1859,15 @@ export const useAppStore = create<AppState>((set, get) => {
     },
   };
 });
+
+/** Sidecar diagnostics must never be the thing that breaks an otherwise healthy workspace. */
+async function safePrinterStatusNote(): Promise<string | null> {
+  try {
+    return await ipcBridge.getPrinterStatusNote();
+  } catch {
+    return null;
+  }
+}
 
 // A single subscription covers printer selection, initialization, project restore and
 // undo/redo. Results are keyed to the exact oriented media; old responses are discarded.

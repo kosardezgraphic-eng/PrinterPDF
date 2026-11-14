@@ -280,6 +280,17 @@ export const ipcBridge = {
     return structuredClone(memPrinters);
   },
 
+  /**
+   * Why the real printer list is missing, in the desktop app's own words. In a browser there is no
+   * sidecar at all, so the answer is fixed instead of pretending the list came from Windows.
+   */
+  async getPrinterStatusNote(): Promise<string | null> {
+    const api = electronApi();
+    if (!api) return 'Browser preview: the printer list is simulated, nothing was read from Windows.';
+    if (typeof api.getPrinterStatusNote !== 'function') return 'The installed app is older than this bridge; restart it after reinstalling.';
+    return api.getPrinterStatusNote();
+  },
+
   async getPrinterMargins(request: PrinterMarginRequest): Promise<PrinterMarginResult> {
     const api = electronApi();
     if (api) {

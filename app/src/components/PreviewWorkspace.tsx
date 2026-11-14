@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { useAppStore, type PageEditScope } from '../store/useAppStore';
 import { PageCanvasCell, type CanvasTool } from './PageCanvasCell';
+import { PrinterRetryButton, PrinterServiceStatus } from './PrinterStatus';
 import { LayoutGuides, MeasurementTool } from './SheetTools';
 import { RulerGuideProvider, SheetRuler, GuidePaperRef, UserGuideLines } from './RulerGuides';
 import { TextOverlayLayer } from './TextOverlayLayer';
@@ -1004,7 +1005,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* I1 & I2: Windows Printers & Live Status */}
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-              <div className="mb-2 flex items-center justify-between">
+              <div className="mb-2 flex items-center justify-between gap-3">
                 <h4 className="flex items-center gap-1.5 text-xs font-bold text-white">
                   <Printer className="h-4 w-4 text-sky-400" />
                   <span>
@@ -1013,7 +1014,11 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                       : 'Windows Printers & Live Status (I1/I2)'}
                   </span>
                 </h4>
+                <PrinterRetryButton />
               </div>
+
+              {/* An empty list is never a diagnosis: the sidecar reason is shown next to it. */}
+              <PrinterServiceStatus />
 
               <div className="space-y-2">
                 {printers.map((p) => (
