@@ -35,12 +35,19 @@ const pointInBox=(point:{xMm:number;yMm:number},box:BoxMm)=>point.xMm>=box.x&&po
  * (the caller then imports the file as its own document/page instead).
  */
 export function imageDropPlacement(sheet:ComputedSheetSide,point:{xMm:number;yMm:number},natural:{width:number;height:number}):ImageDropPlacement|null{
+  if(!pointInBox(point,{x:0,y:0,width:sheet.widthMm,height:sheet.heightMm}))return null;
+  const cells=sheet.cells.filter(c=>c.page);
+  for(const cell of cells){
+    const box={x:cell.contentXMm,y:cell.contentYMm,width:cell.contentWidthMm,height:cell.contentHeightMm};
+    const rotation=cell.transform?.rotationDeg??0;
+    if(!pointInBox(sheetToBoxPoint(point,box,rotation),box))continue;
+    const size=sizeImageToFit(natural.width,natural.height,box);
+    const position=placeImageInBox(sheetToBoxPoint(point,box,rotation),box,size);
+    return {target:'page',pageId:cell.page!.id,sheetIndex:sheet.sideIndex,...position,...size};
+  }
   const box={x:0,y:0,width:sheet.widthMm,height:sheet.heightMm};
-  if(!pointInBox(point,box))return null;
   const size=sizeImageToFit(natural.width,natural.height,box);
   const position=placeImageInBox(point,box,size);
-  // Picture overlays belong to the output sheet, not to an individual matrix cell.
-  // Changing rows, columns, gutters or page imposition must not resize or delete the picture.
   return {target:'sheet',sheetIndex:sheet.sideIndex,...position,...size};
 }
 export const newOverlayId=()=>globalThis.crypto?.randomUUID?.()??`image-${Date.now()}-${Math.random().toString(36).slice(2)}`;

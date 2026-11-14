@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
+    "module": "CommonJS",
+    "moduleResolution": "node",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -10,8 +10,14 @@
     "rootDir": ".",
     "baseUrl": ".",
     "paths": {
-      "@shared/*": ["shared/*"]
-    }
+      "@shared/*": [
+        "shared/*"
+      ]
+    },
+    "verbatimModuleSyntax": false
   },
-  "include": ["electron/**/*", "shared/**/*"]
+  "include": [
+    "electron/**/*",
+    "shared/**/*"
+  ]
 }

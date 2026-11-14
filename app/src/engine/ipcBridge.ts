@@ -280,6 +280,17 @@ export const ipcBridge = {
     return structuredClone(memPrinters);
   },
 
+  /**
+   * Why the real printer list is missing, in the desktop app's own words. In a browser there is no
+   * sidecar at all, so the answer is fixed instead of pretending the list came from Windows.
+   */
+  async getPrinterStatusNote(): Promise<string | null> {
+    const api = electronApi();
+    if (!api) return 'Browser preview: the printer list is simulated, nothing was read from Windows.';
+    if (typeof api.getPrinterStatusNote !== 'function') return 'The installed app is older than this bridge; restart it after reinstalling.';
+    return api.getPrinterStatusNote();
+  },
+
   async getPrinterMargins(request: PrinterMarginRequest): Promise<PrinterMarginResult> {
     const api = electronApi();
     if (api) {
@@ -315,9 +326,13 @@ export const ipcBridge = {
     return true;
   },
 
+  /** Native driver preferences are a desktop-only capability: never fake it in the browser. */
   async openPrinterPreferences(printerName: string): Promise<PrinterInfo[]> {
     const api = electronApi();
     if (!api) throw new Error('Native Windows printer preferences are available only in the desktop app');
+    if (typeof api.openPrinterPreferences !== 'function') {
+      throw new Error('The installed app is older than this bridge; restart it after reinstalling.');
+    }
     return api.openPrinterPreferences(printerName);
   },
 

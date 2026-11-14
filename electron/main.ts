@@ -1,22 +1,18 @@
 import { app, BrowserWindow, ipcMain, session } from 'electron';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import fs from 'node:fs/promises';
-import { IPC_CHANNELS, type LocalFilePayload } from '../shared/ipc-channels.js';
-import { PrinterSidecarClient } from './printerSidecarClient.js';
-import { SessionStore } from './sessionStore.js';
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
+import { IPC_CHANNELS, type LocalFilePayload } from '../shared/ipc-channels';
+import { PrinterSidecarClient } from './printerSidecarClient';
+import { SessionStore } from './sessionStore';
 import type {
   AppSettings,
   PrinterProfileSettings,
   PrinterMarginRequest,
   PrintJobRequest,
   PspProjectFile,
-} from '../shared/models.js';
+} from '../shared/models';
 
 /** Anything bigger than this is not something a preview app should hold in memory twice. */
 const MAX_NATIVE_FILE_BYTES = 128 * 1024 * 1024;
@@ -88,7 +84,9 @@ async function createMainWindow(): Promise<void> {
     title: 'PrintStudio Pro',
     backgroundColor: '#020617',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      // The preload is a single CommonJS bundle (`npm run build:preload`): a sandboxed renderer
+      // cannot load an ESM preload script, and silently loses window.printStudioAPI if it is tried.
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -112,13 +110,33 @@ async function createMainWindow(): Promise<void> {
   if (devServerUrl) {
     await mainWindow.loadURL(devServerUrl);
   } else {
+    // `__dirname` is <resources>/dist-electron/electron once packed, so the renderer is two up.
     await mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
+  }
+}
+
+/**
+ * Runs a sidecar call with a message the operator can act on: the raw pipe error alone says
+ * nothing about a missing executable or a service that died on startup, which is exactly what an
+ * empty printer list otherwise hides.
+ */
+async function withSidecarDiagnostics<TResult>(action: Promise<TResult>): Promise<TResult> {
+  const blocked = sidecar.blockedReason;
+  if (blocked) throw new Error(blocked);
+  try {
+    return await action;
+  } catch (error) {
+    throw new Error(sidecar.describeFailure(error));
   }
 }
 
 function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.PRINTER_LIST, async () => {
-    return sidecar.listPrinters();
+    return withSidecarDiagnostics(sidecar.listPrinters());
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PRINTER_STATUS_NOTE, async () => {
+    return sidecar.statusNote();
   });
 
   ipcMain.handle(IPC_CHANNELS.PRINTER_GET_MARGINS, async (_e, request: PrinterMarginRequest) => {
@@ -126,7 +144,7 @@ function registerIpcHandlers(): void {
       !Number.isFinite(request.widthMm) || !Number.isFinite(request.heightMm) ||
       request.widthMm <= 0 || request.heightMm <= 0 || request.widthMm > 2000 || request.heightMm > 2000 ||
       !['portrait','landscape'].includes(request.orientation)) throw new Error('Invalid printer margin request');
-    return sidecar.getPrinterMargins(request);
+    return withSidecarDiagnostics(sidecar.getPrinterMargins(request));
   });
 
   ipcMain.handle(
@@ -153,7 +171,7 @@ function registerIpcHandlers(): void {
       });
     });
     // Refresh after the native dialog closes so paper size and orientation reflect the driver.
-    return sidecar.listPrinters();
+    return withSidecarDiagnostics(sidecar.listPrinters());
   });
 
   ipcMain.handle(

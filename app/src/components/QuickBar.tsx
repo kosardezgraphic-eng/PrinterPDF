@@ -18,6 +18,7 @@ import {
   Cpu,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
+import { PrinterRetryButton } from './PrinterStatus';
 import { t } from '../i18n/translations';
 import { computeCounterSummary } from '../engine/counterEngine';
 import { formatLocalizedNumber } from '../i18n/shamsi';
@@ -161,12 +162,19 @@ export const QuickBar: React.FC = () => {
           onChange={(e) => selectPrinter(e.target.value)}
           className="bg-transparent text-xs font-medium text-slate-200 focus:outline-none max-w-[250px] truncate cursor-pointer"
         >
+          {printers.length === 0 && (
+            <option value="" className="bg-slate-900 text-slate-400">
+              {tr.quickBar.noPrinter}
+            </option>
+          )}
           {printers.map((p) => (
             <option key={p.name} value={p.name} className="bg-slate-900 text-slate-100">
               {p.name} [{p.status}]
             </option>
           ))}
         </select>
+
+        <PrinterRetryButton compact />
 
         {currentPrinter?.status === 'Ready' ? (
           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />

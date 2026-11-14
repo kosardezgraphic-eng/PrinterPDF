@@ -50,9 +50,11 @@ public sealed class PrinterSpoolerService
                         Location: queue.Location, Capabilities: caps, ActiveProfile: profile
                     ));
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // A single unavailable queue must not hide other installed printers.
+                    // A single unavailable queue must not hide other installed printers, but it must
+                    // not be silent either: the Electron host forwards stderr into the printer panel.
+                    Console.Error.WriteLine($"Skipping printer queue '{queue.FullName}': {ex.Message}");
                 }
             }
         }
