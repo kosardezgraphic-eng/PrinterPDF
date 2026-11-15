@@ -165,14 +165,24 @@ export const App: React.FC = () => {
 
     // A picture dropped on a sheet becomes an editable overlay; dropped anywhere else it is a new document/page.
     const onWindowDragOver = (e: DragEvent) => {
-      if (e.dataTransfer?.types && Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault();
+      if (e.dataTransfer?.types && Array.from(e.dataTransfer.types).includes('Files')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
     };
     const onWindowDrop = (e: DragEvent) => {
-      if (e.defaultPrevented) return; // the preview already routed this drop onto a page
+      const alreadyRouted = e.defaultPrevented; // the preview already took this drop onto a page
       const files = e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : [];
+      const hasFiles =
+        files.length > 0 ||
+        (!!e.dataTransfer && Array.from(e.dataTransfer.types ?? []).includes('Files'));
+      // The browser default for a file drop is navigation: the window would be replaced by the
+      // dropped file itself (and in a packaged app it would simply look like the UI fell apart).
+      // That has to be stopped even when the app cannot use the file, hence before the early return.
+      if (hasFiles) e.preventDefault();
+      if (alreadyRouted || files.length === 0) return;
       const { documents } = routeDroppedFiles(files, false); // outside the sheet even a picture is a new document
       if (documents.length === 0) return;
-      e.preventDefault();
       void importFiles(documents);
     };
 

@@ -3,7 +3,6 @@ import {
   UploadCloud,
   ChevronRight,
   ChevronLeft,
-  BookOpen,
   Layers,
   Printer,
   Play,
@@ -91,7 +90,6 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     setZoomPercent,
     importFiles,
     addImageOverlayFiles,
-    loadSampleWorkspace,
     applyPageGeometry,
     applyAspectRatioCrop,
     resetCellGeometry,
@@ -130,8 +128,30 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const [panning, setPanning] = useState(false);
   const [showPreflight, setShowPreflight] = useState(false);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  // A file drag fires `dragover` on the element under the cursor every few milliseconds and a
+  // `dragleave` on the workspace each time the pointer crosses into a child element. Driving the
+  // drop overlay from those events as they arrive made the whole preview flicker while a file was
+  // being dragged, and re-rendered every sheet dozens of times a second — on a slow machine the
+  // renderer cannot answer the drag in time and Windows cancels the drop, so the file never
+  // arrived. Both overlays are therefore edge-triggered: `dragDepth` counts enter/leave pairs and
+  // React only hears about the transitions across zero.
+  const dragDepth = useRef(0);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
-  const [pictureDrop, setPictureDrop] = useState<{sheetIndex:number;xPercent:number;yPercent:number} | null>(null);
+  const [pictureDropSheet, setPictureDropSheet] = useState<number | null>(null);
+  const pictureDropPos = useRef<{ sheetIndex: number; xPercent: number; yPercent: number } | null>(null);
+  const pictureDropNodes = useRef(new Map<number, HTMLSpanElement>());
+  /** Follows the cursor without a re-render: the hint node is written directly, on every event. */
+  const movePictureHint = (sheetIndex: number, xPercent: number, yPercent: number) => {
+    pictureDropPos.current = { sheetIndex, xPercent, yPercent };
+    const node = pictureDropNodes.current.get(sheetIndex);
+    if (node) { node.style.left = `${xPercent}%`; node.style.top = `${yPercent}%`; }
+  };
+  const clearFileDropState = () => {
+    dragDepth.current = 0;
+    setIsDraggingOver(false);
+    setPictureDropSheet(prev => (prev === null ? prev : null));
+    pictureDropPos.current = null;
+  };
   const [loupeCoords, setLoupeCoords] = useState<{
     xPercent: number;
     yPercent: number;
@@ -412,17 +432,21 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 e.preventDefault(); e.stopPropagation();
                 e.dataTransfer.dropEffect = 'copy';
                 const rect = e.currentTarget.getBoundingClientRect();
-                setPictureDrop({ sheetIndex: sheetSide.sideIndex - 1, xPercent: (e.clientX - rect.left) / rect.width * 100, yPercent: (e.clientY - rect.top) / rect.height * 100 });
+                movePictureHint(sheetSide.sideIndex - 1, (e.clientX - rect.left) / rect.width * 100, (e.clientY - rect.top) / rect.height * 100);
+                // Which sheet is hovered changes when the drag crosses into it, and not before.
+                setPictureDropSheet(current => (current === sheetSide.sideIndex - 1 ? current : sheetSide.sideIndex - 1));
               }}
               onDragLeave={(e) => {
                 if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return;
-                setPictureDrop(current => (current?.sheetIndex === sheetSide.sideIndex - 1 ? null : current));
+                setPictureDropSheet(current => (current === sheetSide.sideIndex - 1 ? null : current));
               }}
               onDrop={(e) => {
                 const files = e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : [];
                 // A picture lands on the sheet as an overlay; a PDF dropped here still opens as a document.
                 const { images, documents: others } = routeDroppedFiles(files, !previewOnlyPage);
-                setPictureDrop(null);
+                // The sheet owns the drop, so the workspace counter has to be released here: its own
+                // `onDrop` never runs and the overlay would otherwise stay up until the next drag.
+                clearFileDropState();
                 if (!files.length) return;
                 // The sheet owns this drop either way, so the workspace-wide drop zone must not import it twice.
                 e.preventDefault(); e.stopPropagation();
@@ -547,9 +571,23 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
               })}
 
               {hasTextOverlays && <TextOverlayLayer sheet={sheetSide} totalSheets={outputSheets.length} pages={pages} pageIndices={pageNumbers} pxPerMm={basePxPerMm} enabled={canvasTool==='move' && !spaceDown} previewOnly={!!previewOnlyPage}/>}
-              {pictureDrop?.sheetIndex === sheetSide.sideIndex - 1 && (
+              {pictureDropSheet === sheetSide.sideIndex - 1 && (
                 <div className="pointer-events-none absolute inset-0 z-20 bg-sky-500/10">
-                  <span className="absolute rounded border-2 border-dashed border-sky-400" style={{ left: `${pictureDrop.xPercent}%`, top: `${pictureDrop.yPercent}%`, width: '45%', height: '30%', transform: 'translate(-50%, -50%)' }} />
+                  <span
+                    data-picture-drop-hint
+                    ref={node => {
+                      const index = sheetSide.sideIndex - 1;
+                      if (node) {
+                        pictureDropNodes.current.set(index, node);
+                        // The node is mounted one commit after the first dragover, so it has to be
+                        // placed at the position that event already measured.
+                        const pending = pictureDropPos.current;
+                        if (pending?.sheetIndex === index) { node.style.left = `${pending.xPercent}%`; node.style.top = `${pending.yPercent}%`; }
+                      } else pictureDropNodes.current.delete(sheetSide.sideIndex - 1);
+                    }}
+                    className="absolute rounded border-2 border-dashed border-sky-400"
+                    style={{ width: '45%', height: '30%', transform: 'translate(-50%, -50%)' }}
+                  />
                   <p className="absolute inset-x-0 bottom-2 text-center text-[11px] font-bold text-sky-200">
                     {lang === 'fa' ? 'رها کنید تا تصویر روی همین صفحه بنشیند' : 'Release to drop the picture onto this page'}
                   </p>
@@ -666,20 +704,36 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
 
   return (
     <main
-      onDragOver={(e) => {
-        e.preventDefault();
-        setIsDraggingOver(true);
+      onDragEnter={(e) => {
+        if (!e.dataTransfer || !Array.from(e.dataTransfer.types ?? []).includes('Files')) return;
+        dragDepth.current += 1;
+        if (dragDepth.current === 1) setIsDraggingOver(true);
       }}
-      onDragLeave={() => setIsDraggingOver(false)}
-      onDrop={(e) => {
+      onDragOver={(e) => {
+        // Preventing the default is what says "this area accepts the file". Leaving it out on even
+        // one element lets Windows either grey the cursor out or navigate the window to the file.
         e.preventDefault();
-        setIsDraggingOver(false);
-        const droppedFiles = e.dataTransfer.files
-          ? Array.from(e.dataTransfer.files)
-          : [];
-        if (droppedFiles.length > 0) {
-          void importFiles(droppedFiles);
-        }
+        const wantsFiles = !!e.dataTransfer && Array.from(e.dataTransfer.types ?? []).includes('Files');
+        if (!wantsFiles) return;
+        e.dataTransfer.dropEffect = 'copy';
+        // A `dragover` with no preceding `dragenter` (a child that stopped the enter from bubbling)
+        // still has to count as the start of the drag, or the hint never appears.
+        if (dragDepth.current === 0) { dragDepth.current = 1; setIsDraggingOver(true); }
+      }}
+      onDragLeave={() => {
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (dragDepth.current === 0) clearFileDropState();
+      }}
+      onDrop={(e) => {
+        const files = e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : [];
+        e.preventDefault();
+        clearFileDropState();
+        if (!files.length) return;
+        // Whatever reaches this handler — the overlay, the empty state, the padding around a sheet —
+        // is a new document. A picture only becomes an overlay when it is released on a sheet, which
+        // the sheet handler above owns; here it must not silently vanish into an overlay on a page.
+        const { documents } = routeDroppedFiles(files, false);
+        if (documents.length) void importFiles(documents);
       }}
       className="relative flex flex-1 flex-col overflow-hidden bg-slate-950"
     >
@@ -699,7 +753,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
 
       {/* Drag & Drop Full-Window Overlay */}
       {isDraggingOver && (
-        <div className="absolute inset-3 z-50 flex flex-col items-center justify-center rounded-3xl border-2 border-dashed border-sky-400 bg-sky-950/85 backdrop-blur-md">
+        <div data-file-drop-overlay className="pointer-events-none absolute inset-3 z-50 flex flex-col items-center justify-center rounded-3xl border-2 border-dashed border-sky-400 bg-sky-950/85 backdrop-blur-md">
           <UploadCloud className="mb-3 h-16 w-16 text-sky-400 animate-bounce" />
           <h2 className="text-2xl font-black text-white">
             {tr.preview.dropOverlayTitle}
@@ -885,14 +939,6 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 >
                   <UploadCloud className="h-4 w-4" />
                   <span>{tr.preview.browseFiles}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void loadSampleWorkspace()}
-                  className="flex items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/15 px-4 py-2.5 text-xs font-bold text-amber-300 hover:bg-amber-500/25 cursor-pointer"
-                >
-                  <BookOpen className="h-4 w-4" />
-                  <span>{tr.preview.loadSample}</span>
                 </button>
               </div>
             </div>

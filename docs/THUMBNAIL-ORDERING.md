@@ -4,4 +4,6 @@ On a desktop browser, drag a thumbnail onto the before/after half of another thu
 
 Pages from different source files can be interleaved. The sidebar displays consecutive runs in global page order, so the same file header may appear more than once. Collapsing a source file affects all its runs. The order is the order used for imposition and PDF export; excluded pages remain in the workspace but are skipped in output. The up/down toolbar buttons move every highlighted page by one position and provide an alternative to dragging.
 
+The same selection is what the thumbnail context menu acts on, so a right-click after a Ctrl/Shift-pick applies to every picked page; see [PRINT-SELECTION.md](PRINT-SELECTION.md).
+
 This implementation uses native HTML drag-and-drop for pointer/desktop use. Automated coverage uses simulated drag events; real browser, touch-based drag-and-drop, Electron GUI, 60 fps and 10,000-page performance have not been verified. Touch browsers may not support native drag; the toolbar arrows are an alternative for already-selected pages.

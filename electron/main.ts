@@ -49,6 +49,29 @@ if (!gotSingleInstanceLock) {
   app.quit();
 }
 
+/**
+ * The window must never leave the app. A file dropped on a spot nothing claims, a link a renderer
+ * follows, a `window.open` — each would replace the workspace with the raw file and the operator
+ * loses the desk they were working on (this is the classic symptom of a file drop on Windows:
+ * the app turns into the PDF viewer instead of importing the file). Only the part of the filesystem
+ * the app itself was loaded from is allowed, and in dev only the Vite origin.
+ */
+function isAppUrl(url: string, appDir: string | null): boolean {
+  try {
+    const target = new URL(url);
+    if (appDir) {
+      if (target.protocol !== 'file:') return false;
+      // Windows paths arrive percent-encoded (`Program%20Files`) and with a leading slash.
+      const loaded = path.resolve(decodeURIComponent(target.pathname).replace(/^\/([A-Za-z]:)/, '$1'));
+      return loaded === appDir || loaded.startsWith(appDir + path.sep);
+    }
+    const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+    return !!devServerUrl && target.origin === new URL(devServerUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
 /** Only existing files with a document extension count; switches and the app path do not. */
 function fileArguments(argv: string[]): string[] {
   return argv.filter((arg) => NATIVE_FILE_EXTENSIONS.test(arg) && path.isAbsolute(arg));
@@ -162,6 +185,15 @@ async function createMainWindow(): Promise<void> {
   });
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+  const contents = mainWindow.webContents;
+  contents.on('will-navigate', (event, url) => {
+    // The renderer's own folder, written out the way `packaging.test.ts` pins it for the load below.
+    const appDir = devServerUrl ? null : path.dirname(path.join(__dirname, '../../dist/index.html'));
+    if (!isAppUrl(url, appDir)) event.preventDefault();
+  });
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // The guard is registered before the load, or the very navigation it exists to stop can already
+  // have happened by the time the try/catch around the load is running.
   try {
     if (devServerUrl) {
       await mainWindow.loadURL(devServerUrl);
