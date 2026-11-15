@@ -55,7 +55,14 @@ import {
   renderPdfToSheetPngs,
   triggerBlobDownload,
 } from '../engine/pdfService';
-import { STANDARD_PAPER_SIZES, sanitizePrinterInfo } from '@shared/models';
+import {
+  SHEET_DEFAULT_PRESET_ID,
+  SHEET_DEFAULT_PRESET_SHORTCUT,
+  STANDARD_PAPER_SIZES,
+  sanitizePrinterInfo,
+  sanitizeSettingsPresetList,
+  sanitizeSettingsShortcut,
+} from '@shared/models';
 import {
   imageDropPlacement,
   imageOverlayFromPlacement,
@@ -163,6 +170,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // The cost is bounded by the cache limit and the render queue, not by how big the file is.
   previewFidelity: 'crisp',
 };
+
+/** Why a profile edit was refused; the panel turns these into one-line messages in both languages. */
+export type SettingsPresetEditError =
+  | 'unknown-id' | 'empty-name' | 'duplicate-name' | 'builtin'
+  | 'bad-shortcut' | 'reserved-shortcut' | 'duplicate-shortcut';
+export type SettingsPresetEditResult = { ok: true; id: string } | { ok: false; error: SettingsPresetEditError };
 
 const INITIAL_BATCH_QUEUE: BatchJobItem[] = [];
 
@@ -391,13 +404,24 @@ interface AppState {
   addToast: (toast: Omit<ToastNotification, 'id'>) => void;
   dismissToast: (id: string) => void;
 
-  // Settings presets & reset (K2)
-  /** Saved setting profiles, in the order they were created. */
+  // Sheet profiles & reset (K2)
+  /** Saved sheet profiles, in the order they were created. The defaults entry is not in here. */
   settingsPresets: SettingsPreset[];
+  /**
+   * The profile whose shortcut is being captured, or `null`. It lives in the store rather than in the
+   * panel because the global key handler has to know to stand aside: while a recorder is waiting, a
+   * chord must be *learned*, not fired.
+   */
+  shortcutRecordingFor: string | null;
+  beginShortcutRecording: (presetId: string | null) => void;
   /** Reads back the settings and the saved profiles from start-up — they used to be write-only. */
   restorePreferences: () => Promise<void>;
-  /** Captures the current output settings under a name; the same name overwrites, like a save button. */
-  saveSettingsPreset: (name: string) => string | null;
+  /** Captures the current sheet settings under a name; a name already used is updated, like a save button. */
+  saveSettingsPreset: (name: string, shortcut?: string) => string | null;
+  /** Renames a profile, (re)assigns its shortcut, or both. Returns why it refused, if it did. */
+  editSettingsPreset: (presetId: string, patch: { name?: string; shortcut?: string }) => SettingsPresetEditResult;
+  /** Re-captures the current sheet settings into an existing profile, keeping its name and chord. */
+  overwriteSettingsPreset: (presetId: string) => SettingsPresetEditResult;
   applySettingsPreset: (presetId: string) => void;
   deleteSettingsPreset: (presetId: string) => void;
   /** Every adjustable section goes back to the shipped defaults — documents and pages stay put. */
@@ -457,15 +481,59 @@ export const useAppStore = create<AppState>((set, get) => {
     }
   };
   const presetNameKey = (name: string) => name.trim().toLowerCase();
-  const capturePresetSections = (): Omit<SettingsPreset, 'id' | 'name' | 'createdAt' | 'updatedAt'> => {
+  /**
+   * What a profile stores: the sheet, and only the sheet. Language, unit, tariffs and the preview
+   * settings stay out, so switching a profile on a loaded job cannot change how the application itself
+   * behaves — a profile is a press setup, not a preferences dump.
+   */
+  const capturePresetSections = (): Pick<SettingsPreset, 'layout' | 'effects' | 'watermark' | 'pageNumbering'> => {
     const state = get();
     return {
       layout: { ...state.layout },
       effects: { ...state.effects },
       watermark: { ...state.watermark },
       pageNumbering: { ...state.pageNumbering },
-      settings: { ...state.settings },
     };
+  };
+  const newPresetId = () => `preset-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  /** Canonicalises and checks a chord against the rules in `shared/models.ts` and against the other profiles. */
+  const resolvePresetShortcut = (
+    shortcut: string | undefined,
+    exceptId: string
+  ): { ok: true; value: string } | { ok: false; error: SettingsPresetEditError } => {
+    const text = (shortcut ?? '').trim();
+    if (!text) return { ok: true, value: '' };
+    // Checked before the general rule so the message says what actually happened: `Alt+F6` is not an
+    // unknown chord, it is the one the defaults entry owns.
+    if (text.replace(/\s+/g, '').toLowerCase() === SHEET_DEFAULT_PRESET_SHORTCUT.toLowerCase()) {
+      return { ok: false, error: 'reserved-shortcut' };
+    }
+    const canonical = sanitizeSettingsShortcut(text);
+    if (!canonical) return { ok: false, error: 'bad-shortcut' };
+    const taken = get().settingsPresets.some(item => item.id !== exceptId && item.shortcut === canonical);
+    if (taken) return { ok: false, error: 'duplicate-shortcut' };
+    return { ok: true, value: canonical };
+  };
+  const reportPresetError = (error: SettingsPresetEditError, name = ''): SettingsPresetEditResult => {
+    const lang = get().settings.language;
+    const messages: Record<SettingsPresetEditError, [string, string]> = {
+      'unknown-id': ['پریست پیدا نشد', 'That profile is no longer stored'],
+      'empty-name': ['نام پریست خالی است', 'The profile needs a name'],
+      'duplicate-name': [`پریستی با نام «${name}» از قبل هست`, `A profile called "${name}" already exists`],
+      builtin: ['پریست پیش‌فرض قابل ویرایش یا حذف نیست', 'The defaults entry cannot be edited or deleted'],
+      'bad-shortcut': ['این کلید مجاز نیست', 'That key combination is not allowed'],
+      'reserved-shortcut': ['این کلید برای پیش‌فرض رزرو شده است', 'That chord belongs to the defaults entry'],
+      'duplicate-shortcut': ['این کلید به پریست دیگری اختصاص دارد', 'Another profile already uses that chord'],
+    };
+    const [titleFa, titleEn] = messages[error];
+    get().addToast({
+      type: 'warning',
+      title: lang === 'fa' ? titleFa : titleEn,
+      message: lang === 'fa'
+        ? 'میانبر پروفایل باید Alt+F7 تا Alt+F12 یا Ctrl+Alt با یک حرف/رقم باشد.'
+        : 'A profile chord must be Alt+F7 to Alt+F12, or Ctrl+Alt with one letter or digit.',
+    });
+    return { ok: false, error };
   };
   const persistPresets = (presets: SettingsPreset[]) => {
     void ipcBridge.saveSettingsPresets(presets).then(saved => {
@@ -548,6 +616,7 @@ export const useAppStore = create<AppState>((set, get) => {
     printProgress: null,
 
     settingsPresets: [],
+    shortcutRecordingFor: null,
     canUndo: false,
     canRedo: false,
     undoLabel: '',
@@ -1615,27 +1684,26 @@ export const useAppStore = create<AppState>((set, get) => {
         const name = key as keyof AppSettings;
         if (live[name] === DEFAULT_SETTINGS[name]) (restorable as Record<string, unknown>)[name] = value;
       }
+      // The bridge already sanitises, and so does this: a profile file is the one piece of persisted data
+      // the operator is expected to hand-edit (it is a list of names and settings), so the shape is not
+      // trusted twice-removed. It also drops the `settings` block profiles used to carry.
+      const storedPresets = sanitizeSettingsPresetList(presets);
       set((state) => ({
         settings: { ...state.settings, ...restorable },
         // Anything saved during this session wins over the file; the stored list is the base, not the word.
-        settingsPresets: Array.isArray(presets)
-          ? [...presets.filter(stored => !state.settingsPresets.some(item => item.id === stored.id)), ...state.settingsPresets]
-          : state.settingsPresets,
+        settingsPresets: [
+          ...storedPresets.filter(stored => !state.settingsPresets.some(item => item.id === stored.id)),
+          ...state.settingsPresets,
+        ],
       }));
       syncCrispPreview();
     },
 
-    saveSettingsPreset: (name) => {
+    saveSettingsPreset: (name, shortcut) => {
       const trimmed = name.trim();
-      if (!trimmed) {
-        const lang = get().settings.language;
-        get().addToast({
-          type: 'warning',
-          title: lang === 'fa' ? 'نام پریست خالی است' : 'Preset needs a name',
-          message: lang === 'fa' ? 'برای ذخیره، یک نام برای این پریست بنویسید.' : 'Type a name for this profile before saving it.',
-        });
-        return null;
-      }
+      if (!trimmed) { reportPresetError('empty-name'); return null; }
+      const chord = resolvePresetShortcut(shortcut, '');
+      if (!chord.ok) { reportPresetError(chord.error); return null; }
       const lang = get().settings.language;
       const now = new Date().toISOString();
       const sections = capturePresetSections();
@@ -1643,9 +1711,9 @@ export const useAppStore = create<AppState>((set, get) => {
       const duplicate = current.find((preset) => presetNameKey(preset.name) === presetNameKey(trimmed));
       const next = duplicate
         ? current.map((preset) => preset.id === duplicate.id
-            ? { ...preset, ...sections, name: trimmed, updatedAt: now }
+            ? { ...preset, ...sections, name: trimmed, shortcut: chord.value || preset.shortcut, updatedAt: now }
             : preset)
-        : [...current, { id: `preset-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, name: trimmed, createdAt: now, updatedAt: now, ...sections }];
+        : [...current, { id: newPresetId(), name: trimmed, shortcut: chord.value, createdAt: now, updatedAt: now, ...sections }];
       set({ settingsPresets: next });
       persistPresets(next);
       get().addToast({
@@ -1654,13 +1722,57 @@ export const useAppStore = create<AppState>((set, get) => {
           ? (lang === 'fa' ? `پریست «${trimmed}» به‌روزرسانی شد` : `Updated the "${trimmed}" profile`)
           : (lang === 'fa' ? `پریست «${trimmed}» ذخیره شد` : `Saved the "${trimmed}" profile`),
         message: lang === 'fa'
-          ? 'چیدمان، افکت‌ها، واترمارک، شماره‌گذاری صفحه و تنظیمات عمومی در همین پروفایل نگه داشته شدند.'
-          : 'Layout, effects, watermark, page numbering and general settings are stored in this profile.',
+          ? 'چیدمان، افکت‌ها، واترمارک و شماره‌گذاری صفحه در همین پروفایل نگه داشته شدند؛ تنظیمات خود برنامه دست‌نخورده است.'
+          : 'Layout, effects, watermark and page numbering are stored in this profile; the application settings are not part of it.',
       });
       return duplicate?.id ?? next[next.length - 1].id;
     },
 
+    editSettingsPreset: (presetId, patch) => {
+      if (presetId === SHEET_DEFAULT_PRESET_ID) { reportPresetError('builtin'); return { ok: false, error: 'builtin' }; }
+      const current = get().settingsPresets;
+      const preset = current.find((item) => item.id === presetId);
+      if (!preset) { reportPresetError('unknown-id'); return { ok: false, error: 'unknown-id' }; }
+      const name = patch.name === undefined ? preset.name : patch.name.trim();
+      if (!name) { reportPresetError('empty-name'); return { ok: false, error: 'empty-name' }; }
+      if (current.some((item) => item.id !== presetId && presetNameKey(item.name) === presetNameKey(name))) {
+        reportPresetError('duplicate-name', name);
+        return { ok: false, error: 'duplicate-name' };
+      }
+      const chord = patch.shortcut === undefined
+        ? { ok: true as const, value: preset.shortcut }
+        : resolvePresetShortcut(patch.shortcut, presetId);
+      if (!chord.ok) { reportPresetError(chord.error); return { ok: false, error: chord.error }; }
+      const now = new Date().toISOString();
+      const next = current.map((item) => item.id === presetId
+        ? { ...item, name, shortcut: chord.value, updatedAt: now }
+        : item);
+      set({ settingsPresets: next });
+      persistPresets(next);
+      return { ok: true, id: presetId };
+    },
+
+    overwriteSettingsPreset: (presetId) => {
+      if (presetId === SHEET_DEFAULT_PRESET_ID) { reportPresetError('builtin'); return { ok: false, error: 'builtin' }; }
+      const current = get().settingsPresets;
+      const preset = current.find((item) => item.id === presetId);
+      if (!preset) { reportPresetError('unknown-id'); return { ok: false, error: 'unknown-id' }; }
+      const next = current.map((item) => item.id === presetId
+        ? { ...item, ...capturePresetSections(), updatedAt: new Date().toISOString() }
+        : item);
+      set({ settingsPresets: next });
+      persistPresets(next);
+      return { ok: true, id: presetId };
+    },
+
+    beginShortcutRecording: (presetId) => {
+      set({ shortcutRecordingFor: presetId });
+    },
+
     applySettingsPreset: (presetId) => {
+      // The defaults entry is not a stored profile: applying it *is* the reset, so it stays one action
+      // with one chord instead of a snapshot that can go stale when the app's defaults change.
+      if (presetId === SHEET_DEFAULT_PRESET_ID) { get().resetAllSettings(); return; }
       const preset = get().settingsPresets.find((item) => item.id === presetId);
       const lang = get().settings.language;
       if (!preset) return;
@@ -1672,19 +1784,19 @@ export const useAppStore = create<AppState>((set, get) => {
         effects: { ...DEFAULT_EFFECTS, ...preset.effects },
         watermark: { ...getDefaultWatermarkSettings(), ...preset.watermark },
         pageNumbering: { ...getDefaultPageNumberSettings(), ...preset.pageNumbering },
-        settings: { ...DEFAULT_SETTINGS, ...preset.settings },
       }));
-      pushUndo('اعمال پریست تنظیمات', 'Apply settings preset', before, captureSnapshot(get()));
-      void ipcBridge.saveSettings(get().settings);
-      syncCrispPreview();
+      pushUndo('اعمال پروفایل شیت', 'Apply sheet profile', before, captureSnapshot(get()));
       get().addToast({
         type: 'info',
-        title: lang === 'fa' ? `پریست «${preset.name}» اعمال شد` : `Applied the "${preset.name}" profile`,
-        message: lang === 'fa' ? 'برگشت با Ctrl+Z ممکن است؛ فایل‌های روی میز کار تغییری نکردند.' : 'Ctrl+Z brings the previous settings back; the documents on the desk were not touched.',
+        title: lang === 'fa' ? `پروفایل «${preset.name}» اعمال شد` : `Applied the "${preset.name}" profile`,
+        message: lang === 'fa'
+          ? 'تنظیمات خود برنامه (زبان، واحد، تعرفه و پیش‌نمایش) تغییری نکردند؛ برگشت با Ctrl+Z ممکن است.'
+          : 'The application settings (language, unit, tariffs, preview) were not touched; Ctrl+Z brings the previous sheet setup back.',
       });
     },
 
     deleteSettingsPreset: (presetId) => {
+      if (presetId === SHEET_DEFAULT_PRESET_ID) { reportPresetError('builtin'); return; }
       const current = get().settingsPresets;
       const next = current.filter((preset) => preset.id !== presetId);
       if (next.length === current.length) return;

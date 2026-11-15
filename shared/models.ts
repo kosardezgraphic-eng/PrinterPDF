@@ -539,20 +539,34 @@ export interface AppSettings {
 export type PreviewFidelity = 'fast' | 'crisp';
 
 /**
- * A named, reusable snapshot of the settings that change print output. Deliberately excludes
- * documents, pages and overlays: a preset describes the machine setup, not the job on the desk.
+ * A named, reusable snapshot of the **sheet** settings: what happens to the pages — imposition and
+ * placement, colour and effects, watermark, page numbering.
+ *
+ * The application's own settings (language, unit, calendar, operator name, tariffs, cache and preview
+ * fidelity) are deliberately *not* part of a profile. A profile is a press setup you hand to a
+ * colleague or switch to ten times a day; the machine's preferences are not, and folding them in made
+ * applying a profile change things the operator was not asking to change.
+ *
+ * `shortcut` is a canonical key chord (`Alt+F7`…`Alt+F12`, or `Ctrl+Alt` with one letter or digit —
+ * see `isAssignableShortcut` below), empty when the profile has none. `id` is stable across renames, and the reserved `SHEET_DEFAULT_PRESET_ID` below is a
+ * profile that is never stored: it *is* the reset-to-defaults action.
  */
 export interface SettingsPreset {
   id: string;
   name: string;
+  shortcut: string;
   createdAt: string;
   updatedAt: string;
   layout: LayoutSettings;
   effects: EffectsSettings;
   watermark: WatermarkSettings;
   pageNumbering: PageNumberSettings;
-  settings: AppSettings;
 }
+
+/** The built-in "back to the shipped defaults" entry; applying it resets every section, sheet and app. */
+export const SHEET_DEFAULT_PRESET_ID = 'preset:defaults';
+/** The chord that entry answers to — fixed, and never assignable to a stored profile. */
+export const SHEET_DEFAULT_PRESET_SHORTCUT = 'Alt+F6';
 
 export interface PspProjectFile {
   version: '1.0.0';
@@ -775,9 +789,15 @@ export function sanitizeAppSettings(raw: unknown): Partial<AppSettings> {
 }
 
 /**
- * A preset is a bundle of section objects; only its identity is checked here. A section that is not an
- * object becomes `{}`, which the store's merge-over-defaults turns into "this preset does not change
- * that part" instead of a page of `undefined` values.
+ * Reads a persisted profile list back. Three things are enforced, because this file can be edited by
+ * hand and was written by an older build:
+ *
+ * - the built-in "defaults" row is never restorable from disk (the store synthesises it, and a file that
+ *   could define it could also point the reset chord at anything);
+ * - a `settings` block that profiles used to carry is dropped, since a profile is now sheet-only — old
+ *   files stay readable but can no longer change the application's own preferences;
+ * - the chord is normalised through `sanitizeSettingsShortcut`, so a hand-written or duplicated key
+ *   becomes "no shortcut" rather than a chord the app would never have offered.
  */
 export function sanitizeSettingsPresetList(raw: unknown): SettingsPreset[] {
   if (!Array.isArray(raw)) return [];
@@ -791,18 +811,113 @@ export function sanitizeSettingsPresetList(raw: unknown): SettingsPreset[] {
     seen.add(source.id);
     const section = <T>(value: unknown): T => ((value && typeof value === 'object' ? value : {}) as T);
     const stamp = (value: unknown): string => typeof value === 'string' ? value : '';
+    // The profile's own id is the one thing that must not be spoofable: the built-in defaults entry is
+    // synthesised by the store and would otherwise be replaceable by a file.
+    if (source.id === SHEET_DEFAULT_PRESET_ID) continue;
     out.push({
       id: source.id,
       name: sanitizeDriverText(source.name).slice(0, 120) || source.name,
+      // Normalised through the same rules the recorder uses, so a hand-edited file cannot claim a chord
+      // the app would never accept (or one that belongs to the browser).
+      shortcut: sanitizeSettingsShortcut(source.shortcut),
       createdAt: stamp(source.createdAt),
       updatedAt: stamp(source.updatedAt),
       layout: section<LayoutSettings>(source.layout),
       effects: section<EffectsSettings>(source.effects),
       watermark: section<WatermarkSettings>(source.watermark),
       pageNumbering: section<PageNumberSettings>(source.pageNumbering),
-      settings: section<AppSettings>(source.settings),
     });
     if (out.length >= 100) break;                     // a preset list is a menu, not a database
   }
   return out;
+}
+
+/**
+ * Key chords for sheet profiles. The rules live here, next to the persisted type, because the same three
+ * questions have to be answered in three places — while recording, when a stored file is read back, and
+ * when a keypress is matched against the list — and a divergent answer in any of them is either a dead
+ * shortcut or a chord the operator did not intend.
+ *
+ * Only two families are assignable, and both are deliberate:
+ *
+ * - `Alt+F7` … `Alt+F12` — function keys are never text input, so the chord works with the caret in a
+ *   field, which is exactly what a print-shop operator needs. `F1`…`F6` stay out: help, refresh and the
+ *   reset chord live there, and the OS owns some of them.
+ * - `Ctrl+Alt+<letter or digit>` — a chord the browser does not already use (`Ctrl+1`…`Ctrl+9` switch
+ *   browser tabs, so a bare `Ctrl+digit` profile would be unreachable).
+ *
+ * Anything else is refused rather than accepted-and-ignored, because a shortcut that silently does
+ * nothing is worse than being told to pick another one.
+ */
+export type KeyEventLike = {
+  key: string;
+  ctrlKey: boolean;
+  altKey: boolean;
+  shiftKey: boolean;
+  metaKey: boolean;
+};
+
+/** The order the canonical string lists modifiers in, and the only one `formatShortcut` produces. */
+const SHORTCUT_MODIFIERS = ['Ctrl', 'Alt', 'Shift', 'Meta'] as const;
+const FUNCTION_KEYS = ['F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12'] as const;
+
+/** Turns a keypress into `Ctrl+Alt+A` / `Alt+F7`, or `null` when no modifier is involved at all. */
+export function formatShortcut(event: KeyEventLike): string | null {
+  const raw = event.key;
+  if (!raw || raw === 'Unidentified') return null;
+  if (raw === 'Control' || raw === 'Alt' || raw === 'Shift' || raw === 'Meta') return null;   // modifier alone
+  const mods: string[] = [];
+  if (event.ctrlKey) mods.push('Ctrl');
+  if (event.altKey) mods.push('Alt');
+  if (event.shiftKey) mods.push('Shift');
+  if (event.metaKey) mods.push('Meta');
+  if (mods.length === 0) return null;
+  const functionKey = FUNCTION_KEYS.find(name => name.toLowerCase() === raw.toLowerCase());
+  const key = functionKey ?? (raw.length === 1 ? raw.toUpperCase() : raw);
+  return `${[...SHORTCUT_MODIFIERS.filter(mod => mods.includes(mod)), key].join('+')}`;
+}
+
+/** True when the chord is one a profile may own. `''` and `null` are not chords; they are "no shortcut". */
+export function isAssignableShortcut(shortcut: unknown): shortcut is string {
+  if (typeof shortcut !== 'string') return false;
+  const text = shortcut.trim();
+  if (!text) return false;
+  const parts = text.split('+');
+  const key = parts.pop() ?? '';
+  const mods = new Set(parts);
+  if (mods.size === 0 || parts.length !== mods.size) return false;          // dupes or junk
+  for (const mod of mods) if (!SHORTCUT_MODIFIERS.includes(mod as typeof SHORTCUT_MODIFIERS[number])) return false;
+  const onlyAlt = mods.size === 1 && mods.has('Alt');
+  const onlyCtrlAlt = mods.size === 2 && mods.has('Ctrl') && mods.has('Alt');
+  if (onlyAlt) {
+    const index = FUNCTION_KEYS.indexOf(key as typeof FUNCTION_KEYS[number]);
+    return index >= 6 && index <= 11;                                        // F7…F12
+  }
+  if (onlyCtrlAlt) return key.length === 1 && /[a-z0-9]/i.test(key);
+  return false;
+}
+
+/** Normalises whatever a file or a recorder produced into the canonical form, or `''` when unusable. */
+export function sanitizeSettingsShortcut(shortcut: unknown): string {
+  if (typeof shortcut !== 'string') return '';
+  const parts = shortcut.trim().split('+').map(part => part.trim()).filter(Boolean);
+  const key = parts.pop();
+  if (!key) return '';
+  const mods = parts.map(mod => {
+    const lower = mod.toLowerCase();
+    if (lower === 'ctrl' || lower === 'control') return 'Ctrl';
+    if (lower === 'alt' || lower === 'option') return 'Alt';
+    if (lower === 'shift') return 'Shift';
+    if (lower === 'meta' || lower === 'cmd' || lower === 'command') return 'Meta';
+    return mod;
+  });
+  const functionKey = FUNCTION_KEYS.find(name => name.toLowerCase() === key.toLowerCase());
+  const normalized = [...SHORTCUT_MODIFIERS.filter(mod => mods.includes(mod)), functionKey ?? (key.length === 1 ? key.toUpperCase() : key)].join('+');
+  return isAssignableShortcut(normalized) ? normalized : '';
+}
+
+/** Does this keypress fire this chord? Exact on modifiers, so `Ctrl+Alt+A` is not `Ctrl+Alt+Shift+A`. */
+export function shortcutMatchesEvent(shortcut: string, event: KeyEventLike): boolean {
+  const fired = formatShortcut(event);
+  return !!fired && fired === shortcut;
 }

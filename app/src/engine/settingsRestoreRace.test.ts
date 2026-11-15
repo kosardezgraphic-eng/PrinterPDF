@@ -66,11 +66,13 @@ describe('a start-up read that arrives late', () => {
   });
 
   it('does not lose a profile saved while the list was being read', async () => {
-    const stored: SettingsPreset = {
+    // Deliberately the *old* shape on disk - a `settings` block and no `shortcut` - because that is what a
+    // real user's file looks like after this change: it has to load, be normalised, and not be clobbered.
+    const stored = {
       id: 'from-disk', name: 'Disk', createdAt: '', updatedAt: '',
       layout: { ...DEFAULT_LAYOUT, cols: 2 },
       effects: {}, watermark: {}, pageNumbering: {}, settings: { ...DEFAULT_SETTINGS },
-    } as SettingsPreset;
+    };
     loadSettingsPresets.mockResolvedValue([stored]);
     const restoring = useAppStore.getState().restorePreferences();
     const savedNow = useAppStore.getState().saveSettingsPreset('Saved this session');
@@ -80,6 +82,9 @@ describe('a start-up read that arrives late', () => {
     expect(names).toContain('Disk');
     expect(names).toContain('Saved this session');
     expect(useAppStore.getState().settingsPresets.find(p => p.id === savedNow)?.name).toBe('Saved this session');
+    const disk = useAppStore.getState().settingsPresets.find(preset => preset.id === 'from-disk');
+    expect(disk?.shortcut).toBe('');                                  // normalised, not undefined
+    expect('settings' in (disk as object)).toBe(false);                // and the stale block is gone
   });
 
   it('does not write the restored values back, which would make a read look like an edit', async () => {
