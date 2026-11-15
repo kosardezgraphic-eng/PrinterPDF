@@ -527,6 +527,31 @@ export interface AppSettings {
   duplexDiscountPercent: number;
   autoSaveIntervalSec: number;
   autoSelectPrinterByPaperAndColor: boolean;
+  /**
+   * How the sheet preview paints a page. `fast` reuses the bitmap made at import, which is cheap but
+   * blurry for vector artwork as soon as the operator zooms in; `crisp` re-renders the page from the
+   * file's own drawing instructions at the size it is displayed.
+   */
+  previewFidelity: PreviewFidelity;
+}
+
+/** `fast` = stored bitmap only, `crisp` = render the source page at display resolution. */
+export type PreviewFidelity = 'fast' | 'crisp';
+
+/**
+ * A named, reusable snapshot of the settings that change print output. Deliberately excludes
+ * documents, pages and overlays: a preset describes the machine setup, not the job on the desk.
+ */
+export interface SettingsPreset {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  layout: LayoutSettings;
+  effects: EffectsSettings;
+  watermark: WatermarkSettings;
+  pageNumbering: PageNumberSettings;
+  settings: AppSettings;
 }
 
 export interface PspProjectFile {
@@ -715,3 +740,69 @@ export function sanitizePrinterInfo(printer: PrinterInfo): PrinterInfo {
   };
 }
 
+/**
+ * Settings and presets come back from disk (`settings.json`, `presets.json`) or from localStorage,
+ * where a hand edit or an older version of the app can leave anything at all. These readers keep the
+ * keys whose value is actually possible, and drop the rest, so a corrupted file costs the operator one
+ * default value rather than a crash on the next render. The caller merges the result over its own
+ * defaults, which is why the return type is a `Partial`.
+ */
+export function sanitizeAppSettings(raw: unknown): Partial<AppSettings> {
+  if (!raw || typeof raw !== 'object') return {};
+  const source = raw as Record<string, unknown>;
+  const out: Partial<AppSettings> = {};
+  const oneOf = <T extends string>(value: unknown, allowed: readonly T[]): value is T =>
+    typeof value === 'string' && (allowed as readonly string[]).includes(value);
+  const num = (value: unknown, min: number, max: number): number | null =>
+    typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : null;
+  const text = (value: unknown, maxLength = 400): string | null =>
+    typeof value === 'string' ? sanitizeDriverText(value).slice(0, maxLength) : null;
+
+  if (oneOf(source.language, ['fa', 'en'] as const)) out.language = source.language;
+  if (oneOf(source.theme, ['dark', 'light', 'system'] as const)) out.theme = source.theme;
+  if (oneOf(source.unit, ['mm', 'cm', 'inch'] as const)) out.unit = source.unit;
+  if (oneOf(source.calendar, ['shamsi', 'gregorian'] as const)) out.calendar = source.calendar;
+  if (oneOf(source.previewFidelity, ['fast', 'crisp'] as const)) out.previewFidelity = source.previewFidelity;
+  const userName = text(source.userName, 120); if (userName !== null) out.userName = userName;
+  const folder = text(source.defaultOutputFolder); if (folder !== null) out.defaultOutputFolder = folder;
+  const cache = num(source.maxCachePages, 16, 20000); if (cache !== null) out.maxCachePages = cache;
+  const bw = num(source.bwPageTariffRials, 0, 100_000_000); if (bw !== null) out.bwPageTariffRials = bw;
+  const color = num(source.colorPageTariffRials, 0, 100_000_000); if (color !== null) out.colorPageTariffRials = color;
+  const discount = num(source.duplexDiscountPercent, 0, 95); if (discount !== null) out.duplexDiscountPercent = discount;
+  const autoSave = num(source.autoSaveIntervalSec, 0, 3600); if (autoSave !== null) out.autoSaveIntervalSec = autoSave;
+  if (typeof source.autoSelectPrinterByPaperAndColor === 'boolean') out.autoSelectPrinterByPaperAndColor = source.autoSelectPrinterByPaperAndColor;
+  return out;
+}
+
+/**
+ * A preset is a bundle of section objects; only its identity is checked here. A section that is not an
+ * object becomes `{}`, which the store's merge-over-defaults turns into "this preset does not change
+ * that part" instead of a page of `undefined` values.
+ */
+export function sanitizeSettingsPresetList(raw: unknown): SettingsPreset[] {
+  if (!Array.isArray(raw)) return [];
+  const out: SettingsPreset[] = [];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const source = entry as Record<string, unknown>;
+    if (typeof source.id !== 'string' || !source.id || seen.has(source.id)) continue;
+    if (typeof source.name !== 'string' || !source.name.trim()) continue;
+    seen.add(source.id);
+    const section = <T>(value: unknown): T => ((value && typeof value === 'object' ? value : {}) as T);
+    const stamp = (value: unknown): string => typeof value === 'string' ? value : '';
+    out.push({
+      id: source.id,
+      name: sanitizeDriverText(source.name).slice(0, 120) || source.name,
+      createdAt: stamp(source.createdAt),
+      updatedAt: stamp(source.updatedAt),
+      layout: section<LayoutSettings>(source.layout),
+      effects: section<EffectsSettings>(source.effects),
+      watermark: section<WatermarkSettings>(source.watermark),
+      pageNumbering: section<PageNumberSettings>(source.pageNumbering),
+      settings: section<AppSettings>(source.settings),
+    });
+    if (out.length >= 100) break;                     // a preset list is a menu, not a database
+  }
+  return out;
+}

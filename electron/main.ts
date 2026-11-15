@@ -21,6 +21,7 @@ import type {
   PrinterMarginRequest,
   PrintJobRequest,
   PspProjectFile,
+  SettingsPreset,
 } from '../shared/models';
 
 /** Anything bigger than this is not something a preview app should hold in memory twice. */
@@ -437,6 +438,14 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS_LOAD, async () => {
     return sessionStore.loadSettings();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_PRESETS_SAVE, async (_e, presets: SettingsPreset[]) => {
+    return sessionStore.saveSettingsPresets(Array.isArray(presets) ? presets : []);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_PRESETS_LOAD, async () => {
+    return sessionStore.loadSettingsPresets();
   });
 
   ipcMain.handle(IPC_CHANNELS.FILE_READ_LOCAL, async (_e, filePath: unknown): Promise<LocalFilePayload> => {

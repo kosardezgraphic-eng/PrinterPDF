@@ -24,12 +24,14 @@ import {
   RefreshCw,
   Ruler,
   Search,
+  VectorSquare,
   Maximize2,
   FlipHorizontal2,
   Trash2,
   FileDown,
 } from 'lucide-react';
 import { MatrixSizeFields } from './MatrixSizeFields';
+import { SettingsPresetMenu } from './SettingsPresets';
 import { useAppStore, type RibbonTabId } from '../store/useAppStore';
 import { getSheetDimensionsMm } from '../engine/layoutEngine';
 import { t } from '../i18n/translations';
@@ -76,6 +78,7 @@ export const Ribbon: React.FC = () => {
     updateEffects,
     toggleGlobalInvert,
     resetEffects,
+    updateSettings,
     updateWatermark,
     updatePageNumbering,
     addTextOverlay,
@@ -247,6 +250,7 @@ export const Ribbon: React.FC = () => {
                     {lang === 'fa' ? 'ذخیره خروجی PDF' : 'Export Final PDF'}
                   </span>
                 </button>
+                <SettingsPresetMenu />
                 <button
                   type="button"
                   onClick={clearWorkspace}
@@ -1033,6 +1037,23 @@ export const Ribbon: React.FC = () => {
                 />
                 <Ruler className="h-3.5 w-3.5 text-sky-400" />
                 <span>{lang === 'fa' ? 'نمایش خط‌کش دقیق' : 'Rulers'}</span>
+              </label>
+
+              <label
+                className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-slate-200 cursor-pointer"
+                title={lang === 'fa'
+                  ? 'صفحه‌های PDF را با رندر دوباره در اندازهٔ نمایش نشان می‌دهد تا خط‌های نازک و متن در زوم تار نشوند؛ فقط صفحات دیدنی رندر می‌شوند و کش، محدود است.'
+                  : 'Re-renders each PDF page at the size it is displayed, so hairlines and small text stay sharp while zooming. Only visible pages are rendered and the cache is bounded.'}
+              >
+                <input
+                  type="checkbox"
+                  data-crisp-preview-toggle
+                  checked={settings.previewFidelity === 'crisp'}
+                  onChange={(e) => updateSettings({ previewFidelity: e.target.checked ? 'crisp' : 'fast' })}
+                  className="accent-emerald-500"
+                />
+                <VectorSquare className="h-3.5 w-3.5 text-emerald-400" />
+                <span>{lang === 'fa' ? 'پیش‌نمایش دقیق وکتور' : 'Crisp vector preview'}</span>
               </label>
 
               <label className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-slate-200 cursor-pointer">

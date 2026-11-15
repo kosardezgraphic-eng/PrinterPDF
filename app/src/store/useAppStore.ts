@@ -25,10 +25,21 @@ import type {
   PrinterProfileSettings,
   PrintJobRequest,
   PspProjectFile,
+  SettingsPreset,
   SourceDocument,
   SpoolerJobInfo,
   WatermarkSettings,
 } from '@shared/models';
+import {
+  clearCrispPreviewCache,
+  configureVectorPreview,
+  crispCacheBytesFor,
+  crispPreviewStats,
+  releaseCrispPreviewDocument,
+  setCrispPreviewByteBudget,
+  setCrispPreviewCacheLimit,
+  setCrispPreviewEnabled,
+} from '../engine/vectorPreviewBridge';
 import { CommandHistoryManager } from '../engine/commandHistory';
 import {
   getDefaultPageNumberSettings,
@@ -148,6 +159,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   duplexDiscountPercent: 12,
   autoSaveIntervalSec: 30,
   autoSelectPrinterByPaperAndColor: true,
+  // Vector pages are re-rendered at the size they are shown — the only way a hairline stays a hairline.
+  // The cost is bounded by the cache limit and the render queue, not by how big the file is.
+  previewFidelity: 'crisp',
 };
 
 const INITIAL_BATCH_QUEUE: BatchJobItem[] = [];
@@ -376,6 +390,20 @@ interface AppState {
   ) => void;
   addToast: (toast: Omit<ToastNotification, 'id'>) => void;
   dismissToast: (id: string) => void;
+
+  // Settings presets & reset (K2)
+  /** Saved setting profiles, in the order they were created. */
+  settingsPresets: SettingsPreset[];
+  /** Reads back the settings and the saved profiles from start-up — they used to be write-only. */
+  restorePreferences: () => Promise<void>;
+  /** Captures the current output settings under a name; the same name overwrites, like a save button. */
+  saveSettingsPreset: (name: string) => string | null;
+  applySettingsPreset: (presetId: string) => void;
+  deleteSettingsPreset: (presetId: string) => void;
+  /** Every adjustable section goes back to the shipped defaults — documents and pages stay put. */
+  resetAllSettings: () => void;
+  /** Drops every crisp page bitmap and the parsed files behind them; visible cells re-render on demand. */
+  clearCrispPreviewCacheNow: () => void;
 }
 
 function removeCellOverrides(layout: LayoutSettings, removedPageIds: Set<string>): LayoutSettings {
@@ -397,6 +425,62 @@ function captureSnapshot(state: AppState): WorkspaceSnapshot {
 }
 
 export const useAppStore = create<AppState>((set, get) => {
+  // The crisp preview layer reads the desk through the store, and the store is the only place that knows
+  // when a document arrives or leaves. The resolver is asked lazily, at the moment a render is started,
+  // so a file that was closed in the meantime simply yields `null` and the cell keeps its thumbnail.
+  configureVectorPreview({
+    bytes: docId => get().documents.find((document) => document.id === docId)?.rawBytes,
+    documents: () => get().documents,
+  });
+  let appliedCrispFlag: boolean | null = null;
+  let appliedCrispCache = -1;
+  let appliedCrispBytes = -1;
+  /** Keeps the render pipeline and `settings` telling the same story, whoever changed them. */
+  const syncCrispPreview = () => {
+    const { previewFidelity, maxCachePages } = get().settings;
+    const enabled = previewFidelity === 'crisp';
+    if (appliedCrispFlag !== enabled) {
+      appliedCrispFlag = enabled;
+      setCrispPreviewEnabled(enabled);         // turning it off is also what frees what it was holding
+    }
+    // `maxCachePages` counts thumbnails; a preview cache holds whole sheets, so it is derived from the
+    // same preference by weight rather than shared directly — both an entry count and a byte budget.
+    const entries = Math.min(48, Math.max(16, Math.round((maxCachePages || 400) / 16)));
+    if (appliedCrispCache !== entries) {
+      appliedCrispCache = entries;
+      setCrispPreviewCacheLimit(entries);
+    }
+    const bytes = crispCacheBytesFor(maxCachePages || 400);
+    if (appliedCrispBytes !== bytes) {
+      appliedCrispBytes = bytes;
+      setCrispPreviewByteBudget(bytes);
+    }
+  };
+  const presetNameKey = (name: string) => name.trim().toLowerCase();
+  const capturePresetSections = (): Omit<SettingsPreset, 'id' | 'name' | 'createdAt' | 'updatedAt'> => {
+    const state = get();
+    return {
+      layout: { ...state.layout },
+      effects: { ...state.effects },
+      watermark: { ...state.watermark },
+      pageNumbering: { ...state.pageNumbering },
+      settings: { ...state.settings },
+    };
+  };
+  const persistPresets = (presets: SettingsPreset[]) => {
+    void ipcBridge.saveSettingsPresets(presets).then(saved => {
+      if (saved) return;
+      const lang = get().settings.language;
+      get().addToast({
+        type: 'warning',
+        title: lang === 'fa' ? 'ذخیره‌سازی پریست انجام نشد' : 'Could not save the preset',
+        message: lang === 'fa'
+          ? 'حافظهٔ تنظیمات در دسترس نیست؛ پریست فقط تا پایان این نشست نگه داشته می‌شود.'
+          : 'The settings store is unavailable, so the preset only lasts for this session.',
+      });
+    });
+  };
+
   const pushUndo = (
     labelFa: string,
     labelEn: string,
@@ -463,6 +547,7 @@ export const useAppStore = create<AppState>((set, get) => {
     pendingDuplexPrint: null,
     printProgress: null,
 
+    settingsPresets: [],
     canUndo: false,
     canRedo: false,
     undoLabel: '',
@@ -585,6 +670,7 @@ export const useAppStore = create<AppState>((set, get) => {
         activeSheetIndex: 0,
         previewPageRequest: null,
       });
+      clearCrispPreviewCache();
       pushUndo('پاک‌سازی میز کار', 'Clear Workspace', before, captureSnapshot(get()));
     },
 
@@ -1111,6 +1197,9 @@ export const useAppStore = create<AppState>((set, get) => {
         layout: removeCellOverrides(state.layout, new Set(state.pages.filter(p => p.documentId === docId).map(p => p.id))),
         bookmarks: state.bookmarks.filter((b) => b.documentId !== docId),
       }));
+      // The parsed file and every bitmap made from it go with it; keeping them would hold megabytes
+      // for pages that can never be looked at again.
+      releaseCrispPreviewDocument(docId);
       pushUndo('حذف فایل از پروژه', 'Remove document', before, captureSnapshot(get()));
     },
 
@@ -1507,6 +1596,126 @@ export const useAppStore = create<AppState>((set, get) => {
         void ipcBridge.saveSettings(next);
         return { settings: next };
       });
+      syncCrispPreview();
+    },
+
+    // Start-up: settings and saved profiles used to be written to disk and never read back, so every
+    // launch quietly returned to the shipped defaults. Both are restored here, once.
+    restorePreferences: async () => {
+      const [storedSettings, presets] = await Promise.all([
+        ipcBridge.loadSettings().catch(() => null),
+        ipcBridge.loadSettingsPresets().catch(() => [] as SettingsPreset[]),
+      ]);
+      // Only a value the session has not moved away from. A read that lands after an edit must not walk
+      // over it — "I set it and it snapped back" is the kind of bug nobody can reproduce — and every edit
+      // is written through to disk immediately, so the file is never fresher than the state in memory.
+      const live = get().settings;
+      const restorable: Partial<AppSettings> = {};
+      for (const [key, value] of Object.entries(storedSettings ?? {})) {
+        const name = key as keyof AppSettings;
+        if (live[name] === DEFAULT_SETTINGS[name]) (restorable as Record<string, unknown>)[name] = value;
+      }
+      set((state) => ({
+        settings: { ...state.settings, ...restorable },
+        // Anything saved during this session wins over the file; the stored list is the base, not the word.
+        settingsPresets: Array.isArray(presets)
+          ? [...presets.filter(stored => !state.settingsPresets.some(item => item.id === stored.id)), ...state.settingsPresets]
+          : state.settingsPresets,
+      }));
+      syncCrispPreview();
+    },
+
+    saveSettingsPreset: (name) => {
+      const trimmed = name.trim();
+      if (!trimmed) {
+        const lang = get().settings.language;
+        get().addToast({
+          type: 'warning',
+          title: lang === 'fa' ? 'نام پریست خالی است' : 'Preset needs a name',
+          message: lang === 'fa' ? 'برای ذخیره، یک نام برای این پریست بنویسید.' : 'Type a name for this profile before saving it.',
+        });
+        return null;
+      }
+      const lang = get().settings.language;
+      const now = new Date().toISOString();
+      const sections = capturePresetSections();
+      const current = get().settingsPresets;
+      const duplicate = current.find((preset) => presetNameKey(preset.name) === presetNameKey(trimmed));
+      const next = duplicate
+        ? current.map((preset) => preset.id === duplicate.id
+            ? { ...preset, ...sections, name: trimmed, updatedAt: now }
+            : preset)
+        : [...current, { id: `preset-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, name: trimmed, createdAt: now, updatedAt: now, ...sections }];
+      set({ settingsPresets: next });
+      persistPresets(next);
+      get().addToast({
+        type: 'success',
+        title: duplicate
+          ? (lang === 'fa' ? `پریست «${trimmed}» به‌روزرسانی شد` : `Updated the "${trimmed}" profile`)
+          : (lang === 'fa' ? `پریست «${trimmed}» ذخیره شد` : `Saved the "${trimmed}" profile`),
+        message: lang === 'fa'
+          ? 'چیدمان، افکت‌ها، واترمارک، شماره‌گذاری صفحه و تنظیمات عمومی در همین پروفایل نگه داشته شدند.'
+          : 'Layout, effects, watermark, page numbering and general settings are stored in this profile.',
+      });
+      return duplicate?.id ?? next[next.length - 1].id;
+    },
+
+    applySettingsPreset: (presetId) => {
+      const preset = get().settingsPresets.find((item) => item.id === presetId);
+      const lang = get().settings.language;
+      if (!preset) return;
+      const before = captureSnapshot(get());
+      // Every section is merged over its own default, so a profile saved before the app grew a new
+      // option leaves that option at the default instead of at `undefined`.
+      set(() => ({
+        layout: { ...DEFAULT_LAYOUT, ...preset.layout },
+        effects: { ...DEFAULT_EFFECTS, ...preset.effects },
+        watermark: { ...getDefaultWatermarkSettings(), ...preset.watermark },
+        pageNumbering: { ...getDefaultPageNumberSettings(), ...preset.pageNumbering },
+        settings: { ...DEFAULT_SETTINGS, ...preset.settings },
+      }));
+      pushUndo('اعمال پریست تنظیمات', 'Apply settings preset', before, captureSnapshot(get()));
+      void ipcBridge.saveSettings(get().settings);
+      syncCrispPreview();
+      get().addToast({
+        type: 'info',
+        title: lang === 'fa' ? `پریست «${preset.name}» اعمال شد` : `Applied the "${preset.name}" profile`,
+        message: lang === 'fa' ? 'برگشت با Ctrl+Z ممکن است؛ فایل‌های روی میز کار تغییری نکردند.' : 'Ctrl+Z brings the previous settings back; the documents on the desk were not touched.',
+      });
+    },
+
+    deleteSettingsPreset: (presetId) => {
+      const current = get().settingsPresets;
+      const next = current.filter((preset) => preset.id !== presetId);
+      if (next.length === current.length) return;
+      set({ settingsPresets: next });
+      persistPresets(next);
+    },
+
+    resetAllSettings: () => {
+      const before = captureSnapshot(get());
+      const lang = get().settings.language;
+      set({
+        layout: { ...DEFAULT_LAYOUT },
+        effects: { ...DEFAULT_EFFECTS },
+        watermark: getDefaultWatermarkSettings(),
+        pageNumbering: getDefaultPageNumberSettings(),
+        settings: { ...DEFAULT_SETTINGS, language: lang },
+      });
+      pushUndo('بازگردانی تمام تنظیمات به پیش‌فرض', 'Reset all settings to defaults', before, captureSnapshot(get()));
+      void ipcBridge.saveSettings(get().settings);
+      syncCrispPreview();
+      get().addToast({
+        type: 'success',
+        title: lang === 'fa' ? 'همهٔ تنظیمات به حالت پیش‌فرض برگشت' : 'All settings are back to their defaults',
+        message: lang === 'fa'
+          ? 'چیدمان، افکت‌ها، واترمارک، شماره‌گذاری و تنظیمات عمومی بازنشانی شد؛ فایل‌های روی میز کار دست‌نخورده‌اند.'
+          : 'Layout, effects, watermark, page numbering and general settings were reset; the files on the desk are untouched.',
+      });
+    },
+
+    clearCrispPreviewCacheNow: () => {
+      clearCrispPreviewCache();
     },
 
     exportMergedOrImposedPdf: async (onlyHighlighted = false) => {

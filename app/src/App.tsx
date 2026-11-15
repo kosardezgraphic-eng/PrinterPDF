@@ -13,6 +13,9 @@ import { ImageControlPanel } from './components/ImageControlPanel';
 import { routeDroppedFiles } from './engine/imageImport';
 import { listenForNativeOpenFiles } from './engine/nativeFiles';
 
+/** Whether this page load has already read the persisted settings back (see the effect in `App`). */
+let preferencesRestored = false;
+
 export const App: React.FC = () => {
   const {
     settings,
@@ -33,6 +36,8 @@ export const App: React.FC = () => {
     exportMergedOrImposedPdf,
     importFiles,
     addToast,
+    restorePreferences,
+    resetAllSettings,
   } = useAppStore();
 
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(
@@ -42,6 +47,16 @@ export const App: React.FC = () => {
   useEffect(() => {
     void initializeWorkspace();
   }, [initializeWorkspace]);
+
+  // Settings and saved profiles are written to disk as they change, so they have to be read back once,
+  // before the operator touches anything — otherwise a restart quietly throws away the whole setup.
+  // Once per load, and only once: a StrictMode double-mount or a hot reload must not overwrite the
+  // values the operator has been editing in this session with whatever was on disk a moment ago.
+  useEffect(() => {
+    if (preferencesRestored) return;
+    preferencesRestored = true;
+    void restorePreferences();
+  }, [restorePreferences]);
 
   // A file opened from Explorer or the command line reaches the app as a path only, so it is read
   // through the desktop bridge. In a browser there is no bridge and nothing subscribes at all.
@@ -89,6 +104,16 @@ export const App: React.FC = () => {
   // Comprehensive Keyboard Shortcuts & Clipboard Paste (A1)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // Alt+F6 resets every adjustable setting, and it has to work with focus anywhere in the window —
+      // including inside a field, which the guard below deliberately shields from the letter chords. A
+      // function key is never text input, so checking it first costs nothing and matches the muscle
+      // memory an operator has from other print-shop software.
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === 'F6') {
+        e.preventDefault();
+        resetAllSettings();
+        return;
+      }
+
       const target = e.target as HTMLElement | null;
       if (
         target &&
@@ -211,6 +236,7 @@ export const App: React.FC = () => {
     zoomPercent,
     undo,
     redo,
+    resetAllSettings,
     toggleGlobalInvert,
     duplicatePages,
     deletePages,

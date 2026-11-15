@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { PrinterRetryButton, PrinterServiceStatus } from './PrinterStatus';
+import { SettingsPresetPanel } from './SettingsPresets';
 import { computeCounterSummary } from '../engine/counterEngine';
 import {
   computeImpositionSheets,
@@ -1226,6 +1227,37 @@ export const ModalsAndToasts: React.FC = () => {
                 />
               </div>
             </div>
+
+            {/* Vector pages are re-rendered at the size they are shown; a 0.2 pt line stays a line. */}
+            <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <label className="mb-1 block text-slate-400">
+                  {isFa ? 'رندر پیش‌نمایش صفحه:' : 'Page preview rendering:'}
+                </label>
+                <select
+                  data-preview-fidelity
+                  value={settings.previewFidelity}
+                  onChange={(e) =>
+                    updateSettings({ previewFidelity: e.target.value as 'fast' | 'crisp' })
+                  }
+                  className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-white"
+                >
+                  <option value="crisp">
+                    {isFa ? 'وکتوری، هم‌اندازهٔ نمایش (کم‌مصرف با کش محدود)' : 'Vector, re-rendered at display size (bounded cache)'}
+                  </option>
+                  <option value="fast">
+                    {isFa ? 'فقط تصویر کوچک (سبک‌ترین، در زوم تار می‌شود)' : 'Stored thumbnail only (lightest, blurry when zoomed)'}
+                  </option>
+                </select>
+              </div>
+              <p className="self-center text-[10px] leading-4 text-slate-400">
+                {isFa
+                  ? 'در حالت وکتوری فقط صفحه‌ای که روی صفحه نمایش داده می‌شود رندر می‌شود؛ رندرهای در حال انتظار لغو می‌شوند و کش، سقفش همان «حداکثر صفحات کش» است.'
+                  : 'Crisp mode renders only the page a visible cell shows, cancels what scrolls away, and keeps at most a slice of the page-cache limit in memory.'}
+              </p>
+            </div>
+
+            <SettingsPresetPanel />
 
             <div className="mt-6 flex justify-end border-t border-slate-800 pt-4">
               <button

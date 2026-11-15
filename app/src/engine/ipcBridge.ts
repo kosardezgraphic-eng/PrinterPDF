@@ -14,8 +14,10 @@ import type {
   PrinterProfileSettings,
   PrintJobRequest,
   PspProjectFile,
+  SettingsPreset,
   SpoolerJobInfo,
 } from '@shared/models';
+import { sanitizeAppSettings, sanitizeSettingsPresetList } from '@shared/models';
 
 const BROWSER_NO_WINDOWS_NOTE =
   'Browser preview cannot access local Windows printers directly (no fake printers are shown). Run the app on Windows using "npm run electron:dev" or "npm run dev" on your Windows PC.';
@@ -331,6 +333,52 @@ export const ipcBridge = {
       return true;
     } catch {
       return false;
+    }
+  },
+
+  /**
+   * Settings used to be saved but never read back, so every start-up quietly went back to the
+   * built-in defaults. Both storages are read here; `null` means "nothing stored", which the caller
+   * treats as "keep the defaults" rather than as an error.
+   */
+  async loadSettings(): Promise<Partial<AppSettings> | null> {
+    const api = electronApi();
+    if (api) {
+      const stored = await api.loadSettings();
+      return sanitizeAppSettings(stored);
+    }
+    try {
+      const raw = localStorage.getItem('printstudio:settings');
+      return raw ? sanitizeAppSettings(JSON.parse(raw)) : null;
+    } catch {
+      return null;
+    }
+  },
+
+  /** Saved setting profiles. Kept apart from the settings file so a reset does not erase them. */
+  async saveSettingsPresets(presets: SettingsPreset[]): Promise<boolean> {
+    const api = electronApi();
+    if (api) {
+      return api.saveSettingsPresets(presets);
+    }
+    try {
+      localStorage.setItem('printstudio:presets', JSON.stringify(presets));
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  async loadSettingsPresets(): Promise<SettingsPreset[]> {
+    const api = electronApi();
+    if (api) {
+      return (await api.loadSettingsPresets()) ?? [];
+    }
+    try {
+      const raw = localStorage.getItem('printstudio:presets');
+      return raw ? sanitizeSettingsPresetList(JSON.parse(raw)) : [];
+    } catch {
+      return [];
     }
   },
 };
