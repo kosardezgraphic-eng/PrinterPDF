@@ -42,6 +42,7 @@ export const SidebarPages: React.FC = () => {
     setSidebarTab,
     togglePageSelectedForPrint,
     invertAllPrintSelection,
+    invertPagesPrintSelection,
     highlightPage,
     requestPreviewPage,
     selectAllForPrint,
@@ -51,12 +52,12 @@ export const SidebarPages: React.FC = () => {
     moveHighlightedPages,
     rotatePages,
     duplicatePages,
-    makePageArray,
-    insertBlankPageAfter,
+    makePagesArray,
+    insertBlankPagesAfter,
     deletePages,
     removeDocument,
     toggleDocumentCollapse,
-    togglePageInvertOverride,
+    togglePagesInvertOverride,
     exportMergedOrImposedPdf,
   } = useAppStore();
 
@@ -136,6 +137,22 @@ export const SidebarPages: React.FC = () => {
   const tr = t(lang);
 
   const highlightedIds = pages.filter((p) => p.isHighlighted).map((p) => p.id);
+
+  // What a right-click acts on: the whole highlighted set, because the menu is opened on a page of
+  // that group and every action is expected to follow the selection. Only when the set does not
+  // contain the page under the cursor — which right-click itself prevents — does it narrow to that
+  // one page, so the labels and the effect can never disagree with the highlighted thumbnails.
+  const contextTargets = contextMenu
+    ? (highlightedIds.length > 1 && highlightedIds.includes(contextMenu.pageId)
+        ? highlightedIds
+        : [contextMenu.pageId])
+    : [];
+  const contextLabel = lang === 'fa'
+    ? `${formatLocalizedNumber(contextTargets.length, lang)} صفحه`
+    : `${contextTargets.length} page${contextTargets.length === 1 ? '' : 's'}`;
+  const scopeNote = contextTargets.length > 1
+    ? (lang === 'fa' ? `روی ${contextLabel} انتخاب‌شده اعمال می‌شود` : `Applies to the ${contextLabel} selected`)
+    : (lang === 'fa' ? 'فقط روی همین صفحه' : 'Only this page');
 
   const formatBytes = (bytes: number) => {
     if (bytes < 1024 * 1024) {
@@ -497,9 +514,13 @@ export const SidebarPages: React.FC = () => {
         </div>
       )}
 
-      {/* Right-Click Context Menu for Page Operations (A4) */}
+      {/* Right-Click Context Menu for Page Operations (A4).
+          Every action here works on the whole selection, not on the thumbnail that happened to be
+          under the cursor — inverting, rotating, duplicating or deleting six picked pages is one
+          right-click. The scope line at the top says how far the action reaches. */}
       {contextMenu && (
         <div
+          data-page-context-menu
           style={{
             top: Math.max(8, Math.min(window.innerHeight - 330, contextMenu.y)),
             left: Math.max(8, Math.min(window.innerWidth - 232, contextMenu.x)),
@@ -507,40 +528,67 @@ export const SidebarPages: React.FC = () => {
           }}
           className="fixed z-50 w-56 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-1.5 text-xs text-slate-200 shadow-2xl"
         >
+          <div
+            data-context-menu-scope
+            className="px-2.5 pb-1.5 pt-0.5 text-[10px] font-semibold text-sky-300"
+          >
+            {scopeNote}
+          </div>
           <button
             type="button"
-            onClick={() => { invertAllPrintSelection(); setContextMenu(null); }}
+            data-context-action="invert-print-selection"
+            onClick={() => { invertPagesPrintSelection(contextTargets); setContextMenu(null); }}
             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 cursor-pointer"
           >
             <CheckSquare className="h-3.5 w-3.5 text-sky-400" aria-hidden="true" />
+            <span>
+              {lang === 'fa'
+                ? `معکوس کردن وضعیت چاپ (${contextLabel})`
+                : `Invert print selection (${contextLabel})`}
+            </span>
+          </button>
+          <button
+            type="button"
+            data-context-action="invert-print-all"
+            onClick={() => { invertAllPrintSelection(); setContextMenu(null); }}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 cursor-pointer"
+          >
+            <CheckSquare className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
             <span>{lang === 'fa' ? 'معکوس کردن وضعیت چاپ همهٔ صفحات' : 'Invert print selection of all pages'}</span>
           </button>
           <button
             type="button"
+            data-context-action="rotate"
             onClick={() => {
-              rotatePages([contextMenu.pageId], 90);
+              rotatePages(contextTargets, 90);
               setContextMenu(null);
             }}
             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 cursor-pointer"
           >
             <RotateCw className="h-3.5 w-3.5 text-sky-400" />
-            <span>{tr.sidebar.rotateRight}</span>
+            <span>
+              {lang === 'fa' ? `چرخش ۹۰° راست (${contextLabel})` : `Rotate 90° CW (${contextLabel})`}
+            </span>
           </button>
           <button
             type="button"
+            data-context-action="duplicate"
             onClick={() => {
-              duplicatePages([contextMenu.pageId]);
+              duplicatePages(contextTargets);
               setContextMenu(null);
             }}
             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 cursor-pointer"
           >
             <Copy className="h-3.5 w-3.5 text-emerald-400" />
-            <span>{tr.sidebar.duplicate}</span>
+            <span>
+              {lang === 'fa' ? `تکثیر صفحات (${contextLabel})` : `Duplicate (${contextLabel})`}
+            </span>
           </button>
           <button
             type="button"
+            data-context-action="make-array"
             onClick={() => {
-              makePageArray(contextMenu.pageId, 4);
+              makePagesArray(contextTargets, 4);
               setContextMenu(null);
             }}
             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 cursor-pointer"
@@ -548,25 +596,31 @@ export const SidebarPages: React.FC = () => {
             <Layers className="h-3.5 w-3.5 text-amber-400" />
             <span>
               {lang === 'fa'
-                ? 'تکرار آرایه‌ای ۴تایی (Make Array ×4)'
-                : 'Make an Array (×4)'}
+                ? `تکرار آرایه‌ای ۴تایی (${contextLabel})`
+                : `Make an Array ×4 (${contextLabel})`}
             </span>
           </button>
           <button
             type="button"
+            data-context-action="insert-blank"
             onClick={() => {
-              insertBlankPageAfter(contextMenu.pageId);
+              insertBlankPagesAfter(contextTargets);
               setContextMenu(null);
             }}
             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 cursor-pointer"
           >
             <FilePlus className="h-3.5 w-3.5 text-indigo-400" />
-            <span>{tr.sidebar.insertBlank}</span>
+            <span>
+              {lang === 'fa'
+                ? `درج صفحه خالی بعد از هر صفحه (${contextLabel})`
+                : `Insert a blank page after each (${contextLabel})`}
+            </span>
           </button>
           <button
             type="button"
+            data-context-action="invert-colour"
             onClick={() => {
-              togglePageInvertOverride(contextMenu.pageId);
+              togglePagesInvertOverride(contextTargets);
               setContextMenu(null);
             }}
             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 cursor-pointer"
@@ -574,12 +628,13 @@ export const SidebarPages: React.FC = () => {
             <Contrast className="h-3.5 w-3.5 text-fuchsia-400" />
             <span>
               {lang === 'fa'
-                ? 'معکوس رنگ فقط همین صفحه (Invert)'
-                : 'Invert Only This Page'}
+                ? `معکوس رنگ صفحات (${contextLabel})`
+                : `Invert colour (${contextLabel})`}
             </span>
           </button>
           <button
             type="button"
+            data-context-action="extract-pdf"
             onClick={() => {
               void exportMergedOrImposedPdf(true);
               setContextMenu(null);
@@ -587,19 +642,24 @@ export const SidebarPages: React.FC = () => {
             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 cursor-pointer"
           >
             <Scissors className="h-3.5 w-3.5 text-sky-400" />
-            <span>{tr.sidebar.extractPdf}</span>
+            <span>
+              {lang === 'fa' ? 'استخراج صفحات انتخابی به PDF' : 'Extract the selection to PDF'}
+            </span>
           </button>
           <div className="my-1 h-px bg-slate-800" />
           <button
             type="button"
+            data-context-action="delete"
             onClick={() => {
-              deletePages([contextMenu.pageId]);
+              deletePages(contextTargets);
               setContextMenu(null);
             }}
             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-rose-400 hover:bg-rose-500/15 cursor-pointer"
           >
             <Trash2 className="h-3.5 w-3.5" />
-            <span>{lang === 'fa' ? 'حذف این صفحه' : 'Delete Page'}</span>
+            <span>
+              {lang === 'fa' ? `حذف صفحات انتخابی (${contextLabel})` : `Delete the selection (${contextLabel})`}
+            </span>
           </button>
         </div>
       )}

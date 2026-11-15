@@ -25,7 +25,6 @@ import {
   Ruler,
   Search,
   Maximize2,
-  BookOpen,
   FlipHorizontal2,
   Trash2,
   FileDown,
@@ -68,7 +67,6 @@ export const Ribbon: React.FC = () => {
     setActiveRibbonTab,
     setRibbonCollapsed,
     importFiles,
-    loadSampleWorkspace,
     clearWorkspace,
     updateLayout,
     setNUpMatrix,
@@ -225,15 +223,6 @@ export const Ribbon: React.FC = () => {
                   <span className="sr-only">
                     {lang === 'fa' ? 'افزودن فایل PDF / عکس' : 'Add PDF / Images'}
                   </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void loadSampleWorkspace()}
-                  title={tr.quickBar.loadDemoJob}
-                  className="flex flex-col items-center gap-1 rounded-xl border border-slate-700 bg-slate-800/80 px-3 py-2 text-slate-200 hover:bg-slate-700 cursor-pointer"
-                >
-                  <BookOpen className="h-5 w-5 text-amber-400" />
-                  <span className="sr-only">{tr.quickBar.loadDemoJob}</span>
                 </button>
                 <button
                   type="button"

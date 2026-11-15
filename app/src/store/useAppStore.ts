@@ -254,6 +254,8 @@ interface AppState {
   // Page Operations (A3 - A4)
   togglePageSelectedForPrint: (pageId: string) => void;
   invertAllPrintSelection: () => void;
+  /** Inverts the print state of the given pages only — the sidebar context menu works on a selection. */
+  invertPagesPrintSelection: (pageIds: string[]) => void;
   highlightPage: (pageId: string, multiSelect?: boolean, rangeSelect?: boolean) => void;
   requestPreviewPage: (pageId: string) => void;
   focusPageFromPreview: (pageId: string | null, preserveSelection?: boolean, occurrenceKey?: string) => void;
@@ -272,11 +274,17 @@ interface AppState {
   reorderCellLayer: (sheetIndex: number, occurrenceKey: string, direction: 'front' | 'back' | 'forward' | 'backward') => void;
   duplicatePages: (pageIds: string[]) => void;
   makePageArray: (pageId: string, count: number) => void;
+  /** Repeats every given page as an array, in one undo step. */
+  makePagesArray: (pageIds: string[], count: number) => void;
   insertBlankPageAfter: (pageId?: string) => void;
+  /** Adds one blank page after every given page; with no page given it follows the selection. */
+  insertBlankPagesAfter: (pageIds: string[]) => void;
   deletePages: (pageIds: string[]) => void;
   removeDocument: (docId: string) => void;
   toggleDocumentCollapse: (docId: string) => void;
   togglePageInvertOverride: (pageId: string) => void;
+  /** Sets the invert override on all given pages, or clears it when all of them already have it. */
+  togglePagesInvertOverride: (pageIds: string[]) => void;
   splitEveryNPages: (everyN: number) => void;
 
   // Layout & Effects & Insert
@@ -462,18 +470,19 @@ export const useAppStore = create<AppState>((set, get) => {
 
     toasts: [],
 
+    // The app opens on an empty desk: `initializeWorkspace` reads printer state and nothing else.
+    // Sample documents used to be generated here, so every real file the operator dragged in landed
+    // on a page already crowded with demo work. The sample stays available through
+    // loadSampleWorkspace (an explicit action, used by QA and tests) — it is just never loaded by
+    // itself. Whatever is already on the desk is left untouched, because a remount (hot reload,
+    // StrictMode) must not wipe files that were imported a moment before.
     initializeWorkspace: async () => {
-      const [printerResult, jobResult, sampleResult] = await Promise.all([
+      const [printerResult, jobResult] = await Promise.all([
         ipcBridge.listPrinters().then(value => ({ value, error: null as unknown })).catch(error => ({ value: [], error })),
         ipcBridge.listSpoolerJobs().then(value => ({ value, error: null as unknown })).catch(error => ({ value: [], error })),
-        createSamplePrintShopWorkspace().then(value => ({ value, error: null as unknown })).catch(error => ({ value: null, error })),
       ]);
-      const sample = sampleResult.value;
-      if (sampleResult.error) {
-        console.error('Sample PDF rendering failed:', sampleResult.error);
-        get().addToast({ type: 'error', title: get().settings.language === 'fa' ? 'بارگذاری نمونه ناموفق بود' : 'Could not load sample',
-          message: sampleResult.error instanceof Error ? sampleResult.error.message : String(sampleResult.error) });
-      }
+      // The new main sanitises whatever the sidecar reports; the sample documents that used to be
+      // generated here are gone, so sanitising is all that is left to do with the printer list.
       const printers = printerResult.value.map(sanitizePrinterInfo);
       const spoolerJobs = jobResult.value;
       const error = printerResult.error ?? jobResult.error;
@@ -491,19 +500,14 @@ export const useAppStore = create<AppState>((set, get) => {
       const previousMarginKey = marginKey(get());
       const defaultPrinter =
         printers.find((p) => p.isDefault)?.name ?? printers[0]?.name ?? '';
-      set({
-        printers,
-        selectedPrinterName: defaultPrinter,
-        spoolerJobs,
-        documents: sample?.documents ?? [],
-        pages: sample?.pages ?? [],
-        bookmarks: sample?.bookmarks ?? [],
-        overlays: [], selectedOverlayId: null, textEdit: null, activePageId: null,
-      });
+      set({ printers, selectedPrinterName: defaultPrinter, spoolerJobs });
       if (defaultPrinter) get().selectPrinter(defaultPrinter);
       else if (marginKey(get()) === previousMarginKey) refreshPrinterMargins();
     },
 
+    // Deliberately not wired to a button any more: the desk starts empty, so demo pages never get
+    // mixed in with real work. QA can still put them there from the console with
+    // `useAppStore.getState().loadSampleWorkspace()`.
     loadSampleWorkspace: async () => {
       const before = captureSnapshot(get());
       const sample = await createSamplePrintShopWorkspace();
@@ -547,6 +551,10 @@ export const useAppStore = create<AppState>((set, get) => {
           before,
           captureSnapshot(get())
         );
+        // New pages are appended to the end of the desk, so the preview has to follow them. Staying
+        // on the sheet that was open before is what made a successful drop look like nothing happened.
+        const firstImportedPage = result.pages[0];
+        if (firstImportedPage) get().requestPreviewPage(firstImportedPage.id);
         get().addToast({
           type: 'success',
           title:
@@ -647,6 +655,23 @@ export const useAppStore = create<AppState>((set, get) => {
       const before = captureSnapshot(state);
       set({ pages:state.pages.map(page => ({...page, selectedForPrint:!page.selectedForPrint})) });
       pushUndo('معکوس کردن وضعیت چاپ همه صفحات', 'Invert all pages print selection', before, captureSnapshot(get()));
+    },
+
+    // Same flip, but only under the highlighted set — the shape a right-click menu needs. Nothing
+    // is selected? Nothing changes: silently inverting the whole desk from a context menu is worse
+    // than doing nothing, and the menu only opens on a page anyway, so this set is never empty.
+    invertPagesPrintSelection: (pageIds) => {
+      const state = get();
+      const idSet = new Set(pageIds);
+      if (!idSet.size || !state.pages.some(page => idSet.has(page.id))) return;
+      const before = captureSnapshot(state);
+      set({ pages: state.pages.map(page => idSet.has(page.id) ? { ...page, selectedForPrint: !page.selectedForPrint } : page) });
+      pushUndo(
+        `معکوس کردن وضعیت چاپ ${idSet.size} صفحه`,
+        `Invert print selection of ${idSet.size} page(s)`,
+        before,
+        captureSnapshot(get())
+      );
     },
 
     // Navigation is deliberately separate from edits and sidebar multi-selection.
@@ -976,34 +1001,38 @@ export const useAppStore = create<AppState>((set, get) => {
       pushUndo('تکثیر صفحه (Duplicate)', 'Duplicate page(s)', before, captureSnapshot(get()));
     },
 
-    makePageArray: (pageId, count) => {
+    makePagesArray: (pageIds, count) => {
       const safeCount = Math.max(2, Math.min(100, Math.floor(count)));
+      const idSet = new Set(pageIds);
+      if (!idSet.size) return;
       const before = captureSnapshot(get());
       set((state) => {
         const next: PageItem[] = [];
         for (const p of state.pages) {
           next.push(p);
-          if (p.id === pageId) {
-            for (let i = 1; i < safeCount; i++) {
-              next.push({
-                ...structuredClone(p),
-                id: `${p.id}-arr-${i}-${Date.now()}`,
-              });
-            }
+          if (!idSet.has(p.id)) continue;
+          for (let i = 1; i < safeCount; i++) {
+            next.push({
+              ...structuredClone(p),
+              id: `${p.id}-arr-${i}-${Date.now()}`,
+            });
           }
         }
         return { pages: next };
       });
       pushUndo(
-        `تکرار آرایه‌ای صفحه (${safeCount} نسخه)`,
-        `Make an Array (${safeCount} copies)`,
+        `تکرار آرایه‌ای ${idSet.size} صفحه (${safeCount} نسخه)`,
+        `Make an Array of ${idSet.size} page(s) (${safeCount} copies)`,
         before,
         captureSnapshot(get())
       );
     },
 
-    insertBlankPageAfter: (pageId) => {
-      const before = captureSnapshot(get());
+    makePageArray: (pageId, count) => {
+      get().makePagesArray([pageId], count);
+    },
+
+    insertBlankPagesAfter: (pageIds) => {
       const blankThumb = buildCrispPageSvgDataUrl({
         title: 'Blank Page',
         subtitle: '',
@@ -1015,39 +1044,47 @@ export const useAppStore = create<AppState>((set, get) => {
         accentColor: '#94a3b8',
         lines: [],
       });
+      const makeBlank = (refPage: PageItem | undefined, serial: number): PageItem => ({
+        id: `blank-${Date.now()}-${serial}-${Math.random().toString(36).slice(2, 6)}`,
+        documentId: refPage?.documentId ?? 'blank-doc',
+        documentName: refPage?.documentName ?? 'صفحات الحاقی',
+        sourcePageNumber: 0,
+        widthMm: refPage?.widthMm ?? 210,
+        heightMm: refPage?.heightMm ?? 297,
+        rotation: 0,
+        selectedForPrint: true,
+        isHighlighted: true,
+        isBlankPage: true,
+        colorProfile: 'blank',
+        inkCoveragePercent: 0,
+        thumbnailDataUrl: blankThumb,
+      });
 
+      const before = captureSnapshot(get());
       set((state) => {
-        const refPage =
-          state.pages.find((p) => p.id === pageId) ??
-          state.pages.find((p) => p.isHighlighted) ??
-          state.pages[state.pages.length - 1];
-
-        const blankPage: PageItem = {
-          id: `blank-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          documentId: refPage?.documentId ?? 'blank-doc',
-          documentName: refPage?.documentName ?? 'صفحات الحاقی',
-          sourcePageNumber: 0,
-          widthMm: refPage?.widthMm ?? 210,
-          heightMm: refPage?.heightMm ?? 297,
-          rotation: 0,
-          selectedForPrint: true,
-          isHighlighted: true,
-          isBlankPage: true,
-          colorProfile: 'blank',
-          inkCoveragePercent: 0,
-          thumbnailDataUrl: blankThumb,
-        };
-
-        if (!refPage) {
-          return { pages: [blankPage] };
+        const wanted = new Set(pageIds);
+        // The Ribbon button passes no page at all: then the highlighted set — or, if nothing is
+        // highlighted, the last page — is what "insert a blank page" has always meant here.
+        const anchors = state.pages.filter((page) =>
+          wanted.size ? wanted.has(page.id) : page.isHighlighted
+        );
+        const targets = anchors.length ? anchors : state.pages.slice(-1);
+        if (!targets.length) return { pages: [makeBlank(undefined, 0)] };
+        const afterIds = new Set(targets.map((page) => page.id));
+        const next: PageItem[] = [];
+        let serial = 0;
+        for (const page of state.pages) {
+          next.push(page);
+          if (afterIds.has(page.id)) next.push(makeBlank(page, serial++));
         }
-        const idx = state.pages.findIndex((p) => p.id === refPage.id);
-        const next = state.pages.slice();
-        next.splice(idx + 1, 0, blankPage);
         return { pages: next };
       });
 
       pushUndo('درج صفحه خالی', 'Insert Blank Page', before, captureSnapshot(get()));
+    },
+
+    insertBlankPageAfter: (pageId) => {
+      get().insertBlankPagesAfter(pageId ? [pageId] : []);
     },
 
     deletePages: (pageIds) => {
@@ -1085,27 +1122,29 @@ export const useAppStore = create<AppState>((set, get) => {
       }));
     },
 
-    togglePageInvertOverride: (pageId) => {
-      const before = captureSnapshot(get());
-      set((state) => ({
-        pages: state.pages.map((p) => {
-          if (p.id !== pageId) return p;
-          const current = p.overrides?.invert ?? false;
-          return {
-            ...p,
-            overrides: {
-              ...p.overrides,
-              invert: !current,
-            },
-          };
-        }),
-      }));
+    togglePagesInvertOverride: (pageIds) => {
+      const state = get();
+      const idSet = new Set(pageIds);
+      const targets = state.pages.filter((page) => idSet.has(page.id));
+      if (!targets.length) return;
+      const before = captureSnapshot(state);
+      // One gesture over a set never leaves a mix behind: the value is cleared when every target
+      // already has it and turned on for all of them otherwise.
+      const nextValue = !targets.every((page) => page.overrides?.invert ?? false);
+      set({ pages: state.pages.map((page) => idSet.has(page.id) ? {
+        ...page,
+        overrides: { ...page.overrides, invert: nextValue },
+      } : page) });
       pushUndo(
-        'معکوس رنگ (Invert) صفحه انتخابی',
-        'Toggle page Invert override',
+        nextValue ? `معکوس رنگ ${targets.length} صفحه` : `لغو معکوس رنگ ${targets.length} صفحه`,
+        nextValue ? `Invert ${targets.length} page(s)` : `Clear invert on ${targets.length} page(s)`,
         before,
         captureSnapshot(get())
       );
+    },
+
+    togglePageInvertOverride: (pageId) => {
+      get().togglePagesInvertOverride([pageId]);
     },
 
     splitEveryNPages: (everyN) => {
