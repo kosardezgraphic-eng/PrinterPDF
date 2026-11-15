@@ -4,7 +4,8 @@ import { RotateCw } from 'lucide-react';
 import type { ComputedCellPlacement, PageTransform } from '@shared/models';
 import type { PageEditScope } from '../store/useAppStore';
 import { dragCrop, IDENTITY_TRANSFORM, normalizeAngle, pageCropFractions, resizeRect, resizeProportionally, rotateVector, rotationFromPointer, type Handle, type Rect } from '../engine/pageGeometry';
-import { PageContentImage } from './PageContentImage';
+import { PageContentImage, pageImageStyle } from './PageContentImage';
+import { CrispPageCanvas, useCrispPageFrame } from './CrispPageCanvas';
 import { useAppStore } from '../store/useAppStore';
 
 export type CanvasTool = 'move' | 'crop' | 'layout' | 'measure';
@@ -48,6 +49,7 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
   const applyPageGeometry = useAppStore(state => state.applyPageGeometry);
   const applyCellTransform = useAppStore(state => state.applyCellTransform);
   const reorderCellLayer = useAppStore(state => state.reorderCellLayer);
+  const crispEnabled = useAppStore(state => state.settings.previewFidelity === 'crisp');
   const page = cell.page!, occurrenceKey = cell.occurrenceKey!;
   const interaction = useRef<Gesture | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -185,6 +187,7 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
       openMenu(press.x+16,press.y+16);
     }, 600);
   };
+  const crisp = useCrispPageFrame({ page, enabled: crispEnabled, width:display.width, height:display.height, hostRef: contentRef });
   const pointerEvents = { onPointerMove:move, onPointerUp:(e: React.PointerEvent<HTMLElement>) => finishPress(e), onPointerCancel:(e: React.PointerEvent<HTMLElement>) => finishPress(e,true), onLostPointerCapture:(e: React.PointerEvent<HTMLElement>) => finishPress(e,true) };
   const fa = language === 'fa';
   const menuActions = [
@@ -217,6 +220,12 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
       style={{ left:display.x, top:display.y, width:display.width, height:display.height, transform:`rotate(${angle}deg)`, clipPath:inset, pointerEvents:readOnly ? 'none' : 'auto', touchAction:canEdit ? 'none' : 'auto', WebkitTouchCallout:'none', userSelect:'none', cursor:canEdit && tool === 'move' ? 'move' : 'pointer' }}
       className={`pointer-events-auto absolute overflow-hidden ${(tool === 'move' ? isActive && page.isHighlighted : page.isHighlighted) ? 'ring-2 ring-inset ring-sky-500' : ''}`}>
       <PageContentImage page={page} effects={effects} rotation={cell.effectiveRotation} width={display.width} height={display.height} />
+      {/* The bitmap made at import is a thumbnail; on a zoomed sheet it turns a hairline into a smear.
+          The crisp layer paints the same page re-rendered at the size of this cell, on top of it, and
+          only while the cell is on screen — see `CrispPageCanvas`. */}
+      {crispEnabled && <CrispPageCanvas page={page} effects={effects}
+        width={display.width} height={display.height} frame={crisp.frame} onStaleFrame={crisp.askAgain}
+        style={pageImageStyle(page, cell.effectiveRotation, display.width, display.height)} />}
     </div>
     {canEdit && <div style={{ left:tool === 'crop' ? cropFrame.x : display.x, top:tool === 'crop' ? cropFrame.y : display.y,
       width:tool === 'crop' ? cropFrame.width : display.width, height:tool === 'crop' ? cropFrame.height : display.height,

@@ -12,6 +12,7 @@ import type {
   PrinterProfileSettings,
   PrintJobRequest,
   PspProjectFile,
+  SettingsPreset,
   SpoolerJobInfo,
 } from './models';
 
@@ -54,6 +55,8 @@ export const IPC_CHANNELS = {
   // Settings & System
   SETTINGS_LOAD: 'settings:load',
   SETTINGS_SAVE: 'settings:save',
+  SETTINGS_PRESETS_LOAD: 'settings:presets-load',
+  SETTINGS_PRESETS_SAVE: 'settings:presets-save',
   CACHE_CLEAR: 'cache:clear',
 } as const;
 
@@ -115,6 +118,9 @@ export interface PrintStudioElectronAPI {
   loadAutoSaveSession(): Promise<PspProjectFile | null>;
   saveSettings(settings: AppSettings): Promise<boolean>;
   loadSettings(): Promise<AppSettings | null>;
+  /** Saved setting profiles, kept in their own file so a preset survives a settings reset. */
+  saveSettingsPresets(presets: SettingsPreset[]): Promise<boolean>;
+  loadSettingsPresets(): Promise<SettingsPreset[] | null>;
   clearCache(): Promise<boolean>;
 }
 

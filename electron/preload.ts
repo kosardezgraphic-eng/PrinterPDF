@@ -9,6 +9,7 @@ import type {
   PrinterMarginRequest,
   PrintJobRequest,
   PspProjectFile,
+  SettingsPreset,
 } from '../shared/models';
 
 /**
@@ -66,6 +67,11 @@ const api: PrintStudioElectronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SAVE, settings),
 
   loadSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_LOAD),
+
+  saveSettingsPresets: (presets: SettingsPreset[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_PRESETS_SAVE, presets),
+
+  loadSettingsPresets: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_PRESETS_LOAD),
 
   clearCache: () => ipcRenderer.invoke(IPC_CHANNELS.CACHE_CLEAR),
 

@@ -1,7 +1,7 @@
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
-import { createCanvas, Path2D } from '@napi-rs/canvas';
+import { createCanvas, loadImage, Path2D } from '@napi-rs/canvas';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
-import { analyzeRgbaPixels, renderAndAnalyzePdfPages } from './pdfRealRenderer';
+import { PdfVectorPreviewer, analyzeRgbaPixels, renderAndAnalyzePdfPages } from './pdfRealRenderer';
 import { createSamplePrintShopWorkspace, importFilesBatch } from './pdfService';
 
 // Exercise actual PDF.js rendering against a native canvas in Node, not fabricated SVG.
@@ -74,5 +74,81 @@ describe('PDF raster rendering', () => {
     const result = await importFilesBatch([new File([new Uint8Array(bytes)], 'test.pdf', { type: 'application/pdf' })]);
     expect(result.pages).toHaveLength(0);
     expect(result.errors[0].reasonEn).toContain('Web Worker');
+  });
+});
+
+/** The darkest pixel in a decoded PNG: how much real ink survived the rendering. */
+async function darkestPixel(png: Uint8Array): Promise<{ darkest: number; width: number; height: number }> {
+  const image = await loadImage(png as unknown as Buffer);
+  const canvas = createCanvas(image.width, image.height);
+  const context = canvas.getContext('2d');
+  context.drawImage(image, 0, 0);
+  const data = context.getImageData(0, 0, image.width, image.height).data;
+  let darkest = 255;
+  for (let i = 0; i + 3 < data.length; i += 4) {
+    const alpha = data[i + 3] / 255;
+    const luminance = 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+    darkest = Math.min(darkest, alpha < 1 ? 255 * (1 - alpha) + luminance * alpha : luminance);
+  }
+  return { darkest, width: image.width, height: image.height };
+}
+
+describe('crisp vector preview rendering', () => {
+  it('re-runs the page drawing instructions at the requested size instead of stretching the thumbnail', async () => {
+    (globalThis as unknown as { pdfjsWorker: unknown }).pdfjsWorker = await import('pdfjs-dist/legacy/build/pdf.worker.mjs');
+    globalThis.OffscreenCanvas = TestOffscreenCanvas as unknown as typeof OffscreenCanvas;
+    // A 0.2 pt rule across an A4-tall page: the classic thing a small bitmap cannot keep.
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([200, 400]);
+    page.drawRectangle({ x: 0, y: 199.9, width: 200, height: 0.2, color: rgb(0, 0, 0) });
+    const bytes = await doc.save();
+
+    const previewer = new PdfVectorPreviewer(1);
+    try {
+      expect(await previewer.open('vector', bytes)).toBe(1);
+      const crisp = await previewer.render({ docId: 'vector', pageNumber: 1, width: 800, height: 1600, taskId: 'crisp' });
+      expect(crisp?.png, 'a crisp frame must come back as pixels').toBeTruthy();
+      const crispPixels = await darkestPixel(crisp!.png!);
+      expect(crispPixels.width).toBe(800);           // the size the cell asked for, not 320
+      expect(crispPixels.height).toBe(1600);
+
+      const [thumbnail] = await renderAndAnalyzePdfPages(bytes, 'vector.pdf');
+      const thumbPixels = await darkestPixel(new Uint8Array(Buffer.from(thumbnail.thumbnailDataUrl.split(',')[1], 'base64')));
+      expect(thumbPixels.width).toBeLessThan(crispPixels.width);
+      // The whole point: the hairline is still a hairline with ink in it, not a grey smear. The
+      // threshold is a ratio, not a magic number — the crisp pass has to put at least twice as much ink
+      // into the darkest pixel of the rule as the stretched thumbnail does.
+      expect(thumbPixels.darkest - crispPixels.darkest).toBeGreaterThan(60);
+      expect(255 - crispPixels.darkest).toBeGreaterThan((255 - thumbPixels.darkest) * 2);
+    } finally {
+      previewer.closeAll();
+    }
+  });
+
+  it('holds only the documents the operator is looking at and forgets the oldest', async () => {
+    (globalThis as unknown as { pdfjsWorker: unknown }).pdfjsWorker = await import('pdfjs-dist/legacy/build/pdf.worker.mjs');
+    globalThis.OffscreenCanvas = TestOffscreenCanvas as unknown as typeof OffscreenCanvas;
+    const doc = await PDFDocument.create();
+    doc.addPage([100, 100]);
+    const bytes = await doc.save();
+    const previewer = new PdfVectorPreviewer(2);
+    try {
+      await previewer.open('first', bytes);
+      await previewer.open('second', bytes);
+      expect(previewer.openDocuments).toEqual(['first', 'second']);
+      await previewer.open('third', bytes);
+      // Two is the ceiling; the file that has not been looked at for longest is the one that goes.
+      expect(previewer.openDocuments).toEqual(['second', 'third']);
+      await expect(previewer.render({ docId: 'first', pageNumber: 1, width: 96, height: 96, taskId: 'gone' }))
+        .rejects.toThrow(/No preview document is open for first/);
+      // Re-opening is a parse, not a re-import: the page is available again immediately.
+      expect(await previewer.open('first', bytes)).toBe(1);
+      expect(await previewer.render({ docId: 'first', pageNumber: 1, width: 96, height: 96, taskId: 'back' })).toBeTruthy();
+      // An unknown cancel is not an error: the result would have been dropped anyway.
+      expect(() => previewer.cancel('never-asked-for')).not.toThrow();
+    } finally {
+      previewer.closeAll();
+      expect(previewer.openDocuments).toEqual([]);
+    }
   });
 });

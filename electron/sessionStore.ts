@@ -2,7 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
-import type { AppSettings, PspProjectFile } from '../shared/models.js';
+import { sanitizeSettingsPresetList } from '../shared/models.js';
+import type { AppSettings, PspProjectFile, SettingsPreset } from '../shared/models.js';
 
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
@@ -72,6 +73,34 @@ export class SessionStore {
       return JSON.parse(content) as AppSettings;
     } catch {
       return null;
+    }
+  }
+
+  private get presetsPath(): string {
+    return path.join(this.userDataDir, 'settings-presets.json');
+  }
+
+  /**
+   * Presets live in their own file, not inside settings.json, so that "reset everything to the
+   * defaults" can wipe the live settings without destroying the profiles the operator saved on purpose.
+   */
+  public async saveSettingsPresets(presets: SettingsPreset[]): Promise<boolean> {
+    try {
+      await fs.mkdir(this.userDataDir, { recursive: true });
+      await fs.writeFile(this.presetsPath, JSON.stringify(presets, null, 2), 'utf8');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  public async loadSettingsPresets(): Promise<SettingsPreset[]> {
+    try {
+      const content = await fs.readFile(this.presetsPath, 'utf8');
+      return sanitizeSettingsPresetList(JSON.parse(content));
+    } catch {
+      // A missing file is the normal case on a first run; a broken one is treated the same way.
+      return [];
     }
   }
 }
