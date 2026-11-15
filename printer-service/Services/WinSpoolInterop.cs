@@ -12,12 +12,25 @@ public static class WinSpoolInterop
     public const int DC_PAPERSIZE = 3;
     public const int DC_BINS = 6;
     public const int DC_DUPLEX = 7;
-    public const int DC_COPIES = 18;
-    public const int DC_PAPERNAMES = 16;
     public const int DC_BINNAMES = 12;
     public const int DC_ENUMRESOLUTIONS = 13;
+    public const int DC_PAPERNAMES = 16;
+    public const int DC_COPIES = 18;
+    public const int DC_COLLATE = 22;
+    public const int DC_STAPLE = 30;
     public const int DC_COLORDEVICE = 32;
     public const int DC_MEDIATYPENAMES = 34;
+
+    public const int DM_ORIENTATION = 0x00000001;
+    public const int DM_PAPERSIZE = 0x00000002;
+    public const int DM_PAPERLENGTH = 0x00000004;
+    public const int DM_PAPERWIDTH = 0x00000008;
+    public const int DM_COPIES = 0x00000100;
+    public const int DM_DEFAULTSOURCE = 0x00000200;
+    public const int DM_PRINTQUALITY = 0x00000400;
+    public const int DM_COLOR = 0x00000800;
+    public const int DM_DUPLEX = 0x00001000;
+    public const int DM_COLLATE = 0x00008000;
 
     public const int JOB_CONTROL_PAUSE = 1;
     public const int JOB_CONTROL_RESUME = 2;
@@ -34,6 +47,39 @@ public static class WinSpoolInterop
     {
         public int X;
         public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct DEVMODEW
+    {
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string dmDeviceName;
+        public short dmSpecVersion;
+        public short dmDriverVersion;
+        public short dmSize;
+        public short dmDriverExtra;
+        public int dmFields;
+        public short dmOrientation;
+        public short dmPaperSize;
+        public short dmPaperLength;
+        public short dmPaperWidth;
+        public short dmScale;
+        public short dmCopies;
+        public short dmDefaultSource;
+        public short dmPrintQuality;
+        public short dmColor;
+        public short dmDuplex;
+        public short dmYResolution;
+        public short dmTTOption;
+        public short dmCollate;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string dmFormName;
+        public short dmLogPixels;
+        public int dmBitsPerPel;
+        public int dmPelsWidth;
+        public int dmPelsHeight;
+        public int dmDisplayFlags;
+        public int dmDisplayFrequency;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

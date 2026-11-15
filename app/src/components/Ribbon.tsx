@@ -32,11 +32,13 @@ import {
 } from 'lucide-react';
 import { MatrixSizeFields } from './MatrixSizeFields';
 import { useAppStore, type RibbonTabId } from '../store/useAppStore';
+import { getSheetDimensionsMm } from '../engine/layoutEngine';
 import { t } from '../i18n/translations';
 import {
   STANDARD_PAPER_SIZES,
   type DuplexMode,
   type PageNumberFormat,
+  type PageOrientation,
   type PaperSizeId,
   type ScaleMode,
   type SheetOrderMode,
@@ -86,6 +88,7 @@ export const Ribbon: React.FC = () => {
     reversePageOrder,
     setModalState,
     openPrinterPreferences,
+    updatePrinterProfile,
     addCurrentWorkspaceToBatch,
     runBatchQueue,
     pauseBatchQueue,
@@ -101,9 +104,30 @@ export const Ribbon: React.FC = () => {
   const lang = settings.language;
   const tr = t(lang);
   const selectedPrinter = printers.find((printer) => printer.name === selectedPrinterName);
-  const driverPaperOptions = selectedPrinter?.capabilities.supportedPapers?.length
-    ? selectedPrinter.capabilities.supportedPapers
-    : Object.keys(STANDARD_PAPER_SIZES);
+  const sheetDims = getSheetDimensionsMm(layout);
+  const driverPaperOptions = selectedPrinter?.capabilities.paperOptions?.length
+    ? selectedPrinter.capabilities.paperOptions
+    : (selectedPrinter?.capabilities.supportedPapers?.length
+        ? selectedPrinter.capabilities.supportedPapers
+        : (Object.keys(STANDARD_PAPER_SIZES) as PaperSizeId[])
+      ).map((id) => {
+        const dims = id !== 'Custom' ? STANDARD_PAPER_SIZES[id] : { widthMm: layout.customWidthMm, heightMm: layout.customHeightMm };
+        return {
+          id,
+          name: id,
+          widthMm: dims.widthMm,
+          heightMm: dims.heightMm,
+        };
+      });
+  const selectedPaperOptionValue = (() => {
+    const activeName = selectedPrinter?.activeProfile.paperName;
+    if (activeName) {
+      const byName = driverPaperOptions.find((o) => o.name.toLowerCase() === activeName.toLowerCase());
+      if (byName) return byName.name;
+    }
+    const byId = driverPaperOptions.find((o) => o.id === layout.paperSize);
+    return byId?.name ?? layout.paperSize;
+  })();
 
   const tabs: Array<{ id: RibbonTabId; label: string; icon: React.ReactNode }> = [
     { id: 'file', label: tr.ribbonTabs.file, icon: <FolderOpen className="h-3.5 w-3.5" /> },
@@ -297,39 +321,90 @@ export const Ribbon: React.FC = () => {
                 </span>
                 <div className="flex items-center gap-1.5">
                   <select
-                    value={layout.paperSize}
-                    onChange={(e) =>
-                      updateLayout({ paperSize: e.target.value as PaperSizeId })
-                    }
-                    className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-100"
+                    aria-label={lang === 'fa' ? 'سایز کاغذ شیت' : 'Sheet Paper Size'}
+                    value={selectedPaperOptionValue}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === 'Custom') {
+                        updateLayout({ paperSize: 'Custom' });
+                        if (selectedPrinter) {
+                          void updatePrinterProfile(selectedPrinter.name, {
+                            paperSize: 'Custom',
+                            paperName: 'Custom',
+                            paperWidthMm: layout.customWidthMm,
+                            paperHeightMm: layout.customHeightMm,
+                          });
+                        }
+                        return;
+                      }
+                      const matched = driverPaperOptions.find((o) => o.name === val || o.id === val);
+                      if (!matched) {
+                        updateLayout({ paperSize: val as PaperSizeId });
+                        return;
+                      }
+                      const minW = Math.min(matched.widthMm, matched.heightMm);
+                      const maxH = Math.max(matched.widthMm, matched.heightMm);
+                      updateLayout({
+                        paperSize: matched.id,
+                        customWidthMm: minW,
+                        customHeightMm: maxH,
+                      });
+                      if (selectedPrinter) {
+                        void updatePrinterProfile(selectedPrinter.name, {
+                          paperSize: matched.id,
+                          paperName: matched.name,
+                          paperWidthMm: minW,
+                          paperHeightMm: maxH,
+                        });
+                      }
+                    }}
+                    className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-100 tabular-nums"
                   >
-                    {driverPaperOptions.map((sizeKey) => (
-                      <option key={sizeKey} value={sizeKey}>
-                        {sizeKey}
+                    {driverPaperOptions.map((opt) => (
+                      <option key={`${opt.id}-${opt.name}`} value={opt.name}>
+                        {opt.name} ({Math.round(opt.widthMm)}×{Math.round(opt.heightMm)} mm)
                       </option>
                     ))}
-                    {!driverPaperOptions.includes(layout.paperSize) && (
-                      <option value={layout.paperSize}>{layout.paperSize} ({lang === 'fa' ? 'درایور فعلی گزارش نکرده' : 'not reported by driver'})</option>
+                    {!driverPaperOptions.some((o) => o.name === selectedPaperOptionValue || o.id === layout.paperSize) && (
+                      <option value={layout.paperSize}>
+                        {layout.paperSize} ({lang === 'fa' ? 'درایور فعلی گزارش نکرده' : 'not reported by driver'})
+                      </option>
                     )}
-                    {!driverPaperOptions.includes('Custom') && <option value="Custom">Custom</option>}
+                    {!driverPaperOptions.some((o) => o.id === 'Custom') && <option value="Custom">Custom</option>}
                   </select>
+                  <span className="rounded border border-slate-700/80 bg-slate-950/70 px-1.5 py-1 text-[10px] font-mono text-sky-300 tabular-nums whitespace-nowrap">
+                    {Math.round(sheetDims.widthMm)}×{Math.round(sheetDims.heightMm)} mm
+                  </span>
                   {layout.paperSize === 'Custom' && (['customWidthMm', 'customHeightMm'] as const).map((field) => (
                     <label key={field} className="flex items-center gap-1 text-slate-300">
                       <span>{field === 'customWidthMm' ? (lang === 'fa' ? 'عرض' : 'W') : (lang === 'fa' ? 'ارتفاع' : 'H')} mm</span>
                       <input type="number" min={10} max={2000} value={layout[field]}
-                        onChange={(e) => updateLayout({ [field]: Math.max(10, Math.min(2000, Number(e.target.value) || 10)) })}
-                        className="w-16 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-xs text-white" />
+                        onChange={(e) => {
+                          const nextVal = Math.max(10, Math.min(2000, Number(e.target.value) || 10));
+                          updateLayout({ [field]: nextVal });
+                          if (selectedPrinter) {
+                            void updatePrinterProfile(selectedPrinter.name, {
+                              paperSize: 'Custom',
+                              paperName: 'Custom',
+                              paperWidthMm: field === 'customWidthMm' ? nextVal : layout.customWidthMm,
+                              paperHeightMm: field === 'customHeightMm' ? nextVal : layout.customHeightMm,
+                            });
+                          }
+                        }}
+                        className="w-16 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-xs text-white tabular-nums" />
                     </label>
                   ))}
                   <button
                     type="button"
-                    onClick={() =>
-                      updateLayout({
-                        orientation:
-                          layout.orientation === 'portrait' ? 'landscape' : 'portrait',
-                      })
-                    }
-                    className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700 cursor-pointer"
+                    onClick={() => {
+                      const nextOrientation: PageOrientation =
+                        layout.orientation === 'portrait' ? 'landscape' : 'portrait';
+                      updateLayout({ orientation: nextOrientation });
+                      if (selectedPrinter) {
+                        void updatePrinterProfile(selectedPrinter.name, { orientation: nextOrientation });
+                      }
+                    }}
+                    className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700 cursor-pointer whitespace-nowrap shrink-0"
                   >
                     {layout.orientation === 'portrait'
                       ? lang === 'fa'
@@ -394,9 +469,13 @@ export const Ribbon: React.FC = () => {
                 <div className="flex items-center gap-1.5">
                   <select
                     value={layout.duplexMode}
-                    onChange={(e) =>
-                      updateLayout({ duplexMode: e.target.value as DuplexMode })
-                    }
+                    onChange={(e) => {
+                      const nextDuplex = e.target.value as DuplexMode;
+                      updateLayout({ duplexMode: nextDuplex });
+                      if (selectedPrinter && (nextDuplex === 'none' || selectedPrinter.capabilities.supportsDuplex)) {
+                        void updatePrinterProfile(selectedPrinter.name, { duplexMode: nextDuplex });
+                      }
+                    }}
                     className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-100"
                   >
                     <option value="none">{lang === 'fa' ? 'تک‌رو (Simplex)' : 'Simplex (1-Sided)'}</option>
@@ -883,11 +962,11 @@ export const Ribbon: React.FC = () => {
 
           {/* 8. PRINTERS & SPOOLER TAB (I1 - I3) */}
           {activeRibbonTab === 'printers' && (
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <button
                 type="button"
                 onClick={() => setModalState('print', true)}
-                className="flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 font-bold text-white hover:bg-sky-500 cursor-pointer"
+                className="flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 font-bold text-white hover:bg-sky-500 cursor-pointer whitespace-nowrap shrink-0"
               >
                 <Printer className="h-4 w-4" />
                 <span>
@@ -896,19 +975,31 @@ export const Ribbon: React.FC = () => {
                     : 'Open Full Print Dialog'}
                 </span>
               </button>
-              <span className="text-xs text-slate-400">
-                {lang === 'fa'
-                  ? 'پنل کامل مدیریت پرینترهای ویندوز و صف Spooler در پایین همین بخش باز شده است.'
-                  : 'Full Windows Printer & Spooler Queue Manager is displayed below.'}
-              </span>
               <button
                 type="button"
                 disabled={!selectedPrinterName}
                 onClick={() => void openPrinterPreferences(selectedPrinterName)}
-                className="flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-600/15 px-3.5 py-2 font-semibold text-emerald-300 hover:bg-emerald-600/25 disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-600/15 px-3.5 py-2 font-semibold text-emerald-300 hover:bg-emerald-600/25 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer whitespace-nowrap shrink-0"
               >
                 {lang === 'fa' ? 'تنظیمات درایور ویندوز و همگام‌سازی شیت' : 'Windows Driver Preferences'}
               </button>
+              {selectedPrinter && (
+                <div className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/70 px-3 py-1.5 text-[11px] text-slate-300 tabular-nums">
+                  <span className="font-bold text-sky-300">{selectedPrinter.activeProfile.paperName || selectedPrinter.activeProfile.paperSize}</span>
+                  <span>({Math.round(sheetDims.widthMm)}×{Math.round(sheetDims.heightMm)} mm)</span>
+                  <span className="text-slate-600">|</span>
+                  <span>{lang === 'fa' ? 'سینی:' : 'Tray:'} <strong className="text-slate-100">{selectedPrinter.activeProfile.tray}</strong></span>
+                  <span className="text-slate-600">|</span>
+                  <span>{selectedPrinter.activeProfile.dpi} DPI</span>
+                  <span className="text-slate-600">|</span>
+                  <span>{selectedPrinter.activeProfile.duplexMode}</span>
+                </div>
+              )}
+              <span className="text-xs text-slate-400">
+                {lang === 'fa'
+                  ? 'پنل کامل امکانات سخت‌افزاری، درایور و صف Spooler در پایین باز شده است.'
+                  : 'Full Hardware & Driver Capabilities Inspector and Spooler Queue are open below.'}
+              </span>
             </div>
           )}
 

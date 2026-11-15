@@ -297,11 +297,13 @@ export class PrinterSidecarClient {
 
   public async submitPrintJob(
     request: PrintJobRequest,
-    pdfFilePath?: string
+    pdfFilePath?: string,
+    pageImagePaths?: string[]
   ): Promise<SpoolerJobInfo> {
     return this.callRpc<SpoolerJobInfo>('printer:print-job', {
       ...request,
       pdfFilePath,
+      pageImagePaths,
     });
   }
 }

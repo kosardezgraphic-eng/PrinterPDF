@@ -10,6 +10,7 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import { t } from '../i18n/translations';
 import { computeCounterSummary } from '../engine/counterEngine';
+import { getSheetDimensionsMm } from '../engine/layoutEngine';
 import {
   formatGregorianDate,
   formatLocalizedNumber,
@@ -27,6 +28,8 @@ export const StatusBar: React.FC<StatusBarProps> = ({ cursorPos }) => {
     layout,
     effects,
     settings,
+    printers,
+    selectedPrinterName,
     activeSheetIndex,
     zoomPercent,
     setZoomPercent,
@@ -36,6 +39,8 @@ export const StatusBar: React.FC<StatusBarProps> = ({ cursorPos }) => {
   const lang = settings.language;
   const tr = t(lang);
   const summary = computeCounterSummary(documents, pages, layout, settings);
+  const sheetDims = getSheetDimensionsMm(layout);
+  const selectedPrinter = printers.find((p) => p.name === selectedPrinterName);
 
   const highlightedIdx = pages.findIndex((p) => p.isHighlighted);
   const currentPageNum = highlightedIdx >= 0 ? highlightedIdx + 1 : 1;
@@ -46,7 +51,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({ cursorPos }) => {
       <div className="flex items-center gap-3 overflow-x-auto no-scrollbar">
         <div className="flex items-center gap-1">
           <span className="text-slate-400">{tr.statusBar.page}:</span>
-          <span className="font-bold text-white">
+          <span className="font-bold text-white tabular-nums">
             {formatLocalizedNumber(pages.length > 0 ? currentPageNum : 0, lang)} /{' '}
             {formatLocalizedNumber(pages.length, lang)}
           </span>
@@ -56,7 +61,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({ cursorPos }) => {
 
         <div className="flex items-center gap-1">
           <span className="text-slate-400">{tr.statusBar.sheet}:</span>
-          <span className="font-bold text-sky-400">
+          <span className="font-bold text-sky-400 tabular-nums">
             {formatLocalizedNumber(
               summary.totalImpressions > 0 ? activeSheetIndex + 1 : 0,
               lang
@@ -68,11 +73,19 @@ export const StatusBar: React.FC<StatusBarProps> = ({ cursorPos }) => {
 
         <span className="text-slate-700">|</span>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
           <span className="text-slate-400">{tr.statusBar.paper}:</span>
-          <span className="font-semibold text-slate-200">
-            {layout.paperSize} ({layout.orientation}) • {layout.rows}×{layout.cols}
+          <span className="font-semibold text-slate-200 tabular-nums whitespace-nowrap">
+            {selectedPrinter?.activeProfile.paperName || layout.paperSize} ({Math.round(sheetDims.widthMm)}×{Math.round(sheetDims.heightMm)} mm · {layout.orientation}) • {layout.rows}×{layout.cols}
           </span>
+          {selectedPrinter?.activeProfile.tray && (
+            <span
+              data-testid="status-tray"
+              className="rounded border border-slate-700 bg-slate-800/80 px-1.5 py-0.5 text-[10px] text-sky-300 whitespace-nowrap"
+            >
+              {lang === 'fa' ? 'سینی' : 'Tray'}: {selectedPrinter.activeProfile.tray}
+            </span>
+          )}
         </div>
 
         {cursorPos && (

@@ -207,6 +207,9 @@ public static class Program
                     "printer:set-default" => Spooler.SetDefaultPrinter(
                         req.Params.GetProperty("printerName").GetString()!
                     ),
+                    "printer:print-job" => Spooler.SubmitPrintJob(
+                        req.Params.Deserialize<PrintJobRpcParams>()!
+                    ),
                     "spooler:list-jobs" => Spooler.ListJobs(
                         req.Params.TryGetProperty("printerName", out var pProp) ? pProp.GetString() : null
                     ),

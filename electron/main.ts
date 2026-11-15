@@ -8,6 +8,8 @@ import { PrinterSidecarClient } from './printerSidecarClient';
 import { SessionStore } from './sessionStore';
 import {
   mapElectronPrintersToPrinterInfo,
+  printToWindowsPrinterViaPowerShell,
+  queryWindowsPrinterMarginsViaPowerShell,
   queryWindowsPrintersViaPowerShell,
   queryWindowsSpoolerJobsViaPowerShell,
   setWindowsDefaultPrinterViaPowerShell,
@@ -36,6 +38,8 @@ const sidecar = new PrinterSidecarClient();
 let mainWindow: BrowserWindow | null = null;
 let sessionStore: SessionStore;
 let lastNativeFallbackWorked = false;
+/** User-edited printer profiles preserved across refreshes when using Windows PowerShell fallback. */
+const userProfileOverrides = new Map<string, PrinterProfileSettings>();
 /** Files that arrived before the renderer had a listener, flushed once it does. */
 let pendingOpenFiles: string[] = [];
 
@@ -188,11 +192,26 @@ async function withSidecarDiagnostics<TResult>(action: Promise<TResult>): Promis
   }
 }
 
+function applyCachedProfileOverrides(printers: PrinterInfo[]): PrinterInfo[] {
+  return printers.map((printer) => {
+    const override = userProfileOverrides.get(printer.name);
+    if (!override) return printer;
+    return {
+      ...printer,
+      activeProfile: {
+        ...printer.activeProfile,
+        ...override,
+        printerName: printer.name,
+      },
+    };
+  });
+}
+
 async function listRealWindowsPrinters(): Promise<PrinterInfo[]> {
   try {
     const printers = await withSidecarDiagnostics(sidecar.listPrinters());
     lastNativeFallbackWorked = false;
-    return printers;
+    return applyCachedProfileOverrides(printers);
   } catch (sidecarError) {
     if (process.platform !== 'win32') {
       throw sidecarError;
@@ -203,7 +222,7 @@ async function listRealWindowsPrinters(): Promise<PrinterInfo[]> {
     const psPrinters = await queryWindowsPrintersViaPowerShell().catch(() => []);
     if (psPrinters.length > 0) {
       lastNativeFallbackWorked = true;
-      return psPrinters;
+      return applyCachedProfileOverrides(psPrinters);
     }
 
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -211,7 +230,7 @@ async function listRealWindowsPrinters(): Promise<PrinterInfo[]> {
       const mapped = mapElectronPrintersToPrinterInfo(nativePrinters);
       if (mapped.length > 0) {
         lastNativeFallbackWorked = true;
-        return mapped;
+        return applyCachedProfileOverrides(mapped);
       }
     }
 
@@ -235,7 +254,14 @@ function registerIpcHandlers(): void {
       !Number.isFinite(request.widthMm) || !Number.isFinite(request.heightMm) ||
       request.widthMm <= 0 || request.heightMm <= 0 || request.widthMm > 2000 || request.heightMm > 2000 ||
       !['portrait','landscape'].includes(request.orientation)) throw new Error('Invalid printer margin request');
-    return withSidecarDiagnostics(sidecar.getPrinterMargins(request));
+    try {
+      return await withSidecarDiagnostics(sidecar.getPrinterMargins(request));
+    } catch (error) {
+      if (process.platform === 'win32') {
+        return queryWindowsPrinterMarginsViaPowerShell(request);
+      }
+      throw error;
+    }
   });
 
   ipcMain.handle(
@@ -244,7 +270,24 @@ function registerIpcHandlers(): void {
       _e,
       payload: { printerName: string; profile: PrinterProfileSettings }
     ) => {
-      return sidecar.updateProfile(payload.printerName, payload.profile);
+      const mergedProfile: PrinterProfileSettings = {
+        ...payload.profile,
+        printerName: payload.printerName,
+      };
+      userProfileOverrides.set(payload.printerName, mergedProfile);
+      try {
+        if (sidecar.isRunning) {
+          return await sidecar.updateProfile(payload.printerName, mergedProfile);
+        }
+      } catch {
+        // Fall back to refreshing local Windows printer entry with updated profile
+      }
+      const printers = await listRealWindowsPrinters();
+      const matched = printers.find(
+        (p) => p.name.toLowerCase() === payload.printerName.toLowerCase()
+      );
+      if (matched) return matched;
+      throw new Error(`Printer "${payload.printerName}" is not available`);
     }
   );
 
@@ -268,7 +311,8 @@ function registerIpcHandlers(): void {
         else resolve();
       });
     });
-    // Refresh after the native dialog closes so paper size and orientation reflect the driver.
+    // Native Windows driver preferences take precedence; clear cached override so fresh driver settings load.
+    userProfileOverrides.delete(printerName);
     return listRealWindowsPrinters();
   });
 
@@ -276,22 +320,38 @@ function registerIpcHandlers(): void {
     IPC_CHANNELS.PRINTER_PRINT_JOB,
     async (
       _e,
-      payload: { request: PrintJobRequest; pdfBytes?: Uint8Array }
+      payload: { request: PrintJobRequest; pdfBytes?: Uint8Array; pageImages?: Uint8Array[] }
     ) => {
       let tempPdfPath: string | undefined;
-      if (payload.pdfBytes) {
-        tempPdfPath = path.join(
-          os.tmpdir(),
-          `printstudio-job-${Date.now()}.pdf`
-        );
+      const tempImagePaths: string[] = [];
+      const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      if (payload.pdfBytes && payload.pdfBytes.byteLength > 0) {
+        tempPdfPath = path.join(os.tmpdir(), `printstudio-job-${stamp}.pdf`);
         await fs.writeFile(tempPdfPath, Buffer.from(payload.pdfBytes));
       }
+      if (Array.isArray(payload.pageImages) && payload.pageImages.length > 0) {
+        for (let i = 0; i < payload.pageImages.length; i++) {
+          const imgPath = path.join(os.tmpdir(), `printstudio-page-${stamp}-${i + 1}.png`);
+          await fs.writeFile(imgPath, Buffer.from(payload.pageImages[i]));
+          tempImagePaths.push(imgPath);
+        }
+      }
       try {
-        return await sidecar.submitPrintJob(payload.request, tempPdfPath);
+        if (sidecar.isRunning) {
+          return await sidecar.submitPrintJob(payload.request, tempPdfPath, tempImagePaths);
+        }
+        if (process.platform === 'win32') {
+          return await printToWindowsPrinterViaPowerShell(payload.request, tempImagePaths);
+        }
+        return await withSidecarDiagnostics(
+          sidecar.submitPrintJob(payload.request, tempPdfPath, tempImagePaths)
+        );
       } finally {
-        // The spooler has the bytes by the time the RPC answers, so the job file must not stay
-        // behind: one per print job in a directory nobody cleans would fill the disk.
+        // The spooler has the bytes by the time the RPC answers, so temporary job files must not stay behind.
         if (tempPdfPath) await fs.rm(tempPdfPath, { force: true }).catch(() => undefined);
+        await Promise.all(
+          tempImagePaths.map((p) => fs.rm(p, { force: true }).catch(() => undefined))
+        );
       }
     }
   );

@@ -137,6 +137,20 @@ export const ipcBridge = {
       }
       return api.getPrinterMargins(request);
     }
+    if (canUseHttpBridge()) {
+      try {
+        const res = await fetch('/api/windows-margins', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(request),
+        });
+        if (res.ok) {
+          return (await res.json()) as PrinterMarginResult;
+        }
+      } catch {
+        // Fall through to unavailable
+      }
+    }
     return {
       status: 'unavailable',
       reason: 'Browser preview does not have access to physical printer driver margins',
@@ -227,10 +241,32 @@ export const ipcBridge = {
   async submitPrintJob(
     request: PrintJobRequest,
     _totalSheets: number,
-    pdfBytes?: Uint8Array
+    pdfBytes?: Uint8Array,
+    pageImages?: Uint8Array[]
   ): Promise<SpoolerJobInfo> {
     const api = electronApi();
-    if (api) return api.submitPrintJob(request, pdfBytes);
+    if (api) return api.submitPrintJob(request, pdfBytes, pageImages);
+
+    if (canUseHttpBridge() && cachedBrowserPrinters.length > 0 && pageImages && pageImages.length > 0) {
+      const pageImagesBase64 = pageImages.map((bytes) => {
+        let bin = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+          bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        }
+        return btoa(bin);
+      });
+      const res = await fetch('/api/windows-print-job', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ request, pageImagesBase64 }),
+      });
+      const data = (await res.json()) as SpoolerJobInfo & { error?: string };
+      if (!res.ok || data.error) {
+        throw new Error(data.error || `HTTP print failed (${res.status})`);
+      }
+      return data;
+    }
+
     throw new Error('Direct Windows spooler printing requires the Windows desktop app.');
   },
 

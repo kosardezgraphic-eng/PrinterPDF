@@ -34,13 +34,17 @@ import {
   getDefaultPageNumberSettings,
   getDefaultWatermarkSettings,
 } from '../engine/watermarkEngine';
+import { PDFDocument } from 'pdf-lib';
 import {
   buildCrispPageSvgDataUrl,
   createSamplePrintShopWorkspace,
   exportImposedPdf,
   importFilesBatch,
+  parsePageRangeText,
+  renderPdfToSheetPngs,
   triggerBlobDownload,
 } from '../engine/pdfService';
+import { STANDARD_PAPER_SIZES } from '@shared/models';
 import {
   imageDropPlacement,
   imageOverlayFromPlacement,
@@ -288,7 +292,10 @@ interface AppState {
   autoSelectBestPrinter: () => void;
   /** Asks the sidecar for the printer list again and reports exactly why it failed if it does. */
   retryPrinters: () => Promise<void>;
-  updatePrinterProfile: (printerName: string, profile: PrinterProfileSettings) => Promise<void>;
+  updatePrinterProfile: (
+    printerName: string,
+    profile: PrinterProfileSettings | Partial<PrinterProfileSettings>
+  ) => Promise<void>;
   setDefaultPrinter: (printerName: string) => Promise<void>;
   openPrinterPreferences: (printerName: string) => Promise<void>;
   submitPrintJob: (request: PrintJobRequest) => Promise<void>;
@@ -1562,20 +1569,36 @@ export const useAppStore = create<AppState>((set, get) => {
         return;
       }
 
-      const supported = printer.capabilities.supportedPapers;
-      const paperSize = supported.includes(profile.paperSize) ? profile.paperSize : get().layout.paperSize;
-      const nextLayout = {
+      const prevKey = marginKey(get());
+      const paperSize = profile.paperSize ?? get().layout.paperSize;
+      const opt =
+        printer.capabilities.paperOptions?.find(
+          (o) =>
+            (profile.paperName && o.name.toLowerCase() === profile.paperName.toLowerCase()) ||
+            o.id === paperSize
+        ) ?? null;
+      const stdDims = paperSize !== 'Custom' ? STANDARD_PAPER_SIZES[paperSize] : null;
+      const wMm = profile.paperWidthMm ?? opt?.widthMm ?? stdDims?.widthMm;
+      const hMm = profile.paperHeightMm ?? opt?.heightMm ?? stdDims?.heightMm;
+
+      const nextLayout: LayoutSettings = {
         ...get().layout,
         paperSize,
-        orientation: profile.orientation,
-        ...(profile.paperWidthMm && profile.paperHeightMm
+        orientation: profile.orientation ?? get().layout.orientation,
+        duplexMode: printer.capabilities.supportsDuplex
+          ? (profile.duplexMode ?? get().layout.duplexMode)
+          : 'none',
+        ...(wMm && hMm
           ? {
-              customWidthMm: Math.min(profile.paperWidthMm, profile.paperHeightMm),
-              customHeightMm: Math.max(profile.paperWidthMm, profile.paperHeightMm),
+              customWidthMm: Math.min(wMm, hMm),
+              customHeightMm: Math.max(wMm, hMm),
             }
           : {}),
       };
       set({ selectedPrinterName: printerName, layout: nextLayout });
+      if (get().layout.marginMode === 'printer' && marginKey(get()) === prevKey) {
+        refreshPrinterMargins();
+      }
     },
 
     retryPrinters: async () => {
@@ -1594,9 +1617,8 @@ export const useAppStore = create<AppState>((set, get) => {
           printerServiceNote: await safePrinterStatusNote(),
           isRefreshingPrinters: false,
         });
-        // Re-selecting through selectPrinter also re-applies the driver's paper and orientation,
-        // which is what a "retry" should do after the queue or the driver changed.
-        if (fallback && fallback !== selected) get().selectPrinter(fallback);
+        // Always re-apply driver paper, tray, and orientation after refreshing the list.
+        if (fallback) get().selectPrinter(fallback);
         get().addToast({
           type: printers.length ? 'info' : 'warning',
           title: get().settings.language === 'fa' ? 'فهرست پرینترها تازه شد' : 'Printer list refreshed',
@@ -1655,17 +1677,67 @@ export const useAppStore = create<AppState>((set, get) => {
         needsColor
       );
       if (optimal && optimal.name !== state.selectedPrinterName) {
-        set({ selectedPrinterName: optimal.name });
+        get().selectPrinter(optimal.name);
       }
     },
 
-    updatePrinterProfile: async (printerName, profile) => {
-      const updated = await ipcBridge.updatePrinterProfile(printerName, profile);
-      set((state) => ({
-        printers: state.printers.map((p) =>
-          p.name === printerName ? updated : p
+    updatePrinterProfile: async (printerName, profileOrPatch) => {
+      const state = get();
+      const existing = state.printers.find((p) => p.name === printerName);
+      const baseProfile: PrinterProfileSettings = existing?.activeProfile ?? {
+        printerName,
+        paperSize: state.layout.paperSize,
+        paperName: state.layout.paperSize,
+        paperWidthMm: state.layout.customWidthMm,
+        paperHeightMm: state.layout.customHeightMm,
+        tray: 'Auto Select',
+        mediaType: 'Plain Paper',
+        duplexMode: state.layout.duplexMode,
+        orientation: state.layout.orientation,
+        colorMode: 'color',
+        dpi: 600,
+        quality: 'normal',
+        collate: true,
+      };
+      const nextProfile: PrinterProfileSettings = {
+        ...baseProfile,
+        ...profileOrPatch,
+        printerName,
+      };
+
+      // Optimistically apply to printers and workspace sheet dimensions
+      set((s) => ({
+        printers: s.printers.map((p) =>
+          p.name === printerName ? { ...p, activeProfile: nextProfile } : p
         ),
+        ...(s.selectedPrinterName === printerName
+          ? {
+              layout: {
+                ...s.layout,
+                paperSize: nextProfile.paperSize,
+                orientation: nextProfile.orientation,
+                duplexMode: nextProfile.duplexMode,
+                ...(nextProfile.paperWidthMm && nextProfile.paperHeightMm
+                  ? {
+                      customWidthMm: Math.min(nextProfile.paperWidthMm, nextProfile.paperHeightMm),
+                      customHeightMm: Math.max(nextProfile.paperWidthMm, nextProfile.paperHeightMm),
+                    }
+                  : {}),
+              },
+            }
+          : {}),
       }));
+
+      try {
+        const updated = await ipcBridge.updatePrinterProfile(printerName, nextProfile);
+        set((s) => ({
+          printers: s.printers.map((p) =>
+            p.name === printerName ? { ...updated, activeProfile: { ...updated.activeProfile, ...nextProfile } } : p
+          ),
+        }));
+      } catch {
+        // Optimistic local profile still drives Quick Print & Dialog when IPC bridge is in browser preview
+      }
     },
 
     setDefaultPrinter: async (printerName) => {
@@ -1676,35 +1748,227 @@ export const useAppStore = create<AppState>((set, get) => {
       if (previousName === printerName) refreshPrinterMargins();
     },
 
-    submitPrintJob: async (_request) => {
-      // The sidecar does not yet implement PDF submission. Do not claim that a
-      // browser simulator or a request without PDF bytes was physically printed.
-      get().addToast({
-        type: 'error',
-        title: get().settings.language === 'fa' ? 'چاپ مستقیم هنوز متصل نشده است' : 'Direct printing is not available yet',
-        message: get().settings.language === 'fa' ? 'هیچ کاری به چاپگر ارسال نشد. برای تهیه فایل از خروجی PDF استفاده کنید.' : 'No job was sent to a printer. Export a PDF instead.',
+    submitPrintJob: async (request) => {
+      if (get().textEdit) get().finishTextEdit();
+      const state = get();
+      const isFa = state.settings.language === 'fa';
+      const printerName = request?.printerName?.trim();
+
+      if (!printerName) {
+        state.addToast({
+          type: 'error',
+          title: isFa ? 'پرینتر مقصد انتخاب نشده است' : 'No target printer selected',
+          message: isFa
+            ? 'لطفاً یک پرینتر متصل ویندوز را از لیست انتخاب کنید.'
+            : 'Please select an installed Windows printer first.',
+        });
+        return;
+      }
+
+      const selectedPages = state.pages.filter((p) => p.selectedForPrint);
+      const highlighted = state.pages.find((p) => p.isHighlighted);
+      let targetPages = selectedPages;
+
+      if (request.pageRangeMode === 'current-page') {
+        const allSheets = computeImpositionSheets(selectedPages, state.layout);
+        const activeSheet = allSheets[Math.min(state.activeSheetIndex, Math.max(0, allSheets.length - 1))];
+        const sheetPages = (activeSheet?.cells ?? [])
+          .map((c) => c.page)
+          .filter((p): p is PageItem => Boolean(p));
+        targetPages = sheetPages.length > 0 ? sheetPages : highlighted ? [highlighted] : selectedPages.slice(0, 1);
+      } else if (request.pageRangeMode === 'custom-range') {
+        const indices = parsePageRangeText(request.customRangeText || '', selectedPages.length);
+        targetPages = indices
+          .map((idx) => selectedPages[idx - 1])
+          .filter((p): p is PageItem => Boolean(p));
+      }
+
+      if (targetPages.length === 0) {
+        state.addToast({
+          type: 'error',
+          title: isFa ? 'صفحه‌ای برای چاپ یافت نشد' : 'No pages selected to print',
+          message: isFa
+            ? 'حداقل یک صفحه یا محدوده معتبر برای ارسال به چاپگر انتخاب کنید.'
+            : 'Select at least one valid page or range before printing.',
+        });
+        return;
+      }
+
+      const targetPrinter = state.printers.find((p) => p.name === printerName);
+      const profile = targetPrinter?.activeProfile;
+      const effectivePaperSize = request.paperSize ?? profile?.paperSize ?? state.layout.paperSize;
+      const effectiveOrientation = request.orientation ?? profile?.orientation ?? state.layout.orientation;
+      const effectiveDuplex = request.duplexMode ?? profile?.duplexMode ?? state.layout.duplexMode;
+      const dims = getSheetDimensionsMm({
+        ...state.layout,
+        paperSize: effectivePaperSize,
+        orientation: effectiveOrientation,
+        ...(request.paperWidthMm && request.paperHeightMm
+          ? {
+              customWidthMm: Math.min(request.paperWidthMm, request.paperHeightMm),
+              customHeightMm: Math.max(request.paperWidthMm, request.paperHeightMm),
+            }
+          : {}),
       });
+
+      const printLayout: LayoutSettings = {
+        ...state.layout,
+        paperSize: effectivePaperSize,
+        orientation: effectiveOrientation,
+        duplexMode: effectiveDuplex,
+        ...(request.paperWidthMm && request.paperHeightMm
+          ? {
+              customWidthMm: Math.min(request.paperWidthMm, request.paperHeightMm),
+              customHeightMm: Math.max(request.paperWidthMm, request.paperHeightMm),
+            }
+          : {}),
+      };
+
+      const finalRequest: PrintJobRequest = {
+        ...request,
+        printerName,
+        paperSize: effectivePaperSize,
+        paperName: request.paperName ?? profile?.paperName ?? effectivePaperSize,
+        paperWidthMm: request.paperWidthMm ?? profile?.paperWidthMm ?? Math.min(dims.widthMm, dims.heightMm),
+        paperHeightMm: request.paperHeightMm ?? profile?.paperHeightMm ?? Math.max(dims.widthMm, dims.heightMm),
+        orientation: effectiveOrientation,
+        tray: request.tray || profile?.tray || 'Auto Select',
+        mediaType: request.mediaType ?? profile?.mediaType ?? 'Plain Paper',
+        dpi: request.dpi || profile?.dpi || 600,
+        quality: request.quality ?? profile?.quality ?? 'normal',
+        duplexMode: effectiveDuplex,
+        staple: request.staple ?? profile?.staple,
+        outputBin: request.outputBin ?? profile?.outputBin,
+        holePunch: request.holePunch ?? profile?.holePunch,
+        fold: request.fold ?? profile?.fold,
+        borderless: request.borderless ?? profile?.borderless,
+      };
+
+      set({ isExportingPdf: true, exportProgress: 15 });
+      try {
+        let imposedPdfBytes = await exportImposedPdf({
+          documents: state.documents,
+          pages: targetPages.map((p) => ({ ...p, selectedForPrint: true })),
+          layout: printLayout,
+          effects: state.effects,
+          watermark: state.watermark,
+          pageNumbering: state.pageNumbering,
+          overlays: state.overlays,
+          allPages: state.pages,
+          userName: state.settings.userName,
+          onProgress: (percent) => set({ exportProgress: Math.max(15, Math.round(percent * 0.6)) }),
+        });
+
+        // Apply sheet-level Odd/Even & Reverse filters directly on the imposed PDF sheets
+        if (finalRequest.oddEvenFilter !== 'all' || finalRequest.reverseOrder) {
+          const srcPdf = await PDFDocument.load(imposedPdfBytes);
+          const filteredPdf = await PDFDocument.create();
+          let sheetIndices = Array.from({ length: srcPdf.getPageCount() }, (_, i) => i);
+          if (finalRequest.oddEvenFilter === 'odd') {
+            sheetIndices = sheetIndices.filter((i) => (i + 1) % 2 === 1);
+          } else if (finalRequest.oddEvenFilter === 'even') {
+            sheetIndices = sheetIndices.filter((i) => (i + 1) % 2 === 0);
+          }
+          if (finalRequest.reverseOrder) {
+            sheetIndices = sheetIndices.slice().reverse();
+          }
+          if (sheetIndices.length === 0) {
+            throw new Error(
+              isFa
+                ? 'پس از اعمال فیلتر فرد/زوج هیچ شیتی برای چاپ باقی نماند.'
+                : 'No sheets remain after applying Odd/Even filter.'
+            );
+          }
+          const copied = await filteredPdf.copyPages(srcPdf, sheetIndices);
+          for (const page of copied) filteredPdf.addPage(page);
+          imposedPdfBytes = await filteredPdf.save();
+        }
+
+        set({ exportProgress: 75 });
+        const sheetPngs = await renderPdfToSheetPngs(imposedPdfBytes, finalRequest.dpi);
+        set({ exportProgress: 90 });
+
+        const totalSheetSides = Math.max(
+          1,
+          sheetPngs.length || computeImpositionSheets(targetPages, printLayout).length
+        );
+        const job = await ipcBridge.submitPrintJob(
+          finalRequest,
+          totalSheetSides,
+          imposedPdfBytes,
+          sheetPngs
+        );
+
+        const refreshedJobs = await ipcBridge.listSpoolerJobs(printerName).catch(() => []);
+        const mergedJobs = refreshedJobs.some((j) => j.jobId === job.jobId)
+          ? refreshedJobs
+          : [job, ...refreshedJobs];
+
+        set({
+          spoolerJobs: mergedJobs,
+          showPrintModal: false,
+        });
+
+        state.addToast({
+          type: 'success',
+          title: isFa
+            ? `کار چاپ #${job.jobId} به «${printerName}» ارسال شد`
+            : `Print job #${job.jobId} sent to "${printerName}"`,
+          message: isFa
+            ? `${totalSheetSides} شیت • ${finalRequest.copies} کپی • سینی: ${finalRequest.tray} • کاغذ: ${finalRequest.paperName || effectivePaperSize}`
+            : `${totalSheetSides} sheet(s) • ${finalRequest.copies} cop${finalRequest.copies === 1 ? 'y' : 'ies'} • Tray: ${finalRequest.tray}`,
+        });
+      } catch (error) {
+        state.addToast({
+          type: 'error',
+          title: isFa ? 'ارسال به پرینتر ناموفق بود' : 'Print submission failed',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        set({ isExportingPdf: false, exportProgress: 0 });
+      }
     },
 
     silentPrintNow: async () => {
       const state = get();
-      const printerName =
-        state.selectedPrinterName || state.printers[0]?.name || '';
+      const targetPrinter =
+        state.printers.find((p) => p.name === state.selectedPrinterName) ??
+        state.printers.find((p) => p.isDefault) ??
+        state.printers[0];
+      const printerName = targetPrinter?.name ?? '';
+      const profile = targetPrinter?.activeProfile;
       await state.submitPrintJob({
         printerName,
         jobTitle: state.documents[0]?.name ?? 'PrintStudio Direct Job',
         copies: 1,
-        collate: true,
+        collate: profile?.collate ?? true,
         pageRangeMode: 'all-selected',
         customRangeText: '',
         oddEvenFilter: 'all',
         reverseOrder: false,
-        duplexMode: state.layout.duplexMode,
+        duplexMode: profile?.duplexMode ?? state.layout.duplexMode,
         scaleMode: 'fit',
-        dpi: 600,
-        colorMode: state.effects.grayscale || state.effects.blackAndWhite ? 'bw' : 'color',
-        tray: 'Auto Select',
+        dpi: profile?.dpi ?? 600,
+        colorMode:
+          state.effects.grayscale ||
+          state.effects.blackAndWhite ||
+          profile?.colorMode === 'monochrome'
+            ? 'bw'
+            : 'color',
+        tray: profile?.tray ?? 'Auto Select',
         silent: true,
+        paperSize: profile?.paperSize ?? state.layout.paperSize,
+        paperName: profile?.paperName,
+        paperWidthMm: profile?.paperWidthMm,
+        paperHeightMm: profile?.paperHeightMm,
+        orientation: profile?.orientation ?? state.layout.orientation,
+        mediaType: profile?.mediaType,
+        quality: profile?.quality,
+        staple: profile?.staple,
+        outputBin: profile?.outputBin,
+        holePunch: profile?.holePunch,
+        fold: profile?.fold,
+        borderless: profile?.borderless,
       });
     },
 

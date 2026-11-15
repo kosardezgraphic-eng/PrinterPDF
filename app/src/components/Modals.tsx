@@ -18,10 +18,15 @@ import { computeCounterSummary } from '../engine/counterEngine';
 import {
   computeImpositionSheets,
   computeManualDuplexPasses,
+  getSheetDimensionsMm,
 } from '../engine/layoutEngine';
 import { triggerBlobDownload } from '../engine/pdfService';
 import { formatLocalizedNumber, formatShamsiDate } from '../i18n/shamsi';
-import type { DuplexMode } from '@shared/models';
+import {
+  STANDARD_PAPER_SIZES,
+  type DuplexMode,
+  type PageOrientation,
+} from '@shared/models';
 
 export const ModalsAndToasts: React.FC = () => {
   const {
@@ -41,6 +46,8 @@ export const ModalsAndToasts: React.FC = () => {
     toasts,
     setModalState,
     selectPrinter,
+    updatePrinterProfile,
+    openPrinterPreferences,
     submitPrintJob,
     splitEveryNPages,
     makePageArray,
@@ -63,6 +70,17 @@ export const ModalsAndToasts: React.FC = () => {
   const [reverseOrder, setReverseOrder] = useState(false);
   const [dpi, setDpi] = useState(600);
   const [tray, setTray] = useState('Auto Select');
+  const [mediaType, setMediaType] = useState('Plain Paper');
+  const [quality, setQuality] = useState<'draft' | 'normal' | 'high'>('normal');
+  const [duplexMode, setDuplexMode] = useState<DuplexMode>(layout.duplexMode);
+  const [colorMode, setColorMode] = useState<'color' | 'bw'>('color');
+  const [orientation, setOrientation] = useState<PageOrientation>(layout.orientation);
+  const [selectedPaperName, setSelectedPaperName] = useState<string>(layout.paperSize);
+  const [staple, setStaple] = useState('None');
+  const [holePunch, setHolePunch] = useState('None');
+  const [fold, setFold] = useState('None');
+  const [outputBin, setOutputBin] = useState('');
+  const [borderless, setBorderless] = useState(false);
 
   // Split / Make Array local state
   const [splitN, setSplitN] = useState(2);
@@ -74,6 +92,56 @@ export const ModalsAndToasts: React.FC = () => {
   const selectedPrinter =
     printers.find((p) => p.name === selectedPrinterName) ?? printers[0];
 
+  const activeProfile = selectedPrinter?.activeProfile;
+  const caps = selectedPrinter?.capabilities;
+  const maxCopies = caps?.maxCopies ?? 999;
+  const paperOptions = caps?.paperOptions?.length
+    ? caps.paperOptions
+    : (caps?.supportedPapers ?? (Object.keys(STANDARD_PAPER_SIZES) as Array<keyof typeof STANDARD_PAPER_SIZES>)).map(
+        (id) => {
+          const dims = id !== 'Custom' ? STANDARD_PAPER_SIZES[id] : { widthMm: 210, heightMm: 297 };
+          return { id, name: String(id), widthMm: dims.widthMm, heightMm: dims.heightMm };
+        }
+      );
+
+  React.useEffect(() => {
+    if (!showPrintModal || !selectedPrinter) return;
+    const prof = selectedPrinter.activeProfile;
+    const c = selectedPrinter.capabilities;
+    setTray(prof.tray || c.supportedTrays[0] || 'Auto Select');
+    setDpi(prof.dpi || c.supportedDpi[0] || 600);
+    setCollate(prof.collate ?? true);
+    setMediaType(prof.mediaType || c.supportedMediaTypes[0] || 'Plain Paper');
+    setQuality(prof.quality || 'normal');
+    setDuplexMode(c.supportsDuplex ? prof.duplexMode : 'none');
+    setColorMode(
+      !c.supportsColor || prof.colorMode === 'monochrome' || effects.grayscale || effects.blackAndWhite
+        ? 'bw'
+        : 'color'
+    );
+    setOrientation(prof.orientation || layout.orientation);
+    setSelectedPaperName(prof.paperName || prof.paperSize || layout.paperSize);
+    setStaple(prof.staple || c.supportedStapleModes?.[0] || 'None');
+    setHolePunch(prof.holePunch || c.supportedHolePunchModes?.[0] || 'None');
+    setFold(prof.fold || c.supportedFoldModes?.[0] || 'None');
+    setOutputBin(prof.outputBin || c.supportedOutputBins?.[0] || '');
+    setBorderless(Boolean(prof.borderless));
+  }, [
+    showPrintModal,
+    selectedPrinter?.name,
+    activeProfile?.tray,
+    activeProfile?.dpi,
+    activeProfile?.collate,
+    activeProfile?.paperName,
+    activeProfile?.paperSize,
+    activeProfile?.orientation,
+    activeProfile?.duplexMode,
+    activeProfile?.mediaType,
+    activeProfile?.quality,
+    activeProfile?.colorMode,
+  ]);
+
+  const sheetDims = getSheetDimensionsMm(layout);
   const sheets = computeImpositionSheets(pages, layout);
   const manualDuplexInfo = computeManualDuplexPasses(sheets, layout.duplexMode);
 
@@ -319,7 +387,7 @@ export const ModalsAndToasts: React.FC = () => {
       {/* 2. FULL PRINT DIALOG MODAL (G1 - G2) */}
       {showPrintModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-2xl rounded-2xl border border-slate-700 bg-slate-900 p-6 text-slate-100 shadow-2xl">
+          <div className="w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 text-slate-100 shadow-2xl">
             <div className="mb-4 flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Printer className="h-5 w-5 text-sky-400" />
@@ -361,6 +429,14 @@ export const ModalsAndToasts: React.FC = () => {
                       ))}
                     </select>
                     <PrinterRetryButton />
+                    <button
+                      type="button"
+                      disabled={!selectedPrinter}
+                      onClick={() => selectedPrinter && void openPrinterPreferences(selectedPrinter.name)}
+                      className="rounded-xl border border-emerald-500/40 bg-emerald-600/15 px-2.5 py-2 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-600/25 disabled:opacity-40 whitespace-nowrap shrink-0 cursor-pointer"
+                    >
+                      {isFa ? 'تنظیمات درایور ویندوز' : 'Driver Preferences'}
+                    </button>
                   </div>
                 </div>
 
@@ -369,17 +445,69 @@ export const ModalsAndToasts: React.FC = () => {
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="mb-1 block text-slate-400">
-                      {isFa ? 'تعداد کپی (Copies):' : 'Copies:'}
+                      {isFa ? 'سایز کاغذ درایور:' : 'Driver Paper Size:'}
+                    </label>
+                    <select
+                      aria-label={isFa ? 'سایز کاغذ درایور' : 'Driver Paper Size'}
+                      value={selectedPaperName}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSelectedPaperName(val);
+                        const matched = paperOptions.find((o) => o.name === val || String(o.id) === val);
+                        if (selectedPrinter && matched) {
+                          void updatePrinterProfile(selectedPrinter.name, {
+                            paperSize: matched.id,
+                            paperName: matched.name,
+                            paperWidthMm: Math.min(matched.widthMm, matched.heightMm),
+                            paperHeightMm: Math.max(matched.widthMm, matched.heightMm),
+                          });
+                        }
+                      }}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white tabular-nums"
+                    >
+                      {paperOptions.map((opt) => (
+                        <option key={`${opt.id}-${opt.name}`} value={opt.name}>
+                          {opt.name} ({Math.round(opt.widthMm)}×{Math.round(opt.heightMm)} mm)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-slate-400">
+                      {isFa ? 'جهت صفحه:' : 'Orientation:'}
+                    </label>
+                    <select
+                      aria-label={isFa ? 'جهت صفحه درایور' : 'Driver Orientation'}
+                      value={orientation}
+                      onChange={(e) => {
+                        const next = e.target.value as PageOrientation;
+                        setOrientation(next);
+                        if (selectedPrinter) {
+                          void updatePrinterProfile(selectedPrinter.name, { orientation: next });
+                        }
+                      }}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white"
+                    >
+                      <option value="portrait">{isFa ? 'عمودی (Portrait)' : 'Portrait'}</option>
+                      <option value="landscape">{isFa ? 'افقی (Landscape)' : 'Landscape'}</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="mb-1 block text-slate-400">
+                      {isFa ? `تعداد کپی (حداکثر ${maxCopies}):` : `Copies (Max ${maxCopies}):`}
                     </label>
                     <input
                       type="number"
                       min={1}
-                      max={999}
+                      max={maxCopies}
                       value={copies}
                       onChange={(e) =>
-                        setCopies(Math.max(1, Number(e.target.value)))
+                        setCopies(Math.max(1, Math.min(maxCopies, Number(e.target.value) || 1)))
                       }
-                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-white"
+                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-white tabular-nums"
                     />
                   </div>
                   <div className="flex items-end pb-2">
@@ -387,6 +515,7 @@ export const ModalsAndToasts: React.FC = () => {
                       <input
                         type="checkbox"
                         checked={collate}
+                        disabled={caps?.supportsCollate === false}
                         onChange={(e) => setCollate(e.target.checked)}
                         className="accent-sky-500"
                       />
@@ -442,11 +571,16 @@ export const ModalsAndToasts: React.FC = () => {
                     </label>
                     <select
                       value={tray}
-                      onChange={(e) => setTray(e.target.value)}
+                      onChange={(e) => {
+                        setTray(e.target.value);
+                        if (selectedPrinter) {
+                          void updatePrinterProfile(selectedPrinter.name, { tray: e.target.value });
+                        }
+                      }}
                       className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white"
                     >
                       {(
-                        selectedPrinter?.capabilities.supportedTrays ?? [
+                        caps?.supportedTrays ?? [
                           'Auto Select',
                         ]
                       ).map((tName) => (
@@ -458,15 +592,46 @@ export const ModalsAndToasts: React.FC = () => {
                   </div>
                   <div>
                     <label className="mb-1 block text-slate-400">
+                      {isFa ? 'جنس کاغذ (Media):' : 'Media Type:'}
+                    </label>
+                    <select
+                      aria-label={isFa ? 'جنس کاغذ' : 'Media Type'}
+                      value={mediaType}
+                      onChange={(e) => {
+                        setMediaType(e.target.value);
+                        if (selectedPrinter) {
+                          void updatePrinterProfile(selectedPrinter.name, { mediaType: e.target.value });
+                        }
+                      }}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white"
+                    >
+                      {(caps?.supportedMediaTypes ?? ['Plain Paper']).map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="mb-1 block text-slate-400">
                       {isFa ? 'رزولوشن چاپ (DPI):' : 'Resolution (DPI):'}
                     </label>
                     <select
                       value={dpi}
-                      onChange={(e) => setDpi(Number(e.target.value))}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white"
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setDpi(val);
+                        if (selectedPrinter) {
+                          void updatePrinterProfile(selectedPrinter.name, { dpi: val });
+                        }
+                      }}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white tabular-nums"
                     >
                       {(
-                        selectedPrinter?.capabilities.supportedDpi ?? [
+                        caps?.supportedDpi ?? [
                           300, 600, 1200,
                         ]
                       ).map((d) => (
@@ -476,7 +641,149 @@ export const ModalsAndToasts: React.FC = () => {
                       ))}
                     </select>
                   </div>
+                  <div>
+                    <label className="mb-1 block text-slate-400">
+                      {isFa ? 'کیفیت چاپ (Quality):' : 'Print Quality:'}
+                    </label>
+                    <select
+                      value={quality}
+                      onChange={(e) => {
+                        const q = e.target.value as 'draft' | 'normal' | 'high';
+                        setQuality(q);
+                        if (selectedPrinter) {
+                          void updatePrinterProfile(selectedPrinter.name, { quality: q });
+                        }
+                      }}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white"
+                    >
+                      {(caps?.supportedQualities ?? (['draft', 'normal', 'high'] as const)).map((q) => (
+                        <option key={q} value={q}>
+                          {q}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="mb-1 block text-slate-400">
+                      {isFa ? 'چاپ دورو (Duplex):' : 'Duplex:'}
+                    </label>
+                    <select
+                      disabled={!caps?.supportsDuplex}
+                      value={caps?.supportsDuplex ? duplexMode : 'none'}
+                      onChange={(e) => {
+                        const d = e.target.value as DuplexMode;
+                        setDuplexMode(d);
+                        if (selectedPrinter) {
+                          void updatePrinterProfile(selectedPrinter.name, { duplexMode: d });
+                        }
+                      }}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white disabled:opacity-40"
+                    >
+                      <option value="none">{isFa ? 'تک‌رو (Simplex)' : 'Simplex'}</option>
+                      <option value="long-edge">{isFa ? 'لبه بلند (Long-Edge)' : 'Long-Edge'}</option>
+                      <option value="short-edge">{isFa ? 'لبه کوتاه (Short-Edge)' : 'Short-Edge'}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-slate-400">
+                      {isFa ? 'حالت رنگ سخت‌افزاری:' : 'Color Mode:'}
+                    </label>
+                    <select
+                      disabled={!caps?.supportsColor}
+                      value={caps?.supportsColor ? colorMode : 'bw'}
+                      onChange={(e) => {
+                        const nextC = e.target.value as 'color' | 'bw';
+                        setColorMode(nextC);
+                        if (selectedPrinter) {
+                          void updatePrinterProfile(selectedPrinter.name, {
+                            colorMode: nextC === 'bw' ? 'monochrome' : 'color',
+                          });
+                        }
+                      }}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white disabled:opacity-40"
+                    >
+                      {caps?.supportsColor && (
+                        <option value="color">{isFa ? 'رنگی (Color)' : 'Color'}</option>
+                      )}
+                      <option value="bw">{isFa ? 'تک‌رنگ (B&W)' : 'Monochrome'}</option>
+                    </select>
+                  </div>
+                </div>
+
+                {(caps?.supportsStaple ||
+                  (caps?.supportedHolePunchModes?.length ?? 0) > 1 ||
+                  (caps?.supportedFoldModes?.length ?? 0) > 1 ||
+                  (caps?.supportedOutputBins?.length ?? 0) > 0) && (
+                  <div className="grid grid-cols-2 gap-2">
+                    {caps?.supportsStaple && (
+                      <div>
+                        <label className="mb-1 block text-slate-400">
+                          {isFa ? 'منگنه (Staple):' : 'Staple:'}
+                        </label>
+                        <select
+                          value={staple}
+                          onChange={(e) => setStaple(e.target.value)}
+                          className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
+                        >
+                          {(caps.supportedStapleModes ?? ['None', 'TopLeft']).map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    {(caps?.supportedHolePunchModes?.length ?? 0) > 1 && (
+                      <div>
+                        <label className="mb-1 block text-slate-400">
+                          {isFa ? 'پانچ (Hole Punch):' : 'Hole Punch:'}
+                        </label>
+                        <select
+                          value={holePunch}
+                          onChange={(e) => setHolePunch(e.target.value)}
+                          className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
+                        >
+                          {caps.supportedHolePunchModes!.map((hp) => (
+                            <option key={hp} value={hp}>{hp}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    {(caps?.supportedOutputBins?.length ?? 0) > 0 && (
+                      <div>
+                        <label className="mb-1 block text-slate-400">
+                          {isFa ? 'سینی خروجی (Output Bin):' : 'Output Bin:'}
+                        </label>
+                        <select
+                          value={outputBin}
+                          onChange={(e) => setOutputBin(e.target.value)}
+                          className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
+                        >
+                          {caps.supportedOutputBins!.map((b) => (
+                            <option key={b} value={b}>{b}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    {(caps?.supportedFoldModes?.length ?? 0) > 1 && (
+                      <div>
+                        <label className="mb-1 block text-slate-400">
+                          {isFa ? 'تا کردن (Fold):' : 'Fold:'}
+                        </label>
+                        <select
+                          value={fold}
+                          onChange={(e) => setFold(e.target.value)}
+                          className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
+                        >
+                          {caps.supportedFoldModes!.map((f) => (
+                            <option key={f} value={f}>{f}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -497,7 +804,7 @@ export const ModalsAndToasts: React.FC = () => {
                       <option value="even">{isFa ? 'فقط زوج' : 'Even Only'}</option>
                     </select>
                   </div>
-                  <div className="flex items-end pb-2">
+                  <div className="flex flex-col justify-end gap-1.5 pb-1">
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input
                         type="checkbox"
@@ -507,17 +814,27 @@ export const ModalsAndToasts: React.FC = () => {
                       />
                       <span>{isFa ? 'چاپ از آخر به اول (Reverse)' : 'Reverse Order'}</span>
                     </label>
+                    {caps?.supportsBorderless && (
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={borderless}
+                          onChange={(e) => setBorderless(e.target.checked)}
+                          className="accent-sky-500"
+                        />
+                        <span>{isFa ? 'چاپ بدون حاشیه (Borderless)' : 'Borderless'}</span>
+                      </label>
+                    )}
                   </div>
                 </div>
 
                 {/* Final Pre-Flight Summary Box */}
-                <div className="rounded-xl border border-sky-500/30 bg-sky-950/30 p-3 text-[11px] leading-relaxed text-slate-200">
+                <div className="rounded-xl border border-sky-500/30 bg-sky-950/30 p-3 text-[11px] leading-relaxed text-slate-200 tabular-nums">
                   <div className="font-bold text-sky-300">
                     {isFa ? 'خلاصه نهایی پیش از ارسال به پرینتر:' : 'Pre-flight Summary:'}
                   </div>
                   <div>
-                    • {isFa ? 'کاغذ و چیدمان:' : 'Layout:'} {layout.paperSize} (
-                    {layout.rows}×{layout.cols}-Up) • {layout.duplexMode}
+                    • {isFa ? 'کاغذ و چیدمان:' : 'Layout:'} {selectedPaperName} ({Math.round(sheetDims.widthMm)}×{Math.round(sheetDims.heightMm)} mm · {layout.rows}×{layout.cols}-Up) • {duplexMode} • {tray}
                   </div>
                   <div>
                     • {isFa ? 'تعداد برگ فیزیکی در هر سری:' : 'Sheets per copy:'}{' '}
@@ -544,7 +861,10 @@ export const ModalsAndToasts: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() =>
+                onClick={() => {
+                  const matchedPaper = paperOptions.find(
+                    (o) => o.name === selectedPaperName || String(o.id) === selectedPaperName
+                  );
                   void submitPrintJob({
                     printerName:
                       selectedPrinter?.name ?? '',
@@ -556,17 +876,26 @@ export const ModalsAndToasts: React.FC = () => {
                     customRangeText,
                     oddEvenFilter,
                     reverseOrder,
-                    duplexMode: layout.duplexMode as DuplexMode,
+                    duplexMode,
                     scaleMode: 'fit',
                     dpi,
-                    colorMode:
-                      effects.grayscale || effects.blackAndWhite
-                        ? 'bw'
-                        : 'color',
+                    colorMode,
                     tray,
                     silent: true,
-                  })
-                }
+                    paperSize: matchedPaper?.id ?? layout.paperSize,
+                    paperName: matchedPaper?.name ?? selectedPaperName,
+                    paperWidthMm: matchedPaper ? Math.min(matchedPaper.widthMm, matchedPaper.heightMm) : Math.min(sheetDims.widthMm, sheetDims.heightMm),
+                    paperHeightMm: matchedPaper ? Math.max(matchedPaper.widthMm, matchedPaper.heightMm) : Math.max(sheetDims.widthMm, sheetDims.heightMm),
+                    orientation,
+                    mediaType,
+                    quality,
+                    staple,
+                    holePunch,
+                    fold,
+                    outputBin: outputBin || undefined,
+                    borderless,
+                  });
+                }}
                 className="flex items-center gap-2 rounded-xl bg-sky-600 px-5 py-2 text-xs font-bold text-white hover:bg-sky-500 cursor-pointer"
               >
                 <Printer className="h-4 w-4" />

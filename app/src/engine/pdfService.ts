@@ -865,3 +865,132 @@ export function triggerBlobDownload(
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
+
+/**
+ * Parses a human page/sheet range expression like "1-3, 5, 8-10" into 1-based indices.
+ */
+export function parsePageRangeText(rangeText: string, maxNumber: number): number[] {
+  const out: number[] = [];
+  const seen = new Set<number>();
+  for (const part of rangeText.split(/[,،;\s]+/)) {
+    const token = part.trim();
+    if (!token) continue;
+    const rangeMatch = token.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (rangeMatch) {
+      const a = Math.max(1, Math.min(maxNumber, Number(rangeMatch[1])));
+      const b = Math.max(1, Math.min(maxNumber, Number(rangeMatch[2])));
+      const step = a <= b ? 1 : -1;
+      for (let i = a; step > 0 ? i <= b : i >= b; i += step) {
+        if (!seen.has(i)) {
+          seen.add(i);
+          out.push(i);
+        }
+      }
+      continue;
+    }
+    if (/^\d+$/.test(token)) {
+      const num = Number(token);
+      if (num >= 1 && num <= maxNumber && !seen.has(num)) {
+        seen.add(num);
+        out.push(num);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Renders imposed PDF sheet pages into high-resolution PNG byte arrays for direct
+ * dispatch to Windows Spooler / GDI+ PrintDocument & WPF FixedDocument.
+ * Returns [] cleanly in headless Node environments lacking Canvas 2D.
+ */
+export async function renderPdfToSheetPngs(
+  pdfBytes: Uint8Array,
+  dpi = 300
+): Promise<Uint8Array[]> {
+  let canUseDomCanvas = false;
+  if (typeof document !== 'undefined') {
+    try {
+      const testCanvas = document.createElement('canvas');
+      canUseDomCanvas = Boolean(testCanvas.getContext?.('2d'));
+    } catch {
+      canUseDomCanvas = false;
+    }
+  }
+  let canUseOffscreen = false;
+  if (typeof OffscreenCanvas !== 'undefined') {
+    try {
+      canUseOffscreen = Boolean(new OffscreenCanvas(1, 1).getContext('2d'));
+    } catch {
+      canUseOffscreen = false;
+    }
+  }
+  if (!canUseDomCanvas && !canUseOffscreen) {
+    return [];
+  }
+
+  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const workerMod = await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = workerMod.default;
+
+  const targetDpi = Math.max(150, Math.min(300, Number.isFinite(dpi) ? dpi : 300));
+  const task = pdfjsLib.getDocument({
+    data: new Uint8Array(pdfBytes),
+    useSystemFonts: true,
+    isEvalSupported: false,
+  });
+
+  const pngs: Uint8Array[] = [];
+  try {
+    const pdf = await task.promise;
+    for (let pageNo = 1; pageNo <= pdf.numPages; pageNo++) {
+      const page = await pdf.getPage(pageNo);
+      try {
+        const baseViewport = page.getViewport({ scale: 1 });
+        const maxSidePx = 4200;
+        const scale = Math.min(
+          targetDpi / 72,
+          maxSidePx / Math.max(1, baseViewport.width),
+          maxSidePx / Math.max(1, baseViewport.height)
+        );
+        const viewport = page.getViewport({ scale });
+        const width = Math.max(1, Math.ceil(viewport.width));
+        const height = Math.max(1, Math.ceil(viewport.height));
+
+        if (canUseDomCanvas) {
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) throw new Error('Canvas 2D context unavailable for print rasterization');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, width, height);
+          await page.render({ canvasContext: ctx, viewport }).promise;
+          const blob = await new Promise<Blob>((resolve, reject) => {
+            canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('PNG encoding failed'))), 'image/png');
+          });
+          pngs.push(new Uint8Array(await blob.arrayBuffer()));
+        } else {
+          const canvas = new OffscreenCanvas(width, height);
+          const ctx = canvas.getContext('2d');
+          if (!ctx) throw new Error('OffscreenCanvas 2D context unavailable for print rasterization');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, width, height);
+          await page.render({
+            canvasContext: ctx as unknown as CanvasRenderingContext2D,
+            viewport,
+          }).promise;
+          const blob = await canvas.convertToBlob({ type: 'image/png' });
+          pngs.push(new Uint8Array(await blob.arrayBuffer()));
+        }
+      } finally {
+        page.cleanup();
+      }
+    }
+  } finally {
+    await task.destroy();
+  }
+
+  return pngs;
+}
+

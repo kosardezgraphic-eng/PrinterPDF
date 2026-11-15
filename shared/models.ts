@@ -361,19 +361,40 @@ export type PrinterMarginResult =
   | { status: 'available'; source: 'hardware' | 'virtual' | 'simulated-virtual'; marginsMm: MarginsMm }
   | { status: 'unavailable'; reason: string };
 
+export interface PrinterPaperOption {
+  id: PaperSizeId;
+  /** Exact Windows driver paper name, e.g. "A4", "A3", "SRA3", "Letter" */
+  name: string;
+  widthMm: number;
+  heightMm: number;
+  rawKind?: number;
+}
+
 export interface PrinterCapabilities {
   supportedPapers: PaperSizeId[];
+  /** Full driver-reported paper entries including exact driver names and mm dimensions. */
+  paperOptions?: PrinterPaperOption[];
   supportedTrays: string[];
   supportedMediaTypes: string[];
   supportsDuplex: boolean;
   supportsColor: boolean;
   supportedDpi: number[];
   maxCopies: number;
+  supportsCollate?: boolean;
+  supportsStaple?: boolean;
+  supportedStapleModes?: string[];
+  supportedHolePunchModes?: string[];
+  supportedFoldModes?: string[];
+  supportedOutputBins?: string[];
+  supportedQualities?: Array<'draft' | 'normal' | 'high'>;
+  supportsBorderless?: boolean;
 }
 
 export interface PrinterProfileSettings {
   printerName: string;
   paperSize: PaperSizeId;
+  /** Exact driver paper name when available (e.g. "A4", "SRA3", "Letter"). */
+  paperName?: string;
   tray: string;
   mediaType: string;
   duplexMode: DuplexMode;
@@ -384,6 +405,12 @@ export interface PrinterProfileSettings {
   /** Physical media dimensions reported by the selected Windows printer driver. */
   paperWidthMm?: number;
   paperHeightMm?: number;
+  collate?: boolean;
+  staple?: string;
+  outputBin?: string;
+  holePunch?: string;
+  fold?: string;
+  borderless?: boolean;
 }
 
 export interface PrinterInfo {
@@ -441,6 +468,18 @@ export interface PrintJobRequest {
   colorMode: 'color' | 'bw';
   tray: string;
   silent: boolean;
+  paperSize?: PaperSizeId;
+  paperName?: string;
+  paperWidthMm?: number;
+  paperHeightMm?: number;
+  orientation?: PageOrientation;
+  mediaType?: string;
+  quality?: 'draft' | 'normal' | 'high';
+  staple?: string;
+  outputBin?: string;
+  holePunch?: string;
+  fold?: string;
+  borderless?: boolean;
 }
 
 /**

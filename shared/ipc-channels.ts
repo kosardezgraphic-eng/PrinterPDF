@@ -98,7 +98,11 @@ export interface PrintStudioElectronAPI {
   setDefaultPrinter(printerName: string): Promise<boolean>;
   /** Opens the native Windows driver preferences and returns refreshed printer profiles. */
   openPrinterPreferences(printerName: string): Promise<PrinterInfo[]>;
-  submitPrintJob(request: PrintJobRequest, pdfBytes?: Uint8Array): Promise<SpoolerJobInfo>;
+  submitPrintJob(
+    request: PrintJobRequest,
+    pdfBytes?: Uint8Array,
+    pageImages?: Uint8Array[]
+  ): Promise<SpoolerJobInfo>;
   listSpoolerJobs(printerName?: string): Promise<SpoolerJobInfo[]>;
   controlSpoolerJob(
     printerName: string,

@@ -31,8 +31,11 @@ const api: PrintStudioElectronAPI = {
   openPrinterPreferences: (printerName: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.PRINTER_OPEN_PREFERENCES, printerName),
 
-  submitPrintJob: (request: PrintJobRequest, pdfBytes?: Uint8Array) =>
-    ipcRenderer.invoke(IPC_CHANNELS.PRINTER_PRINT_JOB, { request, pdfBytes }),
+  submitPrintJob: (
+    request: PrintJobRequest,
+    pdfBytes?: Uint8Array,
+    pageImages?: Uint8Array[]
+  ) => ipcRenderer.invoke(IPC_CHANNELS.PRINTER_PRINT_JOB, { request, pdfBytes, pageImages }),
 
   listSpoolerJobs: (printerName?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SPOOLER_LIST_JOBS, printerName),

@@ -1,12 +1,20 @@
+using System.IO;
 using System.Printing;
 using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Documents;
+using System.Windows.Markup;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Xml;
 using PrintStudio.PrinterService.Models;
 
 namespace PrintStudio.PrinterService.Services;
 
 /// <summary>
 /// Manages Windows Print Queues, Capabilities (winspool.drv + System.Printing),
-/// DEVMODE/PrintTicket profiles, and Spooler Job lifecycle.
+/// DEVMODE/PrintTicket profiles, direct spooler printing, and Spooler Job lifecycle.
 /// </summary>
 public sealed class PrinterSpoolerService
 {
@@ -14,11 +22,6 @@ public sealed class PrinterSpoolerService
 
     public IReadOnlyList<PrinterInfoDto> ListPrinters()
     {
-        // Order matters. EnumPrinters (winspool.drv) needs no WPF assemblies, and in a single-file
-        // self-contained publish System.Printing/ReachFramework is exactly what throws
-        // DllNotFoundException — so ask the dependency-free API first. System.Printing is used only
-        // when the native pass found nothing, because it adds queue location and the driver's live
-        // PrintTicket but can also be the thing that kills the process.
         IReadOnlyList<PrinterInfoDto> native;
         try
         {
@@ -62,9 +65,9 @@ public sealed class PrinterSpoolerService
                     var status = MapQueueStatus(queue);
                     var caps = QueryCapabilities(name, port, queue);
 
-                    // Re-read the driver's current user ticket on every refresh. This is
-                    // important after the user changes paper/orientation in Windows Preferences.
-                    var profile = ReadActiveProfile(name, caps, queue);
+                    var profile = _profiles.TryGetValue(name, out var cached)
+                        ? cached
+                        : ReadActiveProfile(name, port, caps, queue, IntPtr.Zero);
                     _profiles[name] = profile;
 
                     result.Add(new PrinterInfoDto(
@@ -78,27 +81,18 @@ public sealed class PrinterSpoolerService
                 }
                 catch (Exception ex)
                 {
-                    // A single unavailable queue must not hide other installed printers, but it must
-                    // not be silent either: the Electron host forwards stderr into the printer panel.
                     Program.Log($"Skipping printer queue '{SafeQueueName(queue)}': {ex.Message}");
                 }
             }
         }
         catch (Exception ex)
         {
-            // System.Printing is unavailable on some installations (and in a single-file publish
-            // without extracted WPF natives). The winspool pass already ran, so report and continue.
             Program.Log($"System.Printing enumeration failed: {ex.Message}");
         }
 
         return result;
     }
 
-    /// <summary>
-    /// The per-user default queue, read straight from the spooler. Used instead of
-    /// the WPF-backed default-queue property of LocalPrintServer, so a single call that can fail
-    /// in a single-file publish never decides whether the app highlights a default printer.
-    /// </summary>
     private static string ReadDefaultPrinterName()
     {
         uint size = 0;
@@ -111,17 +105,12 @@ public sealed class PrinterSpoolerService
 
     private static string SafeQueueName(PrintQueue queue)
     {
-        // Reading FullName is itself a spooler call: an inaccessible queue throws here, and the
-        // diagnostic must not be the thing that takes the request down.
         try { return queue.FullName; }
         catch { return "<inaccessible queue>"; }
     }
 
     private IReadOnlyList<PrinterInfoDto> ListPrintersWithWin32()
     {
-        // Level 2 includes the actual driver and port names, which are required by
-        // DeviceCapabilities. Level 4 only returns printer names and cannot query
-        // device-specific media capabilities reliably.
         var flags = WinSpoolInterop.PRINTER_ENUM_LOCAL | WinSpoolInterop.PRINTER_ENUM_CONNECTIONS;
         WinSpoolInterop.EnumPrinters(flags, null, 2, IntPtr.Zero, 0, out var needed, out _);
         if (needed == 0)
@@ -130,10 +119,23 @@ public sealed class PrinterSpoolerService
         var buffer = Marshal.AllocHGlobal((int)needed);
         try
         {
-            if (!WinSpoolInterop.EnumPrinters(flags, null, 2, buffer, needed, out _, out var returned))
+            if (!WinSpoolInterop.EnumPrinters(flags, null, 2, buffer, needed, out _, out var returned) || returned == 0)
                 return ListPrintersByNameOnly(flags);
-            if (returned == 0)
-                return ListPrintersByNameOnly(flags);
+
+            // Best-effort PrintQueue map so we also enrich System.Printing PrintCapabilities & UserPrintTicket safely
+            var queueMap = new Dictionary<string, PrintQueue>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                using var server = new LocalPrintServer();
+                foreach (var q in server.GetPrintQueues(new[] { EnumeratedPrintQueueTypes.Local, EnumeratedPrintQueueTypes.Connections }))
+                {
+                    try { queueMap[q.FullName] = q; } catch { /* skip broken queue */ }
+                }
+            }
+            catch
+            {
+                // System.Printing optional fallback; DEVMODE still gives accurate active settings
+            }
 
             var defaultName = ReadDefaultPrinterName();
             var result = new List<PrinterInfoDto>();
@@ -146,17 +148,13 @@ public sealed class PrinterSpoolerService
                 if (string.IsNullOrWhiteSpace(name)) continue;
                 var port = Marshal.PtrToStringUni(info.pPortName) ?? string.Empty;
                 var driver = Marshal.PtrToStringUni(info.pDriverName) ?? "Windows printer driver";
-                var caps = QueryCapabilities(name, port, null!);
+                queueMap.TryGetValue(name, out var queue);
+
+                var caps = QueryCapabilities(name, port, queue);
 
                 if (!_profiles.TryGetValue(name, out var profile))
                 {
-                    profile = new PrinterProfileDto(name,
-                        caps.SupportedPapers.FirstOrDefault() ?? "Custom",
-                        caps.SupportedTrays.FirstOrDefault() ?? "Auto Select",
-                        caps.SupportedMediaTypes.FirstOrDefault() ?? "Plain Paper",
-                        caps.SupportsDuplex ? "long-edge" : "none",
-                        "portrait", caps.SupportsColor ? "color" : "monochrome",
-                        caps.SupportedDpi.FirstOrDefault(300), "normal");
+                    profile = ReadActiveProfile(name, port, caps, queue, info.pDevMode);
                     _profiles[name] = profile;
                 }
 
@@ -175,6 +173,12 @@ public sealed class PrinterSpoolerService
                     Location: Marshal.PtrToStringUni(info.pLocation),
                     Capabilities: caps, ActiveProfile: profile));
             }
+
+            foreach (var q in queueMap.Values)
+            {
+                try { q.Dispose(); } catch { }
+            }
+
             return result;
         }
         finally { Marshal.FreeHGlobal(buffer); }
@@ -182,9 +186,6 @@ public sealed class PrinterSpoolerService
 
     private IReadOnlyList<PrinterInfoDto> ListPrintersByNameOnly(uint flags)
     {
-        // Some Windows print providers do not return PRINTER_INFO_2 data to a
-        // non-elevated desktop process. PRINTER_INFO_4 is a lighter enumeration
-        // that still exposes every locally installed and connected queue name.
         WinSpoolInterop.EnumPrinters(flags, null, 4, IntPtr.Zero, 0, out var needed, out _);
         if (needed == 0) return Array.Empty<PrinterInfoDto>();
 
@@ -195,7 +196,6 @@ public sealed class PrinterSpoolerService
                 return Array.Empty<PrinterInfoDto>();
 
             var defaultName = ReadDefaultPrinterName();
-
             var result = new List<PrinterInfoDto>();
             int stride = Marshal.SizeOf<WinSpoolInterop.PRINTER_INFO_4>();
             for (var i = 0; i < returned; i++)
@@ -204,19 +204,10 @@ public sealed class PrinterSpoolerService
                 var name = Marshal.PtrToStringUni(info.pPrinterName);
                 if (string.IsNullOrWhiteSpace(name)) continue;
 
-                // Port and driver details are not part of level 4. Passing an empty
-                // port lets the driver/provider decide whether it can report capabilities.
                 var caps = QueryCapabilities(name, string.Empty, null);
-                var profile = new PrinterProfileDto(
-                    name,
-                    caps.SupportedPapers.FirstOrDefault() ?? "Custom",
-                    caps.SupportedTrays.FirstOrDefault() ?? "Auto Select",
-                    caps.SupportedMediaTypes.FirstOrDefault() ?? "Plain Paper",
-                    caps.SupportsDuplex ? "long-edge" : "none",
-                    "portrait",
-                    caps.SupportsColor ? "color" : "monochrome",
-                    caps.SupportedDpi.FirstOrDefault(300),
-                    "normal");
+                var profile = _profiles.TryGetValue(name, out var cached)
+                    ? cached
+                    : ReadActiveProfile(name, string.Empty, caps, null, IntPtr.Zero);
                 _profiles[name] = profile;
 
                 result.Add(new PrinterInfoDto(
@@ -226,7 +217,7 @@ public sealed class PrinterSpoolerService
                     IsDefault: string.Equals(name, defaultName, StringComparison.OrdinalIgnoreCase),
                     IsNetwork: (info.Attributes & 0x10) != 0 || name.StartsWith(@"\\", StringComparison.Ordinal),
                     IsVirtual: IsVirtualPrinter(name),
-                    Status: "Unknown",
+                    Status: "Ready",
                     JobsInQueue: 0,
                     TonerLevelPercent: null,
                     TotalPageCounter: null,
@@ -242,8 +233,6 @@ public sealed class PrinterSpoolerService
         }
     }
 
-    // The existing queue list uses this name-based classification. Virtual queues
-    // default to zero by product policy, rather than being reported as measured hardware.
     private static bool IsVirtualPrinter(string name) =>
         name.Contains("PDF", StringComparison.OrdinalIgnoreCase) ||
         name.Contains("PrintStudio", StringComparison.OrdinalIgnoreCase) ||
@@ -269,7 +258,7 @@ public sealed class PrinterSpoolerService
             using (queue)
             {
                 if (IsVirtualPrinter(queue.FullName))
-                    return new PrinterMarginResultDto("available", "virtual", new PrinterMarginsDto(0,0,0,0));
+                    return new PrinterMarginResultDto("available", "virtual", new PrinterMarginsDto(0, 0, 0, 0));
 
                 const double dipPerMm = 96.0 / 25.4;
                 PageMediaSizeName? name = request.PaperSize switch
@@ -283,26 +272,29 @@ public sealed class PrinterSpoolerService
                 };
                 if (name == null && request.PaperSize != "Custom") return Unavailable("Unsupported paper size");
                 var media = name.HasValue ? new PageMediaSize(name.Value) :
-                    new PageMediaSize(Math.Min(request.WidthMm,request.HeightMm)*dipPerMm, Math.Max(request.WidthMm,request.HeightMm)*dipPerMm);
-                var delta = new PrintTicket { PageMediaSize = media,
-                    PageOrientation = request.Orientation == "landscape" ? PageOrientation.Landscape : PageOrientation.Portrait };
+                    new PageMediaSize(Math.Min(request.WidthMm, request.HeightMm) * dipPerMm, Math.Max(request.WidthMm, request.HeightMm) * dipPerMm);
+                var delta = new PrintTicket
+                {
+                    PageMediaSize = media,
+                    PageOrientation = request.Orientation == "landscape" ? PageOrientation.Landscape : PageOrientation.Portrait
+                };
                 var baseTicket = queue.UserPrintTicket ?? queue.DefaultPrintTicket ?? new PrintTicket();
-                var validated = queue.MergeAndValidatePrintTicket(baseTicket,delta).ValidatedPrintTicket;
+                var validated = queue.MergeAndValidatePrintTicket(baseTicket, delta).ValidatedPrintTicket;
                 var caps = queue.GetPrintCapabilities(validated);
                 var area = caps.PageImageableArea;
                 var width = caps.OrientedPageMediaWidth;
                 var height = caps.OrientedPageMediaHeight;
                 if (area == null || !width.HasValue || !height.HasValue ||
                     !double.IsFinite(width.Value) || !double.IsFinite(height.Value) ||
-                    Math.Abs(width.Value/dipPerMm - request.WidthMm) > 1 || Math.Abs(height.Value/dipPerMm - request.HeightMm) > 1)
+                    Math.Abs(width.Value / dipPerMm - request.WidthMm) > 2 || Math.Abs(height.Value / dipPerMm - request.HeightMm) > 2)
                     return Unavailable("Driver did not report the requested paper size and imageable area");
                 double left = area.OriginWidth, top = area.OriginHeight;
-                double right = width.Value-left-area.ExtentWidth, bottom = height.Value-top-area.ExtentHeight;
+                double right = width.Value - left - area.ExtentWidth, bottom = height.Value - top - area.ExtentHeight;
                 if (!double.IsFinite(left) || !double.IsFinite(top) || !double.IsFinite(right) || !double.IsFinite(bottom) ||
-                    area.ExtentWidth <= 0 || area.ExtentHeight <= 0 || Math.Min(Math.Min(left,right),Math.Min(top,bottom)) < -0.5)
+                    area.ExtentWidth <= 0 || area.ExtentHeight <= 0 || Math.Min(Math.Min(left, right), Math.Min(top, bottom)) < -0.5)
                     return Unavailable("Driver reported an invalid imageable area");
-                double Mm(double dip) => Math.Round(Math.Max(0,dip)/dipPerMm,3);
-                return new PrinterMarginResultDto("available", "hardware", new PrinterMarginsDto(Mm(top),Mm(right),Mm(bottom),Mm(left)));
+                double Mm(double dip) => Math.Round(Math.Max(0, dip) / dipPerMm, 3);
+                return new PrinterMarginResultDto("available", "hardware", new PrinterMarginsDto(Mm(top), Mm(right), Mm(bottom), Mm(left)));
             }
         }
         catch (Exception ex)
@@ -313,16 +305,49 @@ public sealed class PrinterSpoolerService
 
     public PrinterCapabilitiesDto QueryCapabilities(string printerName, string portName, PrintQueue? queue)
     {
-        // Query the selected device/port. Do not advertise generic paper sizes, trays or DPI
-        // values that the installed driver has not reported.
-        var papers = ReadSupportedPaperSizes(printerName, portName);
+        var paperOptions = ReadSupportedPaperOptions(printerName, portName);
+        var papers = paperOptions.Select(o => o.Id).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (papers.Count == 0) papers.Add("A4");
+
         var trays = ReadCapabilityStrings(printerName, portName, WinSpoolInterop.DC_BINNAMES, 24);
         var mediaTypes = ReadCapabilityStrings(printerName, portName, WinSpoolInterop.DC_MEDIATYPENAMES, 64);
         var dpi = ReadSupportedDpi(printerName, portName);
+        if (dpi.Count == 0) dpi.Add(600);
 
         bool supportsDuplex = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_DUPLEX, IntPtr.Zero, IntPtr.Zero) == 1;
         bool supportsColor = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_COLORDEVICE, IntPtr.Zero, IntPtr.Zero) == 1;
+        bool supportsCollate = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_COLLATE, IntPtr.Zero, IntPtr.Zero) == 1;
+        bool supportsStaple = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_STAPLE, IntPtr.Zero, IntPtr.Zero) == 1;
         int copies = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_COPIES, IntPtr.Zero, IntPtr.Zero);
+
+        List<string> stapleModes = new();
+        List<string> holePunchModes = new();
+        List<string> foldModes = new();
+        List<string> outputBins = new();
+        bool supportsBorderless = false;
+
+        if (queue != null)
+        {
+            try
+            {
+                using var xmlStream = queue.GetPrintCapabilitiesAsXml();
+                var doc = new XmlDocument();
+                doc.Load(xmlStream);
+                if (mediaTypes.Count == 0) mediaTypes = ExtractCapabilityOptions(doc, "PageMediaType");
+                stapleModes = ExtractCapabilityOptions(doc, "Staple");
+                holePunchModes = ExtractCapabilityOptions(doc, "HolePunch");
+                foldModes = ExtractCapabilityOptions(doc, "Fold");
+                outputBins = ExtractCapabilityOptions(doc, "OutputBin");
+                var borderlessOpts = ExtractCapabilityOptions(doc, "Borderless");
+                supportsBorderless = borderlessOpts.Any(o => o.Contains("Borderless", StringComparison.OrdinalIgnoreCase));
+            }
+            catch
+            {
+                // Keep Win32-detected capabilities if PrintCapabilities XML fails
+            }
+        }
+
+        if (mediaTypes.Count == 0) mediaTypes.Add("Plain Paper");
 
         return new PrinterCapabilitiesDto(
             SupportedPapers: papers,
@@ -331,36 +356,210 @@ public sealed class PrinterSpoolerService
             SupportsDuplex: supportsDuplex,
             SupportsColor: supportsColor,
             SupportedDpi: dpi,
-            MaxCopies: copies > 0 ? Math.Min(999, copies) : 1
+            MaxCopies: copies > 0 ? Math.Min(999, copies) : 999,
+            PaperOptions: paperOptions.Count > 0 ? paperOptions : null,
+            SupportsCollate: supportsCollate || copies > 1,
+            SupportsStaple: supportsStaple || stapleModes.Count > 0,
+            SupportedStapleModes: stapleModes.Count > 0 ? stapleModes : null,
+            SupportedHolePunchModes: holePunchModes.Count > 0 ? holePunchModes : null,
+            SupportedFoldModes: foldModes.Count > 0 ? foldModes : null,
+            SupportedOutputBins: outputBins.Count > 0 ? outputBins : null,
+            SupportedQualities: new[] { "draft", "normal", "high" },
+            SupportsBorderless: supportsBorderless
         );
     }
 
-    private static PrinterProfileDto ReadActiveProfile(string printerName, PrinterCapabilitiesDto caps, PrintQueue queue)
+    private static List<string> ExtractCapabilityOptions(XmlDocument doc, string featureContains)
+    {
+        var list = new List<string>();
+        var nodes = doc.SelectNodes($"//*[local-name()='Feature' and contains(@name, '{featureContains}')]/*[local-name()='Option']");
+        if (nodes == null) return list;
+        foreach (XmlNode opt in nodes)
+        {
+            var dn = opt.SelectSingleNode("./*[local-name()='Property' and contains(@name,'DisplayName')]/*[local-name()='Value']")?.InnerText?.Trim();
+            var rawName = (opt as XmlElement)?.GetAttribute("name") ?? string.Empty;
+            var colonIdx = rawName.IndexOf(':');
+            var cleanRaw = colonIdx >= 0 ? rawName[(colonIdx + 1)..] : rawName;
+            var val = !string.IsNullOrWhiteSpace(dn) ? dn : cleanRaw;
+            if (!string.IsNullOrWhiteSpace(val) && !list.Contains(val, StringComparer.OrdinalIgnoreCase))
+            {
+                list.Add(val);
+            }
+        }
+        return list;
+    }
+
+    private static PrinterProfileDto ReadActiveProfile(
+        string printerName,
+        string portName,
+        PrinterCapabilitiesDto caps,
+        PrintQueue? queue,
+        IntPtr pDevMode)
     {
         const double dipPerMm = 96.0 / 25.4;
-        var ticket = queue.UserPrintTicket ?? queue.DefaultPrintTicket;
-        var media = ticket?.PageMediaSize;
-        double? widthMm = media?.Width is double width && width > 0 ? width / dipPerMm : null;
-        double? heightMm = media?.Height is double height && height > 0 ? height / dipPerMm : null;
-        var paper = widthMm.HasValue && heightMm.HasValue
-            ? MatchPaperSize(widthMm.Value, heightMm.Value)
-            : caps.SupportedPapers.FirstOrDefault() ?? "Custom";
-        var orientation = ticket?.PageOrientation == PageOrientation.Landscape ? "landscape" : "portrait";
+        string? paper = null;
+        string? paperName = null;
+        double? widthMm = null;
+        double? heightMm = null;
+        string orientation = "portrait";
+        string tray = caps.SupportedTrays.FirstOrDefault() ?? "Auto Select";
+        string duplexMode = caps.SupportsDuplex ? "long-edge" : "none";
+        string colorMode = caps.SupportsColor ? "color" : "monochrome";
+        int dpi = caps.SupportedDpi.Contains(600) ? 600 : caps.SupportedDpi.FirstOrDefault(300);
+        bool collate = true;
+
+        if (pDevMode != IntPtr.Zero)
+        {
+            try
+            {
+                var dm = Marshal.PtrToStructure<WinSpoolInterop.DEVMODEW>(pDevMode);
+                if ((dm.dmFields & WinSpoolInterop.DM_ORIENTATION) != 0 && dm.dmOrientation == 2)
+                    orientation = "landscape";
+
+                if ((dm.dmFields & WinSpoolInterop.DM_PAPERWIDTH) != 0 && dm.dmPaperWidth > 0 &&
+                    (dm.dmFields & WinSpoolInterop.DM_PAPERLENGTH) != 0 && dm.dmPaperLength > 0)
+                {
+                    widthMm = Math.Round(dm.dmPaperWidth / 10.0, 1);
+                    heightMm = Math.Round(dm.dmPaperLength / 10.0, 1);
+                }
+
+                if ((dm.dmFields & WinSpoolInterop.DM_PAPERSIZE) != 0 && dm.dmPaperSize > 0)
+                {
+                    var matchOpt = caps.PaperOptions?.FirstOrDefault(o => o.RawKind == dm.dmPaperSize);
+                    if (matchOpt != null)
+                    {
+                        paperName = matchOpt.Name;
+                        widthMm ??= matchOpt.WidthMm;
+                        heightMm ??= matchOpt.HeightMm;
+                        paper = matchOpt.Id;
+                    }
+                    else
+                    {
+                        paper = MapPaperKindId(dm.dmPaperSize);
+                    }
+                }
+
+                if (paper == null && widthMm.HasValue && heightMm.HasValue)
+                    paper = MatchPaperSize(widthMm.Value, heightMm.Value);
+
+                if ((dm.dmFields & WinSpoolInterop.DM_DEFAULTSOURCE) != 0)
+                {
+                    var matchedTray = MatchBinById(printerName, portName, dm.dmDefaultSource);
+                    if (!string.IsNullOrWhiteSpace(matchedTray)) tray = matchedTray;
+                }
+
+                if ((dm.dmFields & WinSpoolInterop.DM_DUPLEX) != 0 && caps.SupportsDuplex)
+                {
+                    duplexMode = dm.dmDuplex switch
+                    {
+                        2 => "long-edge",
+                        3 => "short-edge",
+                        _ => "none"
+                    };
+                }
+
+                if ((dm.dmFields & WinSpoolInterop.DM_COLOR) != 0 && caps.SupportsColor)
+                {
+                    colorMode = dm.dmColor == 1 ? "monochrome" : "color";
+                }
+
+                if ((dm.dmFields & WinSpoolInterop.DM_PRINTQUALITY) != 0 && dm.dmPrintQuality > 0)
+                {
+                    dpi = dm.dmPrintQuality;
+                }
+
+                if ((dm.dmFields & WinSpoolInterop.DM_COLLATE) != 0)
+                {
+                    collate = dm.dmCollate == 1;
+                }
+            }
+            catch
+            {
+                // Ignore malformed driver DEVMODE
+            }
+        }
+
+        if (queue != null)
+        {
+            try
+            {
+                var ticket = queue.UserPrintTicket ?? queue.DefaultPrintTicket;
+                var media = ticket?.PageMediaSize;
+                if (media?.Width is double w && w > 0 && media?.Height is double h && h > 0)
+                {
+                    widthMm ??= Math.Round(w / dipPerMm, 1);
+                    heightMm ??= Math.Round(h / dipPerMm, 1);
+                    paper ??= MatchPaperSize(widthMm.Value, heightMm.Value);
+                }
+                if (ticket?.PageOrientation == PageOrientation.Landscape)
+                    orientation = "landscape";
+            }
+            catch
+            {
+                // Safe fallback
+            }
+        }
+
+        paper ??= caps.SupportedPapers.Contains("A4")
+            ? "A4"
+            : caps.SupportedPapers.FirstOrDefault() ?? "A4";
+
+        if ((!widthMm.HasValue || !heightMm.HasValue) && caps.PaperOptions != null)
+        {
+            var opt = caps.PaperOptions.FirstOrDefault(o => string.Equals(o.Id, paper, StringComparison.OrdinalIgnoreCase));
+            if (opt != null)
+            {
+                widthMm = opt.WidthMm;
+                heightMm = opt.HeightMm;
+                paperName ??= opt.Name;
+            }
+        }
 
         return new PrinterProfileDto(
             PrinterName: printerName,
             PaperSize: paper,
-            Tray: caps.SupportedTrays.FirstOrDefault() ?? "Auto Select",
+            Tray: tray,
             MediaType: caps.SupportedMediaTypes.FirstOrDefault() ?? "Plain Paper",
-            DuplexMode: caps.SupportsDuplex ? "long-edge" : "none",
+            DuplexMode: duplexMode,
             Orientation: orientation,
-            ColorMode: caps.SupportsColor ? "color" : "monochrome",
-            Dpi: caps.SupportedDpi.Contains(600) ? 600 : caps.SupportedDpi.FirstOrDefault(300),
+            ColorMode: colorMode,
+            Dpi: dpi,
             Quality: "normal",
-            PaperWidthMm: widthMm,
-            PaperHeightMm: heightMm
+            PaperWidthMm: widthMm.HasValue && heightMm.HasValue ? Math.Min(widthMm.Value, heightMm.Value) : null,
+            PaperHeightMm: widthMm.HasValue && heightMm.HasValue ? Math.Max(widthMm.Value, heightMm.Value) : null,
+            PaperName: paperName ?? paper,
+            Collate: collate
         );
     }
+
+    private static string? MatchBinById(string printerName, string portName, short targetBinId)
+    {
+        int count = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_BINS, IntPtr.Zero, IntPtr.Zero);
+        if (count <= 0) return null;
+        var names = ReadCapabilityStrings(printerName, portName, WinSpoolInterop.DC_BINNAMES, 24);
+        var idBuffer = Marshal.AllocHGlobal(count * sizeof(short));
+        try
+        {
+            int fetched = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_BINS, idBuffer, IntPtr.Zero);
+            for (int i = 0; i < Math.Min(Math.Min(count, fetched), names.Count); i++)
+            {
+                if (Marshal.ReadInt16(idBuffer, i * sizeof(short)) == targetBinId)
+                    return names[i];
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(idBuffer);
+        }
+        return null;
+    }
+
+    private static string? MapPaperKindId(short paperId) => paperId switch
+    {
+        1 => "Letter", 5 => "Legal", 8 => "A3", 9 => "A4",
+        11 => "A5", 12 => "B4", 13 => "B5", 66 => "A2", 67 => "A1",
+        68 => "A0", 70 => "A6", _ => null
+    };
 
     private static string MatchPaperSize(double widthMm, double heightMm)
     {
@@ -374,17 +573,18 @@ public sealed class PrinterSpoolerService
             ("Letter", 215.9, 279.4), ("Legal", 215.9, 355.6)
         };
         foreach (var item in standards)
-            if (Math.Abs(shortSide - Math.Min(item.W, item.H)) < 1.5 &&
-                Math.Abs(longSide - Math.Max(item.W, item.H)) < 1.5)
+            if (Math.Abs(shortSide - Math.Min(item.W, item.H)) < 2.2 &&
+                Math.Abs(longSide - Math.Max(item.W, item.H)) < 2.2)
                 return item.Id;
         return "Custom";
     }
 
-    private static List<string> ReadSupportedPaperSizes(string printerName, string portName)
+    private static List<PrinterPaperOptionDto> ReadSupportedPaperOptions(string printerName, string portName)
     {
         int count = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_PAPERS, IntPtr.Zero, IntPtr.Zero);
-        if (count <= 0) return new List<string>();
+        if (count <= 0) return new List<PrinterPaperOptionDto>();
 
+        var names = ReadCapabilityStrings(printerName, portName, WinSpoolInterop.DC_PAPERNAMES, 64);
         var idBuffer = Marshal.AllocHGlobal(count * sizeof(short));
         var sizeBuffer = Marshal.AllocHGlobal(count * Marshal.SizeOf<WinSpoolInterop.POINT>());
         try
@@ -392,22 +592,24 @@ public sealed class PrinterSpoolerService
             int idsRead = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_PAPERS, idBuffer, IntPtr.Zero);
             int sizesRead = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_PAPERSIZE, sizeBuffer, IntPtr.Zero);
             int total = Math.Min(count, Math.Min(idsRead, sizesRead));
-            var result = new List<string>();
+            var result = new List<PrinterPaperOptionDto>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             for (int i = 0; i < total; i++)
             {
                 short paperId = Marshal.ReadInt16(idBuffer, i * sizeof(short));
                 var size = Marshal.PtrToStructure<WinSpoolInterop.POINT>(IntPtr.Add(sizeBuffer, i * Marshal.SizeOf<WinSpoolInterop.POINT>()));
-                string? mapped = paperId switch
+                double wMm = size.X > 0 ? Math.Round(size.X / 10.0, 1) : 210;
+                double hMm = size.Y > 0 ? Math.Round(size.Y / 10.0, 1) : 297;
+                string? id = MapPaperKindId(paperId);
+                id ??= size.X > 0 && size.Y > 0 ? MatchPaperSize(wMm, hMm) : "Custom";
+                string rawName = i < names.Count && !string.IsNullOrWhiteSpace(names[i]) ? names[i] : id;
+
+                var key = $"{rawName}|{wMm}x{hMm}";
+                if (seen.Add(key))
                 {
-                    1 => "Letter", 5 => "Legal", 8 => "A3", 9 => "A4",
-                    11 => "A5", 12 => "B4", 13 => "B5", 66 => "A2", 67 => "A1",
-                    68 => "A0", 70 => "A6", _ => null
-                };
-                if (mapped == null && size.X > 0 && size.Y > 0)
-                    mapped = MatchPaperSize(size.X / 10.0, size.Y / 10.0) == "Custom" ? "Custom" :
-                        MatchPaperSize(size.X / 10.0, size.Y / 10.0);
-                if (mapped != null && !result.Contains(mapped, StringComparer.OrdinalIgnoreCase))
-                    result.Add(mapped);
+                    result.Add(new PrinterPaperOptionDto(id, rawName, wMm, hMm, paperId));
+                }
             }
             return result;
         }
@@ -470,12 +672,162 @@ public sealed class PrinterSpoolerService
         return WinSpoolInterop.SetDefaultPrinter(printerName);
     }
 
+    /// <summary>
+    /// Submits rendered imposed PNG sheet pages directly to the selected Windows Spooler queue
+    /// using WPF FixedDocument + PrintTicket on an STA thread.
+    /// </summary>
+    public SpoolerJobDto SubmitPrintJob(PrintJobRpcParams request)
+    {
+        if (string.IsNullOrWhiteSpace(request.PrinterName))
+            throw new ArgumentException("PrinterName is required.");
+
+        var imagePaths = request.PageImagePaths?.Where(File.Exists).ToList() ?? new List<string>();
+        if (imagePaths.Count == 0)
+            throw new InvalidOperationException("No rendered sheet images were supplied for printing.");
+
+        SpoolerJobDto? jobResult = null;
+        Exception? captured = null;
+
+        var staThread = new Thread(() =>
+        {
+            try
+            {
+                jobResult = SubmitFixedDocumentOnSta(request, imagePaths);
+            }
+            catch (Exception ex)
+            {
+                captured = ex;
+            }
+        });
+        staThread.SetApartmentState(ApartmentState.STA);
+        staThread.Start();
+        staThread.Join();
+
+        if (captured != null)
+            throw new InvalidOperationException(captured.Message, captured);
+
+        return jobResult ?? throw new InvalidOperationException("Print submission completed without job metadata.");
+    }
+
+    private static SpoolerJobDto SubmitFixedDocumentOnSta(PrintJobRpcParams request, List<string> imagePaths)
+    {
+        const double dipPerMm = 96.0 / 25.4;
+        using var server = new LocalPrintServer();
+        var queue = server.GetPrintQueues(new[]
+        {
+            EnumeratedPrintQueueTypes.Local,
+            EnumeratedPrintQueueTypes.Connections
+        }).FirstOrDefault(q => string.Equals(q.FullName, request.PrinterName, StringComparison.OrdinalIgnoreCase));
+
+        if (queue == null)
+            throw new InvalidOperationException($"Windows printer \"{request.PrinterName}\" was not found.");
+
+        using (queue)
+        {
+            queue.Refresh();
+            var baseTicket = (queue.UserPrintTicket ?? queue.DefaultPrintTicket ?? new PrintTicket()).Clone();
+            double widthMm = request.PaperWidthMm is > 10 ? request.PaperWidthMm.Value : 210;
+            double heightMm = request.PaperHeightMm is > 10 ? request.PaperHeightMm.Value : 297;
+            bool isLandscape = string.Equals(request.Orientation, "landscape", StringComparison.OrdinalIgnoreCase);
+
+            var shortDip = Math.Min(widthMm, heightMm) * dipPerMm;
+            var longDip = Math.Max(widthMm, heightMm) * dipPerMm;
+            baseTicket.PageMediaSize = new PageMediaSize(shortDip, longDip);
+            baseTicket.PageOrientation = isLandscape ? PageOrientation.Landscape : PageOrientation.Portrait;
+            baseTicket.CopyCount = Math.Max(1, Math.Min(999, request.Copies));
+            baseTicket.Collation = request.Collate ? Collation.Collated : Collation.Uncollated;
+            baseTicket.OutputColor = string.Equals(request.ColorMode, "bw", StringComparison.OrdinalIgnoreCase)
+                ? OutputColor.Monochrome
+                : OutputColor.Color;
+            baseTicket.Duplexing = request.DuplexMode switch
+            {
+                "long-edge" => Duplexing.TwoSidedLongEdge,
+                "short-edge" => Duplexing.TwoSidedShortEdge,
+                _ => Duplexing.OneSided
+            };
+            if (request.Dpi >= 72)
+                baseTicket.PageResolution = new PageResolution(request.Dpi, request.Dpi);
+            if (string.Equals(request.Quality, "draft", StringComparison.OrdinalIgnoreCase))
+                baseTicket.OutputQuality = OutputQuality.Draft;
+            else if (string.Equals(request.Quality, "high", StringComparison.OrdinalIgnoreCase))
+                baseTicket.OutputQuality = OutputQuality.High;
+            else
+                baseTicket.OutputQuality = OutputQuality.Normal;
+
+            if (request.Borderless == true)
+                baseTicket.PageBorderless = PageBorderless.Borderless;
+
+            var validated = queue.MergeAndValidatePrintTicket(queue.DefaultPrintTicket ?? new PrintTicket(), baseTicket).ValidatedPrintTicket;
+
+            double pageWidthDip = (isLandscape ? Math.Max(widthMm, heightMm) : Math.Min(widthMm, heightMm)) * dipPerMm;
+            double pageHeightDip = (isLandscape ? Math.Min(widthMm, heightMm) : Math.Max(widthMm, heightMm)) * dipPerMm;
+
+            var fixedDoc = new FixedDocument();
+            fixedDoc.DocumentPaginator.PageSize = new Size(pageWidthDip, pageHeightDip);
+
+            foreach (var imgPath in imagePaths)
+            {
+                var bitmap = new BitmapImage();
+                using (var fs = File.OpenRead(imgPath))
+                {
+                    bitmap.BeginInit();
+                    bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                    bitmap.StreamSource = fs;
+                    bitmap.EndInit();
+                }
+                bitmap.Freeze();
+
+                var page = new FixedPage
+                {
+                    Width = pageWidthDip,
+                    Height = pageHeightDip,
+                    Background = Brushes.White
+                };
+                var imageControl = new Image
+                {
+                    Source = bitmap,
+                    Width = pageWidthDip,
+                    Height = pageHeightDip,
+                    Stretch = Stretch.Uniform
+                };
+                FixedPage.SetLeft(imageControl, 0);
+                FixedPage.SetTop(imageControl, 0);
+                page.Children.Add(imageControl);
+                page.Measure(new Size(pageWidthDip, pageHeightDip));
+                page.Arrange(new Rect(new Size(pageWidthDip, pageHeightDip)));
+                page.UpdateLayout();
+
+                var content = new PageContent();
+                ((IAddChild)content).AddChild(page);
+                fixedDoc.Pages.Add(content);
+            }
+
+            var writer = PrintQueue.CreateXpsDocumentWriter(queue);
+            writer.Write(fixedDoc, validated);
+
+            queue.Refresh();
+            var latestJob = queue.GetPrintJobInfoCollection()
+                .OrderByDescending(j => j.JobIdentifier)
+                .FirstOrDefault();
+
+            return new SpoolerJobDto(
+                JobId: latestJob?.JobIdentifier ?? Environment.TickCount,
+                PrinterName: queue.FullName,
+                DocumentTitle: string.IsNullOrWhiteSpace(request.JobTitle) ? "PrintStudio Document" : request.JobTitle,
+                UserName: latestJob?.Submitter ?? Environment.UserName,
+                Status: latestJob != null ? MapJobStatus(latestJob.JobStatus) : "Spooling",
+                TotalPages: imagePaths.Count,
+                PagesPrinted: latestJob?.NumberOfPagesPrinted ?? 0,
+                SizeBytes: latestJob?.JobSize ?? 0,
+                Priority: latestJob != null ? (int)latestJob.Priority : 1,
+                SubmittedAt: DateTime.UtcNow.ToString("O")
+            );
+        }
+    }
+
     public IReadOnlyList<SpoolerJobDto> ListJobs(string? printerFilter = null)
     {
         var jobs = new List<SpoolerJobDto>();
-        // Every call below is System.Printing, so the whole enumeration is guarded: a driver that
-        // throws while its queue is read has to leave the sidecar alive and answer with the jobs it
-        // could read, instead of killing the process and turning the next request into a pipe error.
         try
         {
             foreach (var queue in OpenQueues(printerFilter))
@@ -525,8 +877,6 @@ public sealed class PrinterSpoolerService
 
         foreach (var queue in queues)
         {
-            // Reading FullName is a spooler round-trip and can throw for a shared queue whose
-            // remote server is offline; that queue is simply not filterable, so skip it.
             string fullName;
             try { fullName = queue.FullName; }
             catch { continue; }

@@ -19,6 +19,8 @@ import {
   PanelsTopLeft,
   Ruler,
   Maximize2,
+  SlidersHorizontal,
+  Zap,
 } from 'lucide-react';
 import { useAppStore, type PageEditScope } from '../store/useAppStore';
 import { PageCanvasCell, type CanvasTool } from './PageCanvasCell';
@@ -41,7 +43,15 @@ import {
   resolveTextMacros,
 } from '../engine/watermarkEngine';
 import { formatLocalizedNumber } from '../i18n/shamsi';
-import type { ComputedSheetSide, LayoutSettings, PrinterInfo } from '@shared/models';
+import {
+  STANDARD_PAPER_SIZES,
+  type ComputedSheetSide,
+  type DuplexMode,
+  type LayoutSettings,
+  type PageOrientation,
+  type PaperSizeId,
+  type PrinterInfo,
+} from '@shared/models';
 
 interface PreviewWorkspaceProps {
   onCursorMoveMm: (pos: { x: number; y: number } | null) => void;
@@ -90,6 +100,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     selectPrinter,
     setDefaultPrinter,
     openPrinterPreferences,
+    updatePrinterProfile,
+    refreshPrinterMargins,
+    silentPrintNow,
     controlSpoolerJob,
     purgePrinterQueue,
     removeBatchJob,
@@ -999,10 +1012,28 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
         </div>
       )}
 
-      {/* Contextual Bottom Dock for Windows Printers & Spooler Queue Manager (I1-I3) */}
-      {activeRibbonTab === 'printers' && (
-        <div className="h-72 shrink-0 border-t border-slate-800 bg-slate-900/95 p-4 overflow-y-auto">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Contextual Bottom Dock for Windows Printers, Hardware Capabilities & Spooler Queue Manager (I1-I3) */}
+      {activeRibbonTab === 'printers' && (() => {
+        const activePrinter = printers.find((p) => p.name === selectedPrinterName) ?? printers[0];
+        const caps = activePrinter?.capabilities;
+        const prof = activePrinter?.activeProfile;
+        const hwPaperOptions = caps?.paperOptions?.length
+          ? caps.paperOptions
+          : (caps?.supportedPapers ?? (Object.keys(STANDARD_PAPER_SIZES) as PaperSizeId[])).map((id) => {
+              const d = id !== 'Custom' ? STANDARD_PAPER_SIZES[id] : { widthMm: 210, heightMm: 297 };
+              return { id, name: String(id), widthMm: d.widthMm, heightMm: d.heightMm };
+            });
+        const selectedHwPaperName = (() => {
+          if (!activePrinter || !prof) return 'A4';
+          const byName = hwPaperOptions.find((o) => prof.paperName && o.name.toLowerCase() === prof.paperName.toLowerCase());
+          if (byName) return byName.name;
+          const byId = hwPaperOptions.find((o) => o.id === prof.paperSize);
+          return byId?.name ?? hwPaperOptions[0]?.name ?? prof.paperSize;
+        })();
+
+        return (
+        <div className="h-80 shrink-0 border-t border-slate-800 bg-slate-900/95 p-4 overflow-y-auto">
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
             {/* I1 & I2: Windows Printers & Live Status */}
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
               <div className="mb-2 flex items-center justify-between gap-3">
@@ -1087,6 +1118,343 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                   </div>
                 ))}
               </div>
+            </div>
+
+            {/* Hardware & Driver Capabilities Inspector / Editor */}
+            <div
+              data-testid="printer-hardware-inspector"
+              className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-xs"
+            >
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h4 className="flex items-center gap-1.5 text-xs font-bold text-white">
+                  <SlidersHorizontal className="h-4 w-4 text-emerald-400" />
+                  <span>
+                    {lang === 'fa'
+                      ? 'تنظیمات سخت‌افزاری و امکانات درایور'
+                      : 'Hardware & Driver Capabilities'}
+                  </span>
+                </h4>
+                {activePrinter && (
+                  <button
+                    type="button"
+                    onClick={() => void silentPrintNow()}
+                    className="flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-500 cursor-pointer whitespace-nowrap shrink-0"
+                  >
+                    <Zap className="h-3 w-3" />
+                    <span>{lang === 'fa' ? 'چاپ فوری' : 'Quick Print'}</span>
+                  </button>
+                )}
+              </div>
+
+              {!activePrinter || !caps || !prof ? (
+                <div className="py-8 text-center text-xs text-slate-500">
+                  {lang === 'fa'
+                    ? 'ابتدا یک پرینتر را از فهرست انتخاب کنید.'
+                    : 'Select a Windows printer to inspect hardware capabilities.'}
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-1 rounded-lg border border-slate-800 bg-slate-900/70 px-2.5 py-1.5 text-[10px] text-slate-300 tabular-nums">
+                    <span className="font-bold text-sky-300 truncate max-w-[180px]" title={activePrinter.name}>
+                      {activePrinter.name}
+                    </span>
+                    <span>
+                      {lang === 'fa' ? 'حداکثر کپی:' : 'Max Copies:'} <strong>{caps.maxCopies}</strong>
+                    </span>
+                    <span>
+                      {caps.supportsColor
+                        ? lang === 'fa' ? 'رنگی / تک‌رنگ' : 'Color & Mono'
+                        : lang === 'fa' ? 'فقط تک‌رنگ' : 'Mono only'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <label className="flex flex-col gap-0.5 text-slate-300">
+                      <span className="text-[10px] text-slate-400">
+                        {lang === 'fa' ? 'کاغذ درایور (mm)' : 'Driver Paper Size'}
+                      </span>
+                      <select
+                        value={selectedHwPaperName}
+                        onChange={(e) => {
+                          const opt = hwPaperOptions.find((o) => o.name === e.target.value || o.id === e.target.value);
+                          if (!opt) return;
+                          void updatePrinterProfile(activePrinter.name, {
+                            paperSize: opt.id,
+                            paperName: opt.name,
+                            paperWidthMm: Math.min(opt.widthMm, opt.heightMm),
+                            paperHeightMm: Math.max(opt.widthMm, opt.heightMm),
+                          });
+                        }}
+                        className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-white tabular-nums"
+                      >
+                        {hwPaperOptions.map((o) => (
+                          <option key={`${o.id}-${o.name}`} value={o.name}>
+                            {o.name} ({Math.round(o.widthMm)}×{Math.round(o.heightMm)} mm)
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="flex flex-col gap-0.5 text-slate-300">
+                      <span className="text-[10px] text-slate-400">
+                        {lang === 'fa' ? 'سینی کاغذ (Tray)' : 'Paper Tray'}
+                      </span>
+                      <select
+                        value={prof.tray}
+                        onChange={(e) =>
+                          void updatePrinterProfile(activePrinter.name, { tray: e.target.value })
+                        }
+                        className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-white"
+                      >
+                        {(caps.supportedTrays.length ? caps.supportedTrays : ['Auto Select']).map((trItem) => (
+                          <option key={trItem} value={trItem}>
+                            {trItem}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="flex flex-col gap-0.5 text-slate-300">
+                      <span className="text-[10px] text-slate-400">
+                        {lang === 'fa' ? 'جنس کاغذ (Media)' : 'Media Type'}
+                      </span>
+                      <select
+                        value={prof.mediaType}
+                        onChange={(e) =>
+                          void updatePrinterProfile(activePrinter.name, { mediaType: e.target.value })
+                        }
+                        className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-white"
+                      >
+                        {(caps.supportedMediaTypes.length ? caps.supportedMediaTypes : ['Plain Paper']).map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="flex flex-col gap-0.5 text-slate-300">
+                      <span className="text-[10px] text-slate-400">
+                        {lang === 'fa' ? 'جهت و دورو' : 'Orientation & Duplex'}
+                      </span>
+                      <div className="flex gap-1">
+                        <select
+                          aria-label={lang === 'fa' ? 'جهت درایور' : 'Driver Orientation'}
+                          value={prof.orientation}
+                          onChange={(e) =>
+                            void updatePrinterProfile(activePrinter.name, {
+                              orientation: e.target.value as PageOrientation,
+                            })
+                          }
+                          className="w-1/2 rounded-lg border border-slate-700 bg-slate-800 px-1.5 py-1 text-[11px] text-white"
+                        >
+                          <option value="portrait">{lang === 'fa' ? 'عمودی' : 'Portrait'}</option>
+                          <option value="landscape">{lang === 'fa' ? 'افقی' : 'Landscape'}</option>
+                        </select>
+                        <select
+                          aria-label={lang === 'fa' ? 'دورو درایور' : 'Driver Duplex'}
+                          value={caps.supportsDuplex ? prof.duplexMode : 'none'}
+                          disabled={!caps.supportsDuplex}
+                          onChange={(e) =>
+                            void updatePrinterProfile(activePrinter.name, {
+                              duplexMode: e.target.value as DuplexMode,
+                            })
+                          }
+                          className="w-1/2 rounded-lg border border-slate-700 bg-slate-800 px-1.5 py-1 text-[11px] text-white disabled:opacity-40"
+                        >
+                          {(caps.supportsDuplex ? (['none', 'long-edge', 'short-edge'] as DuplexMode[]) : (['none'] as DuplexMode[])).map((d) => (
+                            <option key={d} value={d}>
+                              {d}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </label>
+
+                    <label className="flex flex-col gap-0.5 text-slate-300">
+                      <span className="text-[10px] text-slate-400">
+                        {lang === 'fa' ? 'رزولوشن (DPI) و رنگ' : 'DPI & Color Mode'}
+                      </span>
+                      <div className="flex gap-1">
+                        <select
+                          aria-label={lang === 'fa' ? 'رزولوشن درایور' : 'Driver DPI'}
+                          value={prof.dpi}
+                          onChange={(e) =>
+                            void updatePrinterProfile(activePrinter.name, { dpi: Number(e.target.value) })
+                          }
+                          className="w-1/2 rounded-lg border border-slate-700 bg-slate-800 px-1.5 py-1 text-[11px] text-white tabular-nums"
+                        >
+                          {(caps.supportedDpi.length ? caps.supportedDpi : [600]).map((d) => (
+                            <option key={d} value={d}>
+                              {d} DPI
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          aria-label={lang === 'fa' ? 'حالت رنگ درایور' : 'Driver Color'}
+                          value={caps.supportsColor ? prof.colorMode : 'monochrome'}
+                          disabled={!caps.supportsColor}
+                          onChange={(e) =>
+                            void updatePrinterProfile(activePrinter.name, {
+                              colorMode: e.target.value as 'color' | 'monochrome',
+                            })
+                          }
+                          className="w-1/2 rounded-lg border border-slate-700 bg-slate-800 px-1.5 py-1 text-[11px] text-white disabled:opacity-40"
+                        >
+                          {caps.supportsColor && (
+                            <option value="color">{lang === 'fa' ? 'رنگی' : 'Color'}</option>
+                          )}
+                          <option value="monochrome">{lang === 'fa' ? 'تک‌رنگ' : 'Mono'}</option>
+                        </select>
+                      </div>
+                    </label>
+
+                    <label className="flex flex-col gap-0.5 text-slate-300">
+                      <span className="text-[10px] text-slate-400">
+                        {lang === 'fa' ? 'کیفیت چاپ' : 'Print Quality'}
+                      </span>
+                      <select
+                        value={prof.quality}
+                        onChange={(e) =>
+                          void updatePrinterProfile(activePrinter.name, {
+                            quality: e.target.value as 'draft' | 'normal' | 'high',
+                          })
+                        }
+                        className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-white"
+                      >
+                        {(caps.supportedQualities?.length
+                          ? caps.supportedQualities
+                          : (['draft', 'normal', 'high'] as const)
+                        ).map((q) => (
+                          <option key={q} value={q}>
+                            {q}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    {((caps.supportedStapleModes?.length ?? 0) > 1 || caps.supportsStaple) && (
+                      <label className="flex flex-col gap-0.5 text-slate-300">
+                        <span className="text-[10px] text-slate-400">
+                          {lang === 'fa' ? 'منگنه (Staple)' : 'Staple'}
+                        </span>
+                        <select
+                          value={prof.staple ?? 'None'}
+                          onChange={(e) =>
+                            void updatePrinterProfile(activePrinter.name, { staple: e.target.value })
+                          }
+                          className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-white"
+                        >
+                          {(caps.supportedStapleModes ?? ['None', 'TopLeft']).map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+
+                    {(caps.supportedHolePunchModes?.length ?? 0) > 1 && (
+                      <label className="flex flex-col gap-0.5 text-slate-300">
+                        <span className="text-[10px] text-slate-400">
+                          {lang === 'fa' ? 'پانچ (Hole Punch)' : 'Hole Punch'}
+                        </span>
+                        <select
+                          value={prof.holePunch ?? 'None'}
+                          onChange={(e) =>
+                            void updatePrinterProfile(activePrinter.name, { holePunch: e.target.value })
+                          }
+                          className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-white"
+                        >
+                          {caps.supportedHolePunchModes!.map((hp) => (
+                            <option key={hp} value={hp}>{hp}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+
+                    {(caps.supportedFoldModes?.length ?? 0) > 1 && (
+                      <label className="flex flex-col gap-0.5 text-slate-300">
+                        <span className="text-[10px] text-slate-400">
+                          {lang === 'fa' ? 'تا کردن (Fold)' : 'Fold'}
+                        </span>
+                        <select
+                          value={prof.fold ?? 'None'}
+                          onChange={(e) =>
+                            void updatePrinterProfile(activePrinter.name, { fold: e.target.value })
+                          }
+                          className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-white"
+                        >
+                          {caps.supportedFoldModes!.map((f) => (
+                            <option key={f} value={f}>{f}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+
+                    {(caps.supportedOutputBins?.length ?? 0) > 0 && (
+                      <label className="flex flex-col gap-0.5 text-slate-300">
+                        <span className="text-[10px] text-slate-400">
+                          {lang === 'fa' ? 'سینی خروجی' : 'Output Bin'}
+                        </span>
+                        <select
+                          value={prof.outputBin ?? caps.supportedOutputBins![0]}
+                          onChange={(e) =>
+                            void updatePrinterProfile(activePrinter.name, { outputBin: e.target.value })
+                          }
+                          className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-white"
+                        >
+                          {caps.supportedOutputBins!.map((b) => (
+                            <option key={b} value={b}>{b}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/80 text-[10px] text-slate-400 tabular-nums">
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-1 cursor-pointer text-slate-200">
+                        <input
+                          type="checkbox"
+                          checked={prof.collate ?? true}
+                          disabled={caps.supportsCollate === false}
+                          onChange={(e) =>
+                            void updatePrinterProfile(activePrinter.name, { collate: e.target.checked })
+                          }
+                          className="accent-sky-500"
+                        />
+                        <span>Collate</span>
+                      </label>
+                      {caps.supportsBorderless && (
+                        <label className="flex items-center gap-1 cursor-pointer text-slate-200">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(prof.borderless)}
+                            onChange={(e) =>
+                              void updatePrinterProfile(activePrinter.name, { borderless: e.target.checked })
+                            }
+                            className="accent-sky-500"
+                          />
+                          <span>{lang === 'fa' ? 'بدون حاشیه' : 'Borderless'}</span>
+                        </label>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span>
+                        {printerMargins.status === 'available'
+                          ? `Margins: ${printerMargins.marginsMm.top}/${printerMargins.marginsMm.right}/${printerMargins.marginsMm.bottom}/${printerMargins.marginsMm.left} mm`
+                          : lang === 'fa' ? 'حاشیه سخت‌افزار نامشخص' : 'Hardware margins N/A'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => refreshPrinterMargins()}
+                        className="rounded border border-slate-700 bg-slate-800 px-1.5 py-0.5 text-slate-200 hover:bg-slate-700 cursor-pointer"
+                      >
+                        {lang === 'fa' ? 'خواندن' : 'Sync'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* I3: Live Print Queue Manager (Spooler Jobs) */}
@@ -1212,7 +1580,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
     </main>
   );
 };
