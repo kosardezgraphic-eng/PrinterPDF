@@ -1,6 +1,12 @@
 // @vitest-environment node
 /**
- * Resetting settings and storing them as profiles.
+ * Resetting settings, and storing the sheet setup as profiles.
+ *
+ * The scope of a profile is the point of these tests: it carries the sheet (layout, effects, watermark,
+ * page numbering) and nothing of the application's own preferences, so applying one cannot change the
+ * language, the unit or the tariffs. Editing is a first-class action too - rename, re-record the chord,
+ * re-capture the contents, delete - and the built-in "defaults" row is an entry in that same list rather
+ * than a separate button, which is why Alt+F6 and the row have to agree.
  *
  * Two behaviours matter here and both were missing before: every adjustable section going back to the
  * values the app ships with (without touching the files on the desk, and without switching the
@@ -10,6 +16,7 @@
  * the settings themselves, which is why the tests watch what the bridge is handed.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { SHEET_DEFAULT_PRESET_ID } from '@shared/models';
 import type { AppSettings, PageItem, SettingsPreset, SourceDocument } from '@shared/models';
 
 // `vi.hoisted` because the mock factory below is hoisted above this file's statements: a plain `const`
@@ -141,7 +148,7 @@ describe('resetting every setting to its default', () => {
   });
 });
 
-describe('saved setting profiles', () => {
+describe('saved sheet profiles', () => {
   it('captures the current sections under a name and persists the list', async () => {
     useAppStore.getState().updateLayout({ rows: 2, cols: 1, paperSize: 'A4' });
     useAppStore.getState().updateEffects({ grayscale: true });
@@ -153,7 +160,9 @@ describe('saved setting profiles', () => {
     expect(preset.name).toBe('A4 دوبلکس');
     expect(preset.layout).toMatchObject({ rows: 2, cols: 1, paperSize: 'A4' });
     expect(preset.effects).toMatchObject({ grayscale: true });
-    expect(preset.settings).toMatchObject({ previewFidelity: DEFAULT_SETTINGS.previewFidelity });
+    expect(preset.shortcut).toBe('');
+    // A profile is the sheet and nothing else: the application settings are not in it, not even a copy.
+    expect('settings' in preset).toBe(false);
     expect(saveSettingsPresets).toHaveBeenCalledTimes(1);
     expect(saveSettingsPresets.mock.calls[0][0]).toHaveLength(1);
     expect(saveSettingsPresets.mock.calls[0][0][0].id).toBe(preset.id);
@@ -168,7 +177,7 @@ describe('saved setting profiles', () => {
   });
 
   it('overwrites a profile of the same name rather than filling the menu with twins', () => {
-    useAppStore.getState().saveSettingsPreset('Counter A4');
+    useAppStore.getState().saveSettingsPreset('Counter A4', 'Alt+F8');
     const createdAt = useAppStore.getState().settingsPresets[0].createdAt;
 
     useAppStore.getState().updateLayout({ cols: 4 });
@@ -179,6 +188,7 @@ describe('saved setting profiles', () => {
     expect(presets[0].layout).toMatchObject({ cols: 4 });
     expect(presets[0].createdAt).toBe(createdAt);        // still the same profile, re-saved
     expect(presets[0].name).toBe('counter a4');           // the typed name wins
+    expect(presets[0].shortcut).toBe('Alt+F8');            // and a re-save never silently drops the chord
   });
 
   it('applies a profile over the current desk without dropping documents', () => {
@@ -197,27 +207,122 @@ describe('saved setting profiles', () => {
     expect(state.documents).toHaveLength(1);
   });
 
-  it('leaves options the profile never saw at their default instead of undefined', () => {
-    // A profile written by an older build has no `previewFidelity` in its settings block.
+  it('leaves the application settings out of it, on purpose', () => {
+    useAppStore.getState().updateSettings({ unit: 'inch', bwPageTariffRials: 42000, previewFidelity: 'fast' });
+    const id = useAppStore.getState().saveSettingsPreset('Sheet only');
+    useAppStore.getState().updateSettings({ unit: 'mm', bwPageTariffRials: 15000, previewFidelity: 'crisp' });
+
+    useAppStore.getState().applySettingsPreset(id as string);
+
+    const settings = useAppStore.getState().settings;
+    expect(settings.unit).toBe('mm');
+    expect(settings.bwPageTariffRials).toBe(15000);
+    expect(settings.previewFidelity).toBe('crisp');
+  });
+
+  it('ignores the settings block a profile saved by the older build still carries', () => {
+    // Exactly what settings-presets.json looks like after the scope change: a stale settings blob.
     useAppStore.setState({
       settingsPresets: [{
-        id: 'old', name: 'old build', createdAt: '', updatedAt: '',
-        layout: { rows: 4 } as never,
-        effects: {},
-        watermark: {},
-        pageNumbering: {},
-        settings: { unit: 'inch' },
+        id: 'legacy', name: 'From the old file', createdAt: '', updatedAt: '', shortcut: '',
+        layout: { ...DEFAULT_LAYOUT, cols: 2 },
+        effects: { ...DEFAULT_EFFECTS },
+        watermark: getDefaultWatermarkSettings(),
+        pageNumbering: getDefaultPageNumberSettings(),
+        settings: { ...DEFAULT_SETTINGS, unit: 'inch' },
       } as unknown as SettingsPreset],
     });
-    useAppStore.getState().updateSettings({ unit: 'mm' });
 
-    useAppStore.getState().applySettingsPreset('old');
+    useAppStore.getState().applySettingsPreset('legacy');
 
-    const state = useAppStore.getState();
-    expect(state.settings.unit).toBe('inch');
-    expect(state.settings.previewFidelity).toBe(DEFAULT_SETTINGS.previewFidelity);
-    expect(state.layout).toEqual({ ...DEFAULT_LAYOUT, rows: 4 });
-    expect(state.effects).toEqual(DEFAULT_EFFECTS);
+    expect(useAppStore.getState().layout).toMatchObject({ cols: 2 });
+    expect(useAppStore.getState().settings.unit).toBe(DEFAULT_SETTINGS.unit);
+  });
+
+  it('refuses to delete the built-in defaults entry, which is not a stored profile', () => {
+    const before = useAppStore.getState().settingsPresets.length;
+
+    useAppStore.getState().deleteSettingsPreset(SHEET_DEFAULT_PRESET_ID);
+
+    expect(useAppStore.getState().settingsPresets).toHaveLength(before);
+    expect(saveSettingsPresets).not.toHaveBeenCalled();
+    expect(useAppStore.getState().toasts.at(-1)?.type).toBe('warning');
+  });
+
+  it('applies the defaults entry as the reset it is, from either door', () => {
+    useAppStore.getState().updateLayout({ rows: 4, cols: 4 });
+    useAppStore.getState().updateSettings({ unit: 'cm' });
+
+    useAppStore.getState().applySettingsPreset(SHEET_DEFAULT_PRESET_ID);
+
+    expect(useAppStore.getState().layout).toEqual(DEFAULT_LAYOUT);
+    expect(useAppStore.getState().settings.unit).toBe(DEFAULT_SETTINGS.unit);   // the reset resets everything
+  });
+
+  it('renames a profile, and refuses a name another profile already has', () => {
+    const id = useAppStore.getState().saveSettingsPreset('First') as string;
+    useAppStore.getState().saveSettingsPreset('Second');
+
+    expect(useAppStore.getState().editSettingsPreset(id, { name: ' Front desk ' })).toMatchObject({ ok: true, id });
+    expect(useAppStore.getState().settingsPresets.find(p => p.id === id)?.name).toBe('Front desk');
+
+    const clash = useAppStore.getState().editSettingsPreset(id, { name: 'Second' });
+    expect(clash).toEqual({ ok: false, error: 'duplicate-name' });
+    expect(useAppStore.getState().settingsPresets.find(p => p.id === id)?.name).toBe('Front desk');
+    expect(useAppStore.getState().editSettingsPreset(id, { name: '   ' })).toEqual({ ok: false, error: 'empty-name' });
+    expect(useAppStore.getState().editSettingsPreset('ghost', { name: 'X' })).toEqual({ ok: false, error: 'unknown-id' });
+  });
+
+  it('records, replaces and clears a chord, and will not hand out a busy one', () => {
+    const first = useAppStore.getState().saveSettingsPreset('First') as string;
+    const second = useAppStore.getState().saveSettingsPreset('Second') as string;
+
+    expect(useAppStore.getState().editSettingsPreset(first, { shortcut: 'alt+f7' })).toMatchObject({ ok: true });
+    expect(useAppStore.getState().settingsPresets.find(p => p.id === first)?.shortcut).toBe('Alt+F7');
+
+    expect(useAppStore.getState().editSettingsPreset(second, { shortcut: 'Alt+F7' })).toEqual({ ok: false, error: 'duplicate-shortcut' });
+    expect(useAppStore.getState().editSettingsPreset(second, { shortcut: 'Alt+F6' })).toEqual({ ok: false, error: 'reserved-shortcut' });
+    // a reservation is still a reservation when it arrives in the wrong case, or with a space in it
+    expect(useAppStore.getState().editSettingsPreset(second, { shortcut: 'alt+ f6' })).toEqual({ ok: false, error: 'reserved-shortcut' });
+    expect(useAppStore.getState().editSettingsPreset(second, { shortcut: 'Ctrl+3' })).toEqual({ ok: false, error: 'bad-shortcut' });
+    expect(useAppStore.getState().settingsPresets.find(p => p.id === second)?.shortcut).toBe('');
+
+    expect(useAppStore.getState().editSettingsPreset(first, { shortcut: '' })).toMatchObject({ ok: true });
+    expect(useAppStore.getState().settingsPresets.find(p => p.id === first)?.shortcut).toBe('');
+    // ...and the freed chord is assignable again.
+    expect(useAppStore.getState().editSettingsPreset(second, { shortcut: 'Alt+F7' })).toMatchObject({ ok: true });
+  });
+
+  it('refuses the whole save when the chord is not one the app could honour', () => {
+    // Ctrl+3 is a browser tab switch. Half-storing the profile - name yes, chord silently no - would
+    // leave the operator pressing a key that does nothing, so nothing is stored and the reason is said.
+    expect(useAppStore.getState().saveSettingsPreset('First', 'Ctrl+3')).toBeNull();
+    expect(useAppStore.getState().settingsPresets).toEqual([]);
+    expect(saveSettingsPresets).not.toHaveBeenCalled();
+    expect(useAppStore.getState().toasts.at(-1)?.type).toBe('warning');
+  });
+
+  it('re-captures the sheet into a profile while keeping its name, chord and birthday', () => {
+    const id = useAppStore.getState().saveSettingsPreset('Duplex A4', 'Alt+F9') as string;
+    const { createdAt } = useAppStore.getState().settingsPresets[0];
+
+    useAppStore.getState().updateLayout({ cols: 6, paperSize: 'A3' });
+    expect(useAppStore.getState().overwriteSettingsPreset(id)).toMatchObject({ ok: true, id });
+
+    const preset = useAppStore.getState().settingsPresets[0];
+    expect(preset.layout).toMatchObject({ cols: 6, paperSize: 'A3' });
+    expect(preset.name).toBe('Duplex A4');
+    expect(preset.shortcut).toBe('Alt+F9');
+    expect(preset.createdAt).toBe(createdAt);
+    expect('settings' in preset).toBe(false);
+  });
+
+  it('holds the recorder flag, which is all that stands between a keypress and a fired chord', () => {
+    const id = useAppStore.getState().saveSettingsPreset('First') as string;
+    useAppStore.getState().beginShortcutRecording(id as string);
+    expect(useAppStore.getState().shortcutRecordingFor).toBe(id);
+    useAppStore.getState().beginShortcutRecording(null);
+    expect(useAppStore.getState().shortcutRecordingFor).toBeNull();
   });
 
   it('deletes a profile and stores the shorter list', () => {
@@ -269,7 +374,7 @@ describe('reading preferences back at start-up', () => {
       effects: { ...DEFAULT_EFFECTS },
       watermark: getDefaultWatermarkSettings(),
       pageNumbering: getDefaultPageNumberSettings(),
-      settings: { ...DEFAULT_SETTINGS, unit: 'cm' },
+      shortcut: 'Alt+F10',
     };
     loadSettings.mockResolvedValue({ unit: 'inch', previewFidelity: 'fast', bwPageTariffRials: 20000 });
     loadSettingsPresets.mockResolvedValue([stored]);

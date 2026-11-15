@@ -11,6 +11,8 @@ import { TextControlPanel } from './components/TextControlPanel';
 import { NumberingControlPanel } from './components/NumberingControlPanel';
 import { ImageControlPanel } from './components/ImageControlPanel';
 import { routeDroppedFiles } from './engine/imageImport';
+import { buildSheetPresetRows, findPresetIdByShortcut } from './engine/sheetPresets';
+import { formatShortcut } from '@shared/models';
 import { listenForNativeOpenFiles } from './engine/nativeFiles';
 
 /** Whether this page load has already read the persisted settings back (see the effect in `App`). */
@@ -37,7 +39,6 @@ export const App: React.FC = () => {
     importFiles,
     addToast,
     restorePreferences,
-    resetAllSettings,
   } = useAppStore();
 
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(
@@ -104,14 +105,25 @@ export const App: React.FC = () => {
   // Comprehensive Keyboard Shortcuts & Clipboard Paste (A1)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      // Alt+F6 resets every adjustable setting, and it has to work with focus anywhere in the window —
-      // including inside a field, which the guard below deliberately shields from the letter chords. A
-      // function key is never text input, so checking it first costs nothing and matches the muscle
-      // memory an operator has from other print-shop software.
-      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === 'F6') {
-        e.preventDefault();
-        resetAllSettings();
-        return;
+      // Chords are resolved against the profile list, so `Alt+F6` is not a special case any more — it is
+      // the chord the built-in defaults row owns, and a recorded profile behaves the same way. The lookup
+      // runs above the "ignore keys typed into a field" guard because a chord carrying Alt or Ctrl is
+      // never text input, and a shortcut that only works when the caret happens to be on a button is not
+      // a shortcut. Nothing that does not match is swallowed: an unassigned `Ctrl+Alt+Q` still belongs to
+      // the browser.
+      const chord = formatShortcut(e);
+      if (chord) {
+        const state = useAppStore.getState();
+        // While the panel is waiting for a key to learn, no chord fires — the press is being recorded.
+        if (!state.shortcutRecordingFor) {
+          const rows = buildSheetPresetRows(state.settingsPresets, state.settings.language === 'fa');
+          const presetId = findPresetIdByShortcut(rows, chord);
+          if (presetId) {
+            e.preventDefault();
+            state.applySettingsPreset(presetId);
+            return;
+          }
+        }
       }
 
       const target = e.target as HTMLElement | null;
@@ -236,7 +248,6 @@ export const App: React.FC = () => {
     zoomPercent,
     undo,
     redo,
-    resetAllSettings,
     toggleGlobalInvert,
     duplicatePages,
     deletePages,

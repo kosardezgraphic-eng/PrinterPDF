@@ -79,6 +79,7 @@ export const Ribbon: React.FC = () => {
     toggleGlobalInvert,
     resetEffects,
     updateSettings,
+    clearCrispPreviewCacheNow,
     updateWatermark,
     updatePageNumbering,
     addTextOverlay,
@@ -1055,6 +1056,18 @@ export const Ribbon: React.FC = () => {
                 <VectorSquare className="h-3.5 w-3.5 text-emerald-400" />
                 <span>{lang === 'fa' ? 'پیش‌نمایش دقیق وکتور' : 'Crisp vector preview'}</span>
               </label>
+
+              <button
+                type="button"
+                data-clear-preview-cache
+                title={lang === 'fa'
+                  ? 'تصویرهای رندرشدهٔ پیش‌نمایش از حافظه پاک می‌شوند؛ صفحات دوباره در زمان لازم رندر می‌شوند.'
+                  : 'Frees every preview bitmap held in memory; pages that are looked at again are re-rendered on demand.'}
+                onClick={() => clearCrispPreviewCacheNow()}
+                className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-[11px] text-slate-300 hover:bg-slate-700 cursor-pointer"
+              >
+                {lang === 'fa' ? 'خالی‌کردن کش پیش‌نمایش' : 'Free the preview cache'}
+              </button>
 
               <label className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-slate-200 cursor-pointer">
                 <input
