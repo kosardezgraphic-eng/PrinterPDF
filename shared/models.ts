@@ -586,7 +586,8 @@ export interface PspProjectFile {
 /** Overlay coordinates are percentages of the selected sheet or source-page box. */
 export type OverlayScope = 'current' | 'all' | 'even' | 'odd' | 'first' | 'last' | 'selected' | 'document' | 'selected-documents';
 export type OverlayTarget = 'page' | 'sheet';
-export type ShapeType = 'rectangle' | 'rounded-rect' | 'circle' | 'line' | 'arrow' | 'triangle' | 'polygon' | 'star' | 'diamond' | 'badge';
+/** `badge` is a ring: a circle with a reversed circle cut out of the middle. */
+export type ShapeType = 'rectangle' | 'square' | 'rounded-rect' | 'circle' | 'line' | 'arrow' | 'triangle' | 'polygon' | 'star' | 'diamond' | 'badge';
 export type NumberingNumberFormat = 'persian' | 'english' | 'roman' | 'abjad';
 export interface OverlayBase {
   id: string;
@@ -619,9 +620,25 @@ export interface PageOverlayText extends OverlayBase {
   /** Line height multiplier and extra word/letter spacing in points. */
   lineHeight?: number; wordSpacingPt?: number; letterSpacingPt?: number;
 }
+/** How the ends of an open stroke are cut; a filled outline ignores it. */
+export type ShapeLineCap = 'butt' | 'round' | 'square';
+/**
+ * A drawn outline — a box, a circle, a rule, an arrow. The geometry is derived from these numbers by
+ * `app/src/engine/shapes.ts`, which is the only place a shape's outline is described, so the preview,
+ * the rasteriser and the exported PDF cannot disagree about what the operator drew.
+ *
+ * Lengths are physical, not relative: `strokeWidth` in points and `borderRadius` in millimetres, so a
+ * 1 pt hairline stays a 1 pt hairline when the box is dragged bigger. Colours are `#rrggbb`, `#rgb` or
+ * `transparent` (nothing else is accepted, because the preview paints the shape as SVG).
+ */
 export interface PageOverlayShape extends OverlayBase {
   kind: 'shape'; type: ShapeType; fillColor: string; strokeColor: string;
   strokeWidth: number; strokeStyle: 'solid' | 'dashed' | 'dotted'; borderRadius: number;
+  /** Vertices of a `polygon`, points of a `star` (3–16); defaults 6 and 5. */
+  sides?: number;
+  /** How deep a `star`'s waist sits, as a percent of its radius (10–95). */
+  innerRadiusPercent?: number;
+  lineCap?: ShapeLineCap;
 }
 export interface PageOverlayNumbering extends OverlayBase {
   kind: 'numbering'; enabled: boolean; fontSize: number; fontFamily: string; color: string;

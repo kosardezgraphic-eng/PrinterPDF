@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { MatrixSizeFields } from './MatrixSizeFields';
 import { SettingsPresetMenu } from './SettingsPresets';
+import { ShapePicker } from './ShapeControlPanel';
 import { useAppStore, type RibbonTabId } from '../store/useAppStore';
 import { getSheetDimensionsMm } from '../engine/layoutEngine';
 import { t } from '../i18n/translations';
@@ -83,6 +84,7 @@ export const Ribbon: React.FC = () => {
     updateWatermark,
     updatePageNumbering,
     addTextOverlay,
+    addShapeOverlay,
     addNumberingOverlay,
     addImageOverlayFiles,
     exportMergedOrImposedPdf,
@@ -680,6 +682,10 @@ export const Ribbon: React.FC = () => {
                 onClick={addTextOverlay} className="flex items-center gap-1 rounded-lg border border-sky-500 bg-sky-700 px-3 py-2 font-semibold text-white disabled:opacity-40">
                 <Type className="h-4 w-4" aria-hidden="true" />{lang==='fa'?'افزودن متن':'Add text'}
               </button>
+              {/* Shapes: one click per outline, and the settings panel opens on what was inserted. */}
+              <div className="flex items-center gap-1 border-e border-slate-800 pe-3">
+                <ShapePicker onPick={(type) => { addShapeOverlay(type); }} />
+              </div>
               {/* F1: Watermark */}
               <div className="flex items-center gap-2.5 border-e border-slate-800 pe-4">
                 <label className="flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 font-bold text-sky-300 cursor-pointer">

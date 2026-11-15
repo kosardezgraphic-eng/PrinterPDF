@@ -14,6 +14,8 @@ import type {
   PageOverlayText,
   PageOverlayNumbering,
   PageOverlayImage,
+  PageOverlayShape,
+  ShapeType,
   ComputedSheetSide,
   TextScriptRange,
   PageNumberSettings,
@@ -68,6 +70,7 @@ import {
   imageOverlayFromPlacement,
   newOverlayId as newImageId,
 } from '../engine/imageOverlays';
+import { defaultShapeStyle, normalizeShapeStyle, shapeCapabilities } from '../engine/shapes';
 import { isImageFile, measureImage, readFileAsDataUrl } from '../engine/imageImport';
 import { centeredAspectCrop, cropToMm, IDENTITY_TRANSFORM, type Insets } from '../engine/pageGeometry';
 import { computeImpositionSheets, getSheetDimensionsMm, sortCellsByLayer } from '../engine/layoutEngine';
@@ -335,6 +338,14 @@ interface AppState {
   selectOverlay: (id: string | null) => void;
   addTextOverlay: () => void;
   addNumberingOverlay: (convertLegacy?: boolean) => void;
+  /**
+   * Draws a geometric shape on the current page (or on the sheet, when there is no page to sit on) and
+   * selects it, so the shape panel opens on the thing that was just inserted. The outline itself is
+   * described once, in `engine/shapes.ts`, and shared by the preview and the exported PDF.
+   */
+  addShapeOverlay: (type: ShapeType, patch?: Partial<PageOverlayShape>) => string | null;
+  /** Moves a layer in the stacking order, which is the order of the `overlays` array. */
+  reorderOverlay: (overlayId: string, where: 'front' | 'forward' | 'backward' | 'back') => void;
   addImageOverlayFiles: (files: File[], sheet?: ComputedSheetSide, point?: {xMm:number;yMm:number}) => Promise<number>;
   beginTextEdit: (id: string, occurrenceKey: string) => void;
   updateTextDraft: (text: string, start: number, end: number) => void;
@@ -414,6 +425,14 @@ interface AppState {
    */
   shortcutRecordingFor: string | null;
   beginShortcutRecording: (presetId: string | null) => void;
+  /**
+   * Which profile the panel is *editing* right now — the row that shows its name field, chord recorder,
+   * re-capture and delete buttons. Every other row is a single click to apply, which is the difference
+   * between a list of buttons and a list of forms. `null` means nothing is open.
+   */
+  editingPresetId: string | null;
+  /** Opens (or closes, with `null`) the edit controls of one profile. */
+  beginEditPreset: (presetId: string | null) => void;
   /** Reads back the settings and the saved profiles from start-up — they used to be write-only. */
   restorePreferences: () => Promise<void>;
   /** Captures the current sheet settings under a name; a name already used is updated, like a save button. */
@@ -617,6 +636,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     settingsPresets: [],
     shortcutRecordingFor: null,
+    editingPresetId: null,
     canUndo: false,
     canRedo: false,
     undoLabel: '',
@@ -1625,6 +1645,59 @@ export const useAppStore = create<AppState>((set, get) => {
       set({activePageId:page.id,previewPageRequest:{pageId:page.id},activeSheetIndex:sheet.sideIndex-1,
         textEdit:{overlayId:id,occurrenceKey:`${id}-${cell.occurrenceKey??cell.cellIndex}`,text:'',ranges:[],selectionStart:0,selectionEnd:0}});
     },
+    addShapeOverlay: (type, patch) => {
+      if (get().textEdit) get().finishTextEdit();
+      const state = get();
+      const page = state.pages.find(p => p.id === state.activePageId) ?? state.pages.find(p => p.isHighlighted)
+        ?? state.pages.find(p => p.selectedForPrint) ?? state.pages[0];
+      const lang = state.settings.language;
+      if (!page) {
+        // A shape belongs on a sheet; without one this button would look like it does nothing at all.
+        state.addToast({ type: 'warning', title: lang === 'fa' ? 'اول یک سند وارد کنید' : 'Load a document first' });
+        return null;
+      }
+      const layout = page.selectedForPrint ? state.layout : { ...state.layout, duplexMode: 'none' as const };
+      const sheets = computeImpositionSheets(page.selectedForPrint ? state.pages : [{ ...page, selectedForPrint: true }], layout);
+      const sheet = sheets.find(s => s.cells.some(c => c.page?.id === page.id));
+      const cell = sheet?.cells.find(c => c.page?.id === page.id);
+      if (!sheet || !cell) {
+        state.addToast({ type: 'warning', title: lang === 'fa' ? 'این صفحه در هیچ برگه‌ای جا نمی‌شود' : 'This page does not fit on any sheet' });
+        return null;
+      }
+      const boxWidth = Math.max(1, cell.contentWidthMm), boxHeight = Math.max(1, cell.contentHeightMm);
+      // A shape is a physical mark, so the default box is measured in millimetres and only then turned
+      // into the percentages the overlay model stores — square in millimetres is what keeps a circle round.
+      const sideMm = Math.max(12, Math.min(80, Math.min(boxWidth, boxHeight) * 0.28));
+      const widthPercent = sideMm / boxWidth * 100, heightPercent = sideMm / boxHeight * 100;
+      const item: PageOverlayShape = {
+        id: globalThis.crypto?.randomUUID?.() ?? `shape-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        kind: 'shape', target: 'page', targetScope: 'current', targetPageIds: [page.id], targetSheetIndex: sheet.sideIndex,
+        xPercent: (100 - widthPercent) / 2, yPercent: (100 - heightPercent) / 2, widthPercent, heightPercent,
+        opacity: 1, rotation: 0, lockAspect: shapeCapabilities(type).lockAspect,
+        ...defaultShapeStyle(type), ...normalizeShapeStyle(patch ?? {}),
+      };
+      get().addOverlay(item);
+      set({ activePageId: page.id, previewPageRequest: { pageId: page.id }, activeSheetIndex: sheet.sideIndex - 1 });
+      return item.id;
+    },
+
+    reorderOverlay: (overlayId, where) => {
+      // The overlays array *is* the stacking order: the preview sorts placements by its index and so does
+      // the exporter, so moving a layer means moving an element of this array and nothing else.
+      const state = get();
+      const index = state.overlays.findIndex(item => item.id === overlayId);
+      if (index < 0) return;
+      const next = [...state.overlays];
+      const [item] = next.splice(index, 1);
+      const target = where === 'front' ? next.length : where === 'back' ? 0
+        : where === 'forward' ? Math.min(next.length, index + 1) : Math.max(0, index - 1);
+      if (target === index) return;
+      next.splice(target, 0, item);
+      const before = captureSnapshot(state);
+      set({ overlays: next, selectedOverlayId: overlayId });
+      pushUndo('تغییر ترتیب لایه', 'Reorder layer', before, captureSnapshot(get()));
+    },
+
     beginTextEdit: (id, occurrenceKey) => {
       const existing=get().textEdit;
       if(existing?.overlayId===id && existing.occurrenceKey===occurrenceKey)return;
@@ -1769,6 +1842,11 @@ export const useAppStore = create<AppState>((set, get) => {
       set({ shortcutRecordingFor: presetId });
     },
 
+    beginEditPreset: (presetId) => {
+      // Switching rows must not leave a recorder waiting for a key on the row that was just closed.
+      set({ editingPresetId: presetId, shortcutRecordingFor: null });
+    },
+
     applySettingsPreset: (presetId) => {
       // The defaults entry is not a stored profile: applying it *is* the reset, so it stays one action
       // with one chord instead of a snapshot that can go stale when the app's defaults change.
@@ -1800,7 +1878,9 @@ export const useAppStore = create<AppState>((set, get) => {
       const current = get().settingsPresets;
       const next = current.filter((preset) => preset.id !== presetId);
       if (next.length === current.length) return;
-      set({ settingsPresets: next });
+      // An editor pointing at a profile that no longer exists would write into nothing.
+      set({ settingsPresets: next,
+        ...(get().editingPresetId === presetId ? { editingPresetId: null, shortcutRecordingFor: null } : {}) });
       persistPresets(next);
     },
 

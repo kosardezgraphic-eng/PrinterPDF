@@ -20,6 +20,29 @@ A selected picture shows the same eight resize handles, rotate knob and drag beh
 - Arrow keys nudge by 1 mm, `Shift`+arrow by 5 mm, in the axes of the parent box.
 - The rotate knob turns the box around the centre of its parent; hold `Shift` to snap to 15° steps. The panel also offers 0/90/180/270° presets and a continuous slider.
 
+### How far a picture may be dragged
+
+The percentages a picture stores are measured against the box it is attached to — the page's **content box**
+for a page picture, the whole output sheet for a sheet picture. The area it is *clipped* by is not the same
+box: a page picture is cut at its **cell**, and a sheet picture at the sheet. `overlayLimitsForBox()` in
+`engine/overlayGeometry.ts` turns those two millimetre boxes into percent limits, and every place that moves
+a picture asks it the same question: the drag, the arrow-key nudge, the six align buttons and the X/Y fields
+of the panel. (Two rules would be how "align left" puts a logo against an edge the mouse cannot reach.)
+
+The rule is **the centre stays inside the printable area, the box may hang over any edge**. So a logo can be
+pushed into the margin, lined up with the trim line, or run half off the page for a bleed — and it can never
+disappear, because at least half of it is always on the sheet. An overlay wider than the area it may enter
+cannot satisfy both halves of that sentence, so it is centred instead of being shoved to one side. Resizing
+obeys the stricter rule (`boxWithinLimits`): a handle should not escape the printable area, because a handle
+the operator is holding has to stay under the cursor.
+
+`placeImageInBox()` still keeps a *newly dropped* picture fully inside its box — the drop point is inside the
+box by definition, and a picture that arrives half off the page looks like a bug. Widening its reach is what
+the drag, the arrow keys or `-20` in the X field are for.
+
+The panel's **X (mm) / Y (mm)** fields accept anything finite, including negatives and values past the page
+size: a typed number is an explicit decision and is not argued with, while the drag keeps the centre rule.
+
 ### Shift and the aspect ratio
 
 **Shift inverts the aspect-ratio lock for the drag you are doing.** The lock itself is a property of the overlay, shown as **Lock aspect ratio** in the picture and numbering panels, and that checkbox is the source of truth:

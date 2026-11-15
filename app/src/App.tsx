@@ -10,6 +10,7 @@ import { ModalsAndToasts } from './components/Modals';
 import { TextControlPanel } from './components/TextControlPanel';
 import { NumberingControlPanel } from './components/NumberingControlPanel';
 import { ImageControlPanel } from './components/ImageControlPanel';
+import { ShapeControlPanel } from './components/ShapeControlPanel';
 import { routeDroppedFiles } from './engine/imageImport';
 import { buildSheetPresetRows, findPresetIdByShortcut } from './engine/sheetPresets';
 import { formatShortcut } from '@shared/models';
@@ -274,6 +275,7 @@ export const App: React.FC = () => {
           {selectedOverlayId && overlays.some(o=>o.id===selectedOverlayId && o.kind==='text') && <TextControlPanel />}
           {selectedOverlayId && overlays.some(o=>o.id===selectedOverlayId && o.kind==='numbering') && <NumberingControlPanel />}
           {selectedOverlayId && overlays.some(o=>o.id===selectedOverlayId && o.kind==='image') && <ImageControlPanel />}
+          {selectedOverlayId && overlays.some(o=>o.id===selectedOverlayId && o.kind==='shape') && <ShapeControlPanel />}
         </div>
         <StatusBar cursorPos={cursorPos} />
         <ModalsAndToasts />

@@ -4,6 +4,7 @@ import {computeImpositionSheets} from '../engine/layoutEngine';
 import {parseCoverageSelection,formatCoverageSelection} from '../engine/coverageSelection';
 import {isImageFile,measureImage,readFileAsDataUrl} from '../engine/imageImport';
 import {newOverlayId} from '../engine/imageOverlays';
+import {alignOverlay, overlayPanelFrame} from '../engine/overlayGeometry';
 import {useAppStore} from '../store/useAppStore';
 import { describePictureFormat, planPictureEmbedding } from '../engine/imageFormat';
 
@@ -26,11 +27,10 @@ export function ImageControlPanel(){
  const patch=(value:Partial<PageOverlayImage>)=>updateOverlay(item.id,value);
  const sheet=sheets[Math.min(activeSheetIndex,Math.max(0,sheets.length-1))];
  const page=pages.find(p=>p.id===activePageId)??sheet?.cells.find(c=>c.page)?.page??pages[0];
- const cell=item.target==='page' ? sheet?.cells.find(c=>c.page?.id===item.targetPageIds[0]) : undefined;
- const box=item.target==='sheet'
-   ? {width:sheet?.widthMm ?? 210,height:sheet?.heightMm ?? 297}
-   : cell ? {width:cell.contentWidthMm,height:cell.contentHeightMm}
-     : {width:page?.widthMm ?? 210,height:page?.heightMm ?? 297};
+ // The box the percentages mean and the area the picture may travel in, from the same helper the drag
+ // uses: a field that disagrees with the mouse is what makes an operator think the picture is stuck.
+ const frame=overlayPanelFrame(sheet,item);
+ const box={width:frame.boxWidthMm,height:frame.boxHeightMm};
  const widthMm=item.widthPercent*box.width/100, heightMm=item.heightPercent*box.height/100;
  const ratio=heightMm>0?widthMm/heightMm:1;
  const setMm=(key:'width'|'height',value:number)=>{
@@ -39,6 +39,16 @@ export function ImageControlPanel(){
      if(key==='width')patch({widthPercent:value/box.width*100,heightPercent:value/ratio/box.height*100});
      else patch({heightPercent:value/box.height*100,widthPercent:value*ratio/box.width*100});
    } else patch(key==='width'?{widthPercent:value/box.width*100}:{heightPercent:value/box.height*100});
+ };
+ const setPosition=(key:'x'|'y',value:number)=>{
+   // Negative and over-the-edge numbers are allowed on purpose: that is the picture hanging into the
+   // margin or past the trim line for a bleed. Only the drag is limited (to its centre staying printable).
+   if(!Number.isFinite(value))return;
+   patch(key==='x'?{xPercent:value/box.width*100}:{yPercent:value/box.height*100});
+ };
+ const align=(where:'left'|'hcenter'|'right'|'top'|'vcenter'|'bottom')=>{
+   const moved=alignOverlay({xPercent:item.xPercent,yPercent:item.yPercent,widthPercent:item.widthPercent,heightPercent:item.heightPercent},where,frame.limits);
+   patch({xPercent:moved.xPercent,yPercent:moved.yPercent});
  };
  const setScope=(scope:OverlayScope,target:OverlayTarget=item.target)=>{
    const side=Math.min(activeSheetIndex+1,Math.max(1,sheets.length));
@@ -61,7 +71,7 @@ export function ImageControlPanel(){
  const scopes:OverlayScope[]=['all','odd','even','first','last','current','selected'];
  return <aside data-text-control-panel aria-label={fa?'تنظیمات تصویر روی صفحه':'Picture overlay controls'} className="w-64 shrink-0 overflow-y-auto border-s border-slate-700 bg-slate-900 p-3 text-xs text-slate-200 space-y-2">
    <div className="flex items-center justify-between"><strong>{fa?'تنظیمات تصویر':'Picture'}</strong>
-     <button type="button" onClick={()=>addOverlay({...item,id:newOverlayId(),xPercent:Math.min(60,item.xPercent+5),yPercent:Math.min(60,item.yPercent+5)})} className="rounded bg-slate-700 px-2 py-1">{fa?'+ نسخه':'+ Copy'}</button></div>
+     <button type="button" onClick={()=>addOverlay({...item,id:newOverlayId(),xPercent:item.xPercent+5,yPercent:item.yPercent+5})} className="rounded bg-slate-700 px-2 py-1">{fa?'+ نسخه':'+ Copy'}</button></div>
    <div role="tablist" aria-label={fa?'تصویرها':'Pictures'} className="flex gap-1 overflow-x-auto">{numbers.map((n,i)=><button key={n.id} role="tab" type="button" aria-selected={n.id===item.id} onClick={()=>useAppStore.getState().selectOverlay(n.id)} className={`shrink-0 rounded px-2 py-1 ${n.id===item.id?'bg-sky-700':'bg-slate-700'}`}>{fa?`تصویر ${i+1}`:`Picture ${i+1}`}</button>)}</div>
    <p className="truncate text-slate-400" title={item.name}>{item.name} · {item.naturalWidth}×{item.naturalHeight}px</p>
    <label className="block">{fa?'جایگزینی تصویر':'Replace picture'}<input data-image-source type="file" accept="image/*" className={input} onChange={e=>void replace(e.target.files?.[0])}/></label>
@@ -71,6 +81,21 @@ export function ImageControlPanel(){
    </div>
    <label className="flex items-center gap-1.5"><input type="checkbox" aria-label={fa?'قفل نسبت ابعاد':'Lock aspect ratio'} checked={!!item.lockAspect} onChange={e=>patch({lockAspect:e.target.checked})}/>
      {fa?'قفل نسبت ابعاد':'Lock aspect ratio'} <span className="text-slate-400">({fa?'Shift هنگام کشیدن':'Shift while dragging'})</span></label>
+   <div className="flex gap-1">
+     <label className="flex-1">{fa?'X (میلی‌متر)':'X (mm)'}<input aria-label={fa?'مختصاف X تصویر':'Image X'} data-image-x type="number" step="0.1" className={input} value={Number((item.xPercent*box.width/100).toFixed(2))} onChange={e=>setPosition('x',Number(e.target.value))}/></label>
+     <label className="flex-1">{fa?'Y (میلی‌متر)':'Y (mm)'}<input aria-label={fa?'مختصاف Y تصویر':'Image Y'} data-image-y type="number" step="0.1" className={input} value={Number((item.yPercent*box.height/100).toFixed(2))} onChange={e=>setPosition('y',Number(e.target.value))}/></label>
+   </div>
+   <div className="grid grid-cols-3 gap-1">
+     {(['left','hcenter','right','top','vcenter','bottom'] as const).map(where=>
+       <button key={where} type="button" data-image-align={where} title={where} onClick={()=>align(where)}
+         className="rounded bg-slate-700 px-1 py-1 hover:bg-slate-600 cursor-pointer">{where==='left'?(fa?'چپ':'Left'):where==='hcenter'?(fa?'وسط':'Centre'):where==='right'?(fa?'راست':'Right')
+         :where==='top'?(fa?'بالا':'Top'):where==='vcenter'?(fa?'میانه':'Middle'):(fa?'پایین':'Bottom')}</button>)}
+   </div>
+   <p className="text-[10px] leading-4 text-slate-500">
+     {fa
+       ? 'مقدار منفی یعنی بیرون از کادر محتوا؛ تصویر تا جایی که مرکزش روی برگه بماند می‌تواند از لبه بیرون بزند (برای بلید).'
+       : 'A negative value is outside the content box. A picture may hang over the edge as far as its centre stays on the sheet — that is how a bleed is placed.'}
+   </p>
    <label className="block">{fa?'نحوهٔ پر کردن کادر':'Fit'}<select aria-label={fa?'نحوهٔ پر کردن':'Fit'} className={input} value={item.fit??'fill'} onChange={e=>patch({fit:e.target.value as 'fill'|'contain'})}>
      <option value="fill">{fa?'کشیدن به اندازهٔ کادر':'Stretch to the box'}</option><option value="contain">{fa?'جای دادن با حفظ نسبت':'Contain (letterbox)'}</option></select></label>
    <div className="flex gap-1">
