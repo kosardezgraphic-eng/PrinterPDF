@@ -325,6 +325,35 @@ describe('saved sheet profiles', () => {
     expect(useAppStore.getState().shortcutRecordingFor).toBeNull();
   });
 
+  it('opens one profile for editing at a time, and takes the recorder with it', () => {
+    const first = useAppStore.getState().saveSettingsPreset('First') as string;
+    const second = useAppStore.getState().saveSettingsPreset('Second') as string;
+
+    useAppStore.getState().beginEditPreset(first);
+    expect(useAppStore.getState().editingPresetId).toBe(first);
+
+    // Opening another row while a recorder is waiting must cancel the wait, or the next keypress would
+    // be assigned to the row the operator already walked away from.
+    useAppStore.getState().beginShortcutRecording(first);
+    useAppStore.getState().beginEditPreset(second);
+    expect(useAppStore.getState().editingPresetId).toBe(second);
+    expect(useAppStore.getState().shortcutRecordingFor).toBeNull();
+
+    useAppStore.getState().beginEditPreset(null);
+    expect(useAppStore.getState().editingPresetId).toBeNull();
+  });
+
+  it('closes the editor when the profile it was editing is deleted', () => {
+    const id = useAppStore.getState().saveSettingsPreset('Doomed') as string;
+    useAppStore.getState().beginEditPreset(id);
+    useAppStore.getState().beginShortcutRecording(id);
+
+    useAppStore.getState().deleteSettingsPreset(id);
+
+    expect(useAppStore.getState().editingPresetId).toBeNull();
+    expect(useAppStore.getState().shortcutRecordingFor).toBeNull();
+  });
+
   it('deletes a profile and stores the shorter list', () => {
     useAppStore.getState().saveSettingsPreset('keep');
     const drop = useAppStore.getState().saveSettingsPreset('drop');

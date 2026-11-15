@@ -1,4 +1,5 @@
-import type { PageOverlay, PageOverlayNumbering, PageOverlayShape } from '@shared/models';
+import type { PageOverlay, PageOverlayNumbering } from '@shared/models';
+import { MM_PER_PT, applyShapeCommands, sanitizeShapeColor, shapeColorComponents, shapeCommands, shapeDashPattern, shapeHasFill } from './shapes';
 
 export interface OverlayContext { pageIndex: number; total: number; pageId?: string; documentId?: string; sheetIndex: number; sheetPageIds: string[] }
 export interface OverlayRect { x: number; y: number; width: number; height: number; pixelsPerPoint: number }
@@ -81,20 +82,6 @@ export function formatOverlayNumber(settings: PageOverlayNumbering, index: numbe
   });
 }
 
-function shapePath(ctx:CanvasRenderingContext2D, s:PageOverlayShape,w:number,h:number) {
-  const line=(pts:[number,number][])=>{ctx.moveTo(pts[0][0]*w,pts[0][1]*h);pts.slice(1).forEach(([x,y])=>ctx.lineTo(x*w,y*h));ctx.closePath();};
-  switch (s.type) {
-    case 'rectangle': ctx.rect(0,0,w,h); break;
-    case 'rounded-rect': ctx.roundRect(0,0,w,h,Math.min(w/2,h/2,Math.max(0,s.borderRadius))); break;
-    case 'circle': case 'badge': ctx.ellipse(w/2,h/2,w/2,h/2,0,0,Math.PI*2); break;
-    case 'line': case 'arrow': ctx.moveTo(0,h/2);ctx.lineTo(w,h/2); if(s.type==='arrow'){ctx.moveTo(w-Math.min(w*.25, h*.4),h*.1);ctx.lineTo(w,h/2);ctx.lineTo(w-Math.min(w*.25,h*.4),h*.9);} break;
-    case 'triangle': line([[.5,0],[1,1],[0,1]]); break;
-    case 'diamond': line([[.5,0],[1,.5],[.5,1],[0,.5]]); break;
-    case 'polygon': line(Array.from({length:6},(_,i)=>[.5+.5*Math.cos(-Math.PI/2+i*Math.PI/3),.5+.5*Math.sin(-Math.PI/2+i*Math.PI/3)] as [number,number])); break;
-    case 'star': line(Array.from({length:10},(_,i)=>{const r=i%2?.22:.5;return [.5+r*Math.cos(-Math.PI/2+i*Math.PI/5),.5+r*Math.sin(-Math.PI/2+i*Math.PI/5)] as [number,number];})); break;
-  }
-}
-
 /** Canvas output uses the same renderer in preview and exported PDF. */
 export function renderOverlaysOnCanvas(ctx:CanvasRenderingContext2D, overlays:PageOverlay[], rect:OverlayRect, context:OverlayContext): void {
   for (const item of [...overlays.filter(o=>o.kind==='shape'), ...overlays.filter(o=>o.kind==='text'), ...overlays.filter(o=>o.kind==='numbering')]) {
@@ -106,10 +93,26 @@ export function renderOverlaysOnCanvas(ctx:CanvasRenderingContext2D, overlays:Pa
     ctx.beginPath();ctx.rect(rect.x,rect.y,rect.width,rect.height);ctx.clip();
     ctx.translate(x+w/2,y+h/2);ctx.rotate(item.rotation*Math.PI/180);ctx.translate(-w/2,-h/2);ctx.globalAlpha=Math.max(.1,Math.min(1,item.opacity));
     if (item.kind==='shape') {
-      ctx.beginPath();shapePath(ctx,item,w,h);ctx.strokeStyle=item.strokeColor;ctx.lineWidth=item.strokeWidth*.75*rect.pixelsPerPoint;
-      ctx.setLineDash(item.strokeStyle==='solid'?[]:item.strokeStyle==='dashed'?[ctx.lineWidth*4,ctx.lineWidth*2]:[ctx.lineWidth,ctx.lineWidth*2]);
-      if (item.fillColor !== 'transparent' && item.type !== 'line' && item.type !== 'arrow') {ctx.fillStyle=item.fillColor;ctx.fill();}
-      if(item.strokeWidth>0)ctx.stroke();
+      // The outline comes from `engine/shapes.ts` — the same command list the preview turns into an SVG
+      // path and the exporter into PDF path operators — so a raster of a page can never disagree with the
+      // vector sheet that is printed. Sizes are in millimetres, hence the px-per-mm conversion; a stroke
+      // width of 1 means one point, not one point times a fudge factor.
+      const pxPerMm = rect.pixelsPerPoint / MM_PER_PT;
+      const commands = shapeCommands(item, w, h, pxPerMm);
+      const lineWidth = Math.max(0, item.strokeWidth) * rect.pixelsPerPoint;
+      ctx.save();
+      ctx.translate(w / 2, h / 2);
+      applyShapeCommands(ctx, commands);
+      ctx.lineWidth = lineWidth;
+      ctx.setLineDash(shapeDashPattern(item.strokeStyle, lineWidth) ?? []);
+      ctx.lineCap = item.lineCap === 'round' ? 'round' : item.lineCap === 'square' ? 'square' : 'butt';
+      ctx.lineJoin = 'round';
+      if (shapeHasFill(item)) { ctx.fillStyle = sanitizeShapeColor(item.fillColor, 'transparent'); ctx.fill(); }
+      if (lineWidth > 0 && shapeColorComponents(item.strokeColor)) {
+        ctx.strokeStyle = sanitizeShapeColor(item.strokeColor);
+        ctx.stroke();
+      }
+      ctx.restore();
     } else {
       const content = item.kind==='text' ? item.text : formatOverlayNumber(item,item.target==='page'?context.pageIndex:context.sheetIndex,context.total);
       if (item.backgroundColor && item.backgroundColor !== 'transparent'){ctx.fillStyle=item.backgroundColor;ctx.fillRect(0,0,w,h);}

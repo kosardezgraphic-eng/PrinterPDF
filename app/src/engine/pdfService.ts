@@ -5,6 +5,7 @@
 
 import {
   BlendMode,
+  LineCapStyle,
   PDFArray,
   PDFName,
   PDFNumber,
@@ -31,7 +32,8 @@ import type {
   WatermarkSettings,
 } from '@shared/models';
 import { drawOverlayText, textPlacements } from './textOverlays';
-import { imagePlacements, imageDrawRect } from './overlayPlacements';
+import { imagePlacements, imageDrawRect, shapePlacements } from './overlayPlacements';
+import { MM_PER_PT, shapeColorComponents, shapeCommands, shapeDashPattern, shapeHasFill, shapeSvgPath } from './shapes';
 import { rasterizeOverlayImage } from './imageImport';
 import { planPictureEmbedding } from './imageFormat';
 import { computeImpositionSheets, sortCellsByLayer } from './layoutEngine';
@@ -762,6 +764,38 @@ export async function exportImposedPdf(params: {
         font,
         color: rgb(0.25, 0.3, 0.38),
       });
+    }
+
+    // Shapes go on the page as vector paths, not as a raster of the box: a 0.2 pt hairline printed from
+    // a bitmap would arrive as a grey smear, and this is the same outline the preview paints from the
+    // same command list. Filled first, so text and pictures keep their traditional position above them.
+    for (const placement of shapePlacements(sheetSide,totalSides,allPages,overlays,pageIndices)) {
+      const item=placement.shape;
+      if (!Number.isFinite(placement.width) || !Number.isFinite(placement.height) || placement.width <= 0 || placement.height <= 0) continue;
+      // The path is in millimetres around the centre of the box, and drawSvgPath multiplies it by `scale`
+      // while flipping y — so the line width and the dash have to be in millimetres too.
+      const lineWidthMm=item.strokeWidth*MM_PER_PT;
+      const fill=shapeHasFill(item)?shapeColorComponents(item.fillColor):null;
+      const stroke=item.strokeWidth>0?shapeColorComponents(item.strokeColor):null;
+      if(!fill&&!stroke)continue;                      // nothing to draw, so nothing to clip either
+      const dash=shapeDashPattern(item.strokeStyle,lineWidthMm);
+      outPage.pushOperators(pushGraphicsState());
+      if(placement.clip){const r=placement.clip;outPage.pushOperators(rectangle(r.x*MM_TO_PT,sheetHeightPt-(r.y+r.height)*MM_TO_PT,r.width*MM_TO_PT,r.height*MM_TO_PT),clip(),endPath());}
+      const parentAngle=-placement.parentRotation*Math.PI/180,pcx=(placement.parentX+placement.parentWidth/2)*MM_TO_PT,pcy=sheetHeightPt-(placement.parentY+placement.parentHeight/2)*MM_TO_PT;
+      if(parentAngle){const c=Math.cos(parentAngle),s=Math.sin(parentAngle);outPage.pushOperators(concatTransformationMatrix(c,s,-s,c,pcx-c*pcx+s*pcy,pcy-s*pcx-c*pcy));}
+      outPage.drawSvgPath(shapeSvgPath(shapeCommands(item,placement.width,placement.height)), {
+        x:(placement.x+placement.width/2)*MM_TO_PT,
+        y:sheetHeightPt-(placement.y+placement.height/2)*MM_TO_PT,
+        scale:MM_TO_PT,
+        rotate:degrees(-item.rotation),
+        ...(fill?{color:rgb(fill[0],fill[1],fill[2])}:{}),
+        ...(stroke?{borderColor:rgb(stroke[0],stroke[1],stroke[2])}:{}),
+        ...(lineWidthMm>0?{borderWidth:lineWidthMm}:{}),
+        ...(dash?{borderDashArray:dash.map(length=>Math.max(0.01,length))}:{}),
+        ...(item.lineCap==='round'?{borderLineCap:LineCapStyle.Round}:item.lineCap==='square'?{borderLineCap:LineCapStyle.Projecting}:{}),
+        opacity:clampOpacity(item.opacity),
+      });
+      outPage.pushOperators(popGraphicsState());
     }
 
     for (const placement of textPlacements(sheetSide,totalSides,allPages,overlays,pageIndices)) {

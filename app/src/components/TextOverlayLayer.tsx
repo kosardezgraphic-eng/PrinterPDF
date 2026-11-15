@@ -1,14 +1,15 @@
 import React,{useEffect,useLayoutEffect,useRef} from 'react';
-import type {ComputedSheetSide,PageItem,PageOverlay,PageOverlayImage,PageOverlayText} from '@shared/models';
+import type {ComputedSheetSide,PageItem,PageOverlay,PageOverlayImage,PageOverlayShape,PageOverlayText} from '@shared/models';
 import {drawOverlayText} from '../engine/textOverlays';
 import {imageDrawRect,overlayPlacements,type OverlayPlacement} from '../engine/overlayPlacements';
-import {moveOverlay,resizeOverlay,resizeOverlayKeepingAspect,rotationFromPointer,pointerAngle,type OverlayHandle} from '../engine/overlayGeometry';
+import {centreWithinLimits,moveOverlay,overlayLimitsForBox,resizeOverlay,resizeOverlayKeepingAspect,rotationFromPointer,pointerAngle,type OverlayHandle,type OverlayLimits} from '../engine/overlayGeometry';
 import {rotateVector} from '../engine/pageGeometry';
+import {MM_PER_PT, SHAPE_NAMES, shapeCommands, shapeDashPattern, shapeHasFill, shapeIsStrokedOnly, shapeSvgPath} from '../engine/shapes';
 import {useAppStore} from '../store/useAppStore';
 const MM_TO_PT=72/25.4;
 const newId=()=>globalThis.crypto?.randomUUID?.()??`overlay-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 /** The editable geometry lives on the overlay itself for every kind. */
-const targetOf=(p:OverlayPlacement)=>'text' in p ? p.text : p.image;
+const targetOf=(p:OverlayPlacement)=>'text' in p ? p.text : 'image' in p ? p.image : p.shape;
 
 function TextCanvas({item,width,height,pxPerMm}:{item:PageOverlayText;width:number;height:number;pxPerMm:number}) {
  const ref=useRef<HTMLCanvasElement>(null);
@@ -30,6 +31,25 @@ function ImagePicture({item,width,height}:{item:PageOverlayImage;width:number;he
  return <img src={item.src} alt={item.name} draggable={false} style={{position:'absolute',...fit,maxWidth:'100%',maxHeight:'100%',
    transform:`scaleX(${item.flipHorizontal?-1:1}) scaleY(${item.flipVertical?-1:1})`,opacity:item.opacity,pointerEvents:'none',userSelect:'none'}}/>;
 }
+/**
+ * A drawn shape in the preview. The path comes from the same `shapeCommands` the exported PDF turns into
+ * vector operators, and the viewBox is in millimetres around the centre of the box, so the picture on the
+ * screen and the ink on the sheet are the same numbers — not two drawings that drift apart.
+ */
+function ShapeGlyph({item,widthMm,heightMm}:{item:PageOverlayShape;widthMm:number;heightMm:number}) {
+ const d=shapeSvgPath(shapeCommands(item,widthMm,heightMm));
+ const lineWidth=Math.max(0,item.strokeWidth*MM_PER_PT);
+ const dash=shapeDashPattern(item.strokeStyle,lineWidth);
+ return <svg data-shape-glyph={item.type} width="100%" height="100%" aria-hidden="true"
+   viewBox={`${-widthMm/2} ${-heightMm/2} ${widthMm} ${heightMm}`} preserveAspectRatio="none"
+   style={{display:'block',overflow:'visible',opacity:item.opacity}}>
+   <path d={d} fill={shapeHasFill(item)?item.fillColor:'none'} fillRule="nonzero"
+     stroke={lineWidth>0?item.strokeColor:'none'} strokeWidth={lineWidth}
+     strokeDasharray={dash?dash.join(' '):undefined}
+     strokeLinecap={item.lineCap ?? (shapeIsStrokedOnly(item.type)?'round':'butt')} strokeLinejoin="round"/>
+ </svg>;
+}
+
 const HANDLES: {id:OverlayHandle;left:string;top:string;cursor:string}[]=[
  {id:'nw',left:'0%',top:'0%',cursor:'nwse-resize'},{id:'n',left:'50%',top:'0%',cursor:'ns-resize'},
  {id:'ne',left:'100%',top:'0%',cursor:'nesw-resize'},{id:'e',left:'100%',top:'50%',cursor:'ew-resize'},
@@ -37,7 +57,7 @@ const HANDLES: {id:OverlayHandle;left:string;top:string;cursor:string}[]=[
  {id:'sw',left:'0%',top:'100%',cursor:'nesw-resize'},{id:'w',left:'0%',top:'50%',cursor:'ew-resize'}];
 type Gesture={pointer:number;x:number;y:number;node:HTMLDivElement;visual:HTMLElement;copy:boolean;handle:OverlayHandle|'move'|'rotate';frame:number|null;dx:number;dy:number;
  startRotation:number;startAngle:number;centerX:number;centerY:number;lock?:boolean};
-function OverlayOccurrence({p,pxPerMm,selected,enabled}:{p:OverlayPlacement;pxPerMm:number;selected:boolean;enabled:boolean}){
+function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacement;pxPerMm:number;selected:boolean;enabled:boolean;sheetMm:{width:number;height:number}}){
  const item=targetOf(p);
  const select=useAppStore(s=>s.selectOverlay),update=useAppStore(s=>s.updateOverlay),add=useAppStore(s=>s.addOverlay),beginEdit=useAppStore(s=>s.beginTextEdit);
  const edit=useAppStore(s=>s.textEdit?.occurrenceKey===p.key?s.textEdit:null);
@@ -45,8 +65,17 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled}:{p:OverlayPlacement;pxPe
  const mounted=useRef(false);
  const gesture=useRef<Gesture|null>(null);
  const isImage='image' in p;
+ const isShape='shape' in p;
  /** Images and text are free by default; page numbers keep their ratio unless Shift is held. */
  const lockedDefault=item.lockAspect ?? item.kind==='numbering';
+ /**
+  * How far the box may travel. A page overlay is clipped by its cell, so the cell — not the narrower
+  * content box the percentages refer to — is the limit; a sheet overlay (and a page whose cell allows
+  * overflow) is limited by the sheet. Everything inside it is printable, so a picture can be pushed into
+  * the margin or over one edge for a bleed, and only its centre must stay on the page.
+  */
+ const limits:OverlayLimits = overlayLimitsForBox(
+   {x:p.parentX,y:p.parentY,width:p.parentWidth,height:p.parentHeight},p.clip,sheetMm);
  const cleanup=(g:Gesture)=>{if(g.frame!==null)cancelAnimationFrame(g.frame);g.node.style.cursor='move';
   if(g.visual!==g.node)g.visual.remove();
   else{g.node.style.left=`${item.xPercent}%`;g.node.style.top=`${item.yPercent}%`;g.node.style.width=`${item.widthPercent}%`;g.node.style.height=`${item.heightPercent}%`;g.node.style.transform=`rotate(${item.rotation}deg)`;}
@@ -58,16 +87,18 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled}:{p:OverlayPlacement;pxPe
  const geometry=(g:Gesture)=>{
   const angle=p.parentRotation+(g.handle==='move'?0:item.rotation);
   const delta=rotateVector(g.dx,g.dy,-angle),pw=p.parentWidth*pxPerMm,ph=p.parentHeight*pxPerMm;
-  if(g.handle==='move')return moveOverlay(item,delta.x/pw*100,delta.y/ph*100);
+  if(g.handle==='move')return moveOverlay(item,delta.x/pw*100,delta.y/ph*100,limits);
   const handle=g.handle as OverlayHandle;
   const next=(g.lock ?? lockedDefault)
-    ? resizeOverlayKeepingAspect(item,handle,delta.x/pw*100,delta.y/ph*100,{parentWidth:p.parentWidth,parentHeight:p.parentHeight})
-    : resizeOverlay(item,handle,delta.x/pw*100,delta.y/ph*100);
+    ? resizeOverlayKeepingAspect(item,handle,delta.x/pw*100,delta.y/ph*100,{parentWidth:p.parentWidth,parentHeight:p.parentHeight},1,limits)
+    : resizeOverlay(item,handle,delta.x/pw*100,delta.y/ph*100,1,limits);
   const dx=((next.xPercent+next.widthPercent/2)-(item.xPercent+item.widthPercent/2))*pw/100;
   const dy=((next.yPercent+next.heightPercent/2)-(item.yPercent+item.heightPercent/2))*ph/100;
   const shifted=rotateVector(dx,dy,item.rotation);
-  return {...next,xPercent:Math.max(0,Math.min(100-next.widthPercent,item.xPercent+item.widthPercent/2+shifted.x/pw*100-next.widthPercent/2)),
-   yPercent:Math.max(0,Math.min(100-next.heightPercent,item.yPercent+item.heightPercent/2+shifted.y/ph*100-next.heightPercent/2))};
+  // A rotated box grows its bounding rect, so the centre is moved back and re-clamped rather than the corners.
+  return centreWithinLimits({...next,
+   xPercent:item.xPercent+item.widthPercent/2+shifted.x/pw*100-next.widthPercent/2,
+   yPercent:item.yPercent+item.heightPercent/2+shifted.y/ph*100-next.heightPercent/2},limits);
  };
  const paint=(g:Gesture)=>{
   if(g.handle==='rotate'){g.node.style.transform=`rotate(${rotationFromPointer(g.centerX,g.centerY,g.x+g.dx,g.y+g.dy,g.startRotation,g.startAngle,g.lock?15:undefined)}deg)`;return;}
@@ -106,22 +137,24 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled}:{p:OverlayPlacement;pxPe
  };
  const lang=useAppStore(s=>s.settings.language);
  const editable=!isImage && item.kind==='text' ? item as PageOverlayText : null;
- const label=isImage?(p as {image:PageOverlayImage}).image.name:('renderText' in p ? p.renderText.text : '')||(lang==='fa'?'نوشته':'Overlay');
+ const label=isImage?(p as {image:PageOverlayImage}).image.name:isShape?(lang==='fa'?SHAPE_NAMES[(p as {shape:PageOverlayShape}).shape.type][0]:SHAPE_NAMES[(p as {shape:PageOverlayShape}).shape.type][1]):('renderText' in p ? p.renderText.text : '')||(lang==='fa'?'نوشته':'Overlay');
  return <div data-overlay-id={item.id} role="button" tabIndex={enabled?0:-1} aria-label={label || (lang==='fa'?'لایه':'Overlay')}
-   onDoubleClick={e=>{if(!enabled)return;e.stopPropagation();activate();if(editable)beginEdit(item.id,p.key);else{select(item.id);const el=document.querySelector<HTMLTextAreaElement>('[data-numbering-template],[data-image-source]');if(el){el.focus();el.select();}}}}
+   onDoubleClick={e=>{if(!enabled)return;e.stopPropagation();activate();if(editable)beginEdit(item.id,p.key);else{select(item.id);const el=document.querySelector<HTMLTextAreaElement>('[data-numbering-template],[data-image-source],[data-shape-fill]');if(el){el.focus();el.select();}}}}
    onKeyDown={e=>{if(!enabled)return;
    const arrows:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};
    const step=arrows[e.key];
    if(step){e.preventDefault();e.stopPropagation();activate();
      // One millimetre on the sheet, five with Shift; the delta is rotated back into the parent box's own axes.
      const mm=(e.shiftKey?5:1),delta=rotateVector(step[0]*mm*pxPerMm,step[1]*mm*pxPerMm,-(p.parentRotation+item.rotation));
-     update(item.id,{xPercent:Math.max(0,Math.min(100-item.widthPercent,item.xPercent+delta.x/(p.parentWidth*pxPerMm)*100)),yPercent:Math.max(0,Math.min(100-item.heightPercent,item.yPercent+delta.y/(p.parentHeight*pxPerMm)*100))});return;}
+     update(item.id,moveOverlay(item,delta.x/(p.parentWidth*pxPerMm)*100,delta.y/(p.parentHeight*pxPerMm)*100,limits));return;}
    if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();activate();if(editable)beginEdit(item.id,p.key);else select(item.id);}}}
    onPointerDown={e=>{if(!edit)start(e,'move');}} onPointerMove={move} onPointerUp={e=>finish(e)} onPointerCancel={e=>finish(e,true)} onLostPointerCapture={e=>finish(e,true)} onClick={e=>e.stopPropagation()}
    style={{position:'absolute',left:`${item.xPercent}%`,top:`${item.yPercent}%`,width:`${item.widthPercent}%`,height:`${item.heightPercent}%`,transform:`rotate(${item.rotation}deg)`,outline:selected?'2px solid #0ea5e9':'none',cursor:enabled?'move':'default',touchAction:'none',pointerEvents:enabled?'auto':'none'}}>
    {!edit && (isImage
      ? <ImagePicture item={(p as {image:PageOverlayImage}).image} width={p.width} height={p.height}/>
-     : <TextCanvas item={(p as {renderText:PageOverlayText}).renderText} width={p.width} height={p.height} pxPerMm={pxPerMm}/>)}
+     : isShape
+       ? <ShapeGlyph item={(p as {shape:PageOverlayShape}).shape} widthMm={p.width} heightMm={p.height}/>
+       : <TextCanvas item={(p as {renderText:PageOverlayText}).renderText} width={p.width} height={p.height} pxPerMm={pxPerMm}/>)}
    {'formulaError' in p && p.formulaError && !edit && <span role="alert" className="absolute bottom-full left-0 whitespace-nowrap bg-red-800 px-1 text-white">{lang==='fa'?'فرمول نامعتبر':'Invalid formula'}</span>}
    {edit && editable && <textarea ref={textarea} data-inline-overlay-editor aria-label={lang==='fa'?'ویرایش متن روی صفحه':'Edit text on page'} value={edit.text}
       wrap="off" spellCheck={false} dir={/[\u0590-\u08ff]/.test(edit.text)?'rtl':'ltr'}
@@ -133,7 +166,7 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled}:{p:OverlayPlacement;pxPe
       style={{width:'100%',height:'100%',resize:'none',border:0,padding:0,margin:0,outline:'none',overflow:'auto',background:editable.backgroundColor||'transparent',color:editable.color,
         fontFamily:`"${editable.fontFamily}", sans-serif`,fontWeight:editable.bold?'bold':'normal',fontStyle:editable.italic?'italic':'normal',textDecoration:editable.underline?'underline':'none',
         textAlign:editable.align,fontSize:editable.fontSize*pxPerMm/MM_TO_PT,lineHeight:editable.lineHeight??1.25,wordSpacing:`${(editable.wordSpacingPt??0)*pxPerMm/MM_TO_PT}px`,letterSpacing:`${(editable.letterSpacingPt??0)*pxPerMm/MM_TO_PT}px`,opacity:editable.opacity,touchAction:'auto'}} />}
-   {selected && enabled && !edit && HANDLES.map(h=><button key={h.id} type="button" aria-label={`${isImage?(lang==='fa'?'تغییر اندازه تصویر':'Resize image'):item.kind==='numbering'?(lang==='fa'?'تغییر اندازه شماره':'Resize number'):(lang==='fa'?'تغییر اندازه متن':'Resize text')} ${h.id}`} data-text-resize={h.id}
+   {selected && enabled && !edit && HANDLES.map(h=><button key={h.id} type="button" aria-label={`${isImage?(lang==='fa'?'تغییر اندازه تصویر':'Resize image'):isShape?(lang==='fa'?'تغییر اندازه شکل':'Resize shape'):item.kind==='numbering'?(lang==='fa'?'تغییر اندازه شماره':'Resize number'):(lang==='fa'?'تغییر اندازه متن':'Resize text')} ${h.id}`} data-text-resize={h.id}
       onPointerDown={e=>start(e,h.id)} onClick={e=>e.stopPropagation()} style={{position:'absolute',left:h.left,top:h.top,transform:'translate(-50%,-50%)',cursor:h.cursor,touchAction:'none'}}
       className="flex h-6 w-6 items-center justify-center"><span className="h-2.5 w-2.5 border border-white bg-sky-600"/></button>)}
    {selected && enabled && !edit && <button type="button" aria-label={lang==='fa'?'چرخش':'Rotate'} data-text-rotate
@@ -146,13 +179,14 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled}:{p:OverlayPlacement;pxPe
 export function TextOverlayLayer({sheet,totalSheets,pages,pageIndices,pxPerMm,enabled,previewOnly=false}:{sheet:ComputedSheetSide;totalSheets:number;pages:PageItem[];pageIndices:Map<string,number>;pxPerMm:number;enabled:boolean;previewOnly?:boolean}){
  const overlays=useAppStore(s=>s.overlays),selected=useAppStore(s=>s.selectedOverlayId);
  const placements=overlayPlacements(sheet,totalSheets,pages,overlays,pageIndices);
+ const sheetMm={width:sheet.widthMm,height:sheet.heightMm};
  return <div className="pointer-events-none absolute inset-0 z-10">{placements.map(p=>{
   const item=targetOf(p);
   const c=p.clip;
   const clip=c?`inset(${c.y*pxPerMm}px ${Math.max(0,(sheet.widthMm-c.x-c.width)*pxPerMm)}px ${Math.max(0,(sheet.heightMm-c.y-c.height)*pxPerMm)}px ${c.x*pxPerMm}px)`:undefined;
   return <div key={p.key} className="pointer-events-none absolute inset-0" style={{clipPath:clip}}>
     <div className="pointer-events-none absolute" style={{left:p.parentX*pxPerMm,top:p.parentY*pxPerMm,width:p.parentWidth*pxPerMm,height:p.parentHeight*pxPerMm,transform:`rotate(${p.parentRotation}deg)`}}>
-      <OverlayOccurrence p={p} pxPerMm={pxPerMm} selected={selected===item.id} enabled={enabled && (!previewOnly || item.target==='page')}/>
+      <OverlayOccurrence p={p} pxPerMm={pxPerMm} sheetMm={sheetMm} selected={selected===item.id} enabled={enabled && (!previewOnly || item.target==='page')}/>
     </div>
   </div>;
  })}</div>;

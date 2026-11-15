@@ -169,7 +169,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const pageNumbers = useMemo(() => new Map(pages.map((page, index) => [page.id, index + 1])), [pages]);
   const textEditing = useAppStore(s => !!s.textEdit || s.overlays.some(o=>o.id===s.selectedOverlayId && (o.kind==='numbering'||o.kind==='image')));
   useEffect(() => { if (textEditing) setCanvasTool('move'); }, [textEditing]);
-  const hasTextOverlays = useMemo(() => overlays.some(item => item.kind === 'text' || item.kind === 'image' || item.kind === 'numbering' && item.enabled), [overlays]);
+    // A drawn shape is edited through the same interactive layer, so it has to mount for shapes alone too.
+  const hasTextOverlays = useMemo(() => overlays.some(item => item.kind === 'text' || item.kind === 'shape' || item.kind === 'image' || item.kind === 'numbering' && item.enabled), [overlays]);
   useEffect(() => {
     if (!selectedOverlayId) return;
     const dismiss = (event: PointerEvent) => {

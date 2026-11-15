@@ -30,15 +30,22 @@ switch into ten times a day; the machine's preferences are not, and while they w
 
 ## Editing a profile
 
-In the panel inside the settings modal (`SettingsPresetPanel`), every stored profile is a row with four
-controls — the built-in row has only the first:
+A closed row is one click to **Apply** and nothing else — that is what makes the list usable as quick
+access. **Edit** on the row opens the four things that need room, and only that row is open at a time
+(`editingPresetId` in the store):
 
 | control | behaviour |
 | --- | --- |
-| name | an inline input; Enter or blur commits, Escape discards. A name that another profile has (trimmed, case-insensitive) is refused, not silently deduplicated. |
-| Apply | merges the stored sheet over the current one. |
+| name | an inline input, focused when the row opens; Enter or blur commits, Escape puts the old name back. A name another profile has (trimmed, case-insensitive) is refused, not silently deduplicated. |
+| chord | the recorder below the divider — see the next section. |
 | re-capture | stores today's sheet into that profile — contents change, name, chord and creation date stay. |
 | delete | two clicks: the first marks the button, the second deletes. A pending confirmation times out after 6 s. |
+
+**Done** commits the name and closes the row. Opening another row closes the previous one *and* cancels a
+waiting recorder, and deleting the profile a row is editing closes that row too — an editor pointing at a
+profile that no longer exists would write into nothing. The ribbon's quick menu carries the same Edit button,
+which opens the settings modal with that row already expanded; the built-in defaults row has none, because
+there is nothing in it to rename or re-capture.
 
 Saving from the ribbon menu names the profile `پروفایل N` / `Profile N`; saving from the panel takes the
 typed name, and an empty name is refused rather than auto-numbered.
@@ -67,8 +74,10 @@ one-line notice in the panel; `reserved-shortcut` is checked against the raw tex
 canonicalised, so `alt+ f6` is reported as "that chord belongs to the defaults entry", not as an unknown
 key.
 
-The recorder itself (`ShortcutRecorder`) listens in the **capture phase** and sets
-`shortcutRecordingFor` in the store. The flag matters: `App.tsx` fires profile chords from a window
+The recorder itself (`ShortcutRecorder`, exported so the ribbon and the panel share it) listens in the
+**capture phase** and sets `shortcutRecordingFor` in the store. It sits under the open row, next to the
+`<kbd>` chip of the chord it currently has, and the row spells out the allowed set — `Alt+F7–Alt+F12`, or
+`Ctrl+Alt` plus one letter or digit — so the operator learns the rule where they are about to break it. The flag matters: `App.tsx` fires profile chords from a window
 listener placed *before* the "ignore keys typed into a field" guard — a chord is never text input, so it
 has to work with the caret anywhere — and while a recorder is open the same listener has to stand aside or
 the profile would fire while the operator is still typing its key. Escape cancels without changing the
@@ -96,7 +105,9 @@ Covered by the suite: scope (a profile cannot move `settings`; the legacy `setti
 rename and its duplicate refusal, re-capture, delete, the built-in row refusing rename/delete, chord
 normalisation / reservation / collision, the recorder flag suppressing the global handler, and both UI
 paths end to end in jsdom — `sheetPresets.test.ts`, `settingsResetAndPresets.test.ts`,
-`settingsRestoreRace.test.ts`, `settingsShortcutsUI.test.ts`.
+`settingsRestoreRace.test.ts`, `settingsShortcutsUI.test.ts` (which covers the edit button both ways: the
+row that opens, the ribbon button that opens the modal on the right row, and the built-in row that refuses
+to be edited).
 
 Not run here: the `%APPDATA%` read/write (this environment is Linux, no Electron), the real feel of
 `Alt+F6` on a Windows desktop — Windows documents it as "switch to the previous window of the same

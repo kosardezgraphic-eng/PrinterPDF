@@ -116,6 +116,50 @@ describe('picture drop and gestures',()=>{
   expect(overlay(0).xPercent).toBeGreaterThan(before.xPercent);expect(overlay(0).yPercent).toBeGreaterThan(before.yPercent);
   act(()=>useAppStore.getState().undo());expect(overlay(0)).toMatchObject({xPercent:before.xPercent,yPercent:before.yPercent});
  });
+ it('lets a picture hang over the page edge, as far as its centre stays on the sheet',()=>{
+  // The old rule kept the whole box inside the page, so a logo could never reach the trim line and a
+  // bleed was impossible. The centre is the limit now: half the picture may leave, all of it may not.
+  act(()=>useAppStore.setState({overlays:[image()],selectedOverlayId:'i'}));render();
+  pointer(node(),'pointerdown',10,10);pointer(node(),'pointermove',4000,4000);pointer(node(),'pointerup',4000,4000);
+  expect(overlay(0).xPercent).toBeCloseTo(100-45/2,4);
+  expect(overlay(0).yPercent).toBeCloseTo(100-15/2,4);
+  expect(overlay(0).xPercent+overlay(0).widthPercent).toBeGreaterThan(100);
+  expect(overlay(0).widthPercent).toBeCloseTo(45,6);expect(overlay(0).heightPercent).toBeCloseTo(15,6);   // only the position moved
+  // Arrow keys obey the same rule, so nudging into the margin works the way dragging does.
+  act(()=>useAppStore.setState({overlays:[image({xPercent:70,yPercent:30})],selectedOverlayId:'i'}));render();
+  const key=(keyName:string)=>act(()=>node().dispatchEvent(new KeyboardEvent('keydown',{key:keyName,bubbles:true})));
+  key('ArrowRight');key('ArrowRight');
+  expect(overlay(0).xPercent).toBeGreaterThan(100-45);        // past the old clamp, still on the sheet
+  expect(overlay(0).xPercent+overlay(0).widthPercent).toBeGreaterThan(100);
+ });
+
+ it('puts the picture where the millimetre fields say, including outside the box',()=>{
+  // The drag is limited so a lost picture stays grabbable; a typed number is an explicit decision and is
+  // not argued with. These two fields are also the only way to put a logo at an exact offset from the trim.
+  act(()=>useAppStore.setState({overlays:[image()],selectedOverlayId:'i'}));render();
+  const setNumber=(label:string,value:number)=>{
+    const el=host.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;
+    const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!;
+    act(()=>{setter.call(el,String(value));el.dispatchEvent(new Event('input',{bubbles:true}));});
+  };
+  setNumber('Image X',-20);
+  expect(overlay(0).xPercent).toBeCloseTo(-10,4);            // 200 mm wide box → -20 mm is -10 %
+  setNumber('Image Y',310);
+  expect(overlay(0).yPercent).toBeCloseTo(103.333,2);        // past the bottom edge, on purpose
+  expect(overlay(0).widthPercent).toBeCloseTo(45,6);         // only the position moved
+ });
+
+ it('lines a picture up with the same edges it can be dragged to',()=>{
+  act(()=>useAppStore.setState({overlays:[image()],selectedOverlayId:'i'}));render();
+  const align=(where:string)=>act(()=>host.querySelector<HTMLButtonElement>(`[data-image-align="${where}"]`)!.click());
+  align('right');
+  expect(overlay(0).xPercent).toBeCloseTo(55,4);             // 100 - its own 45
+  align('bottom');
+  expect(overlay(0).yPercent).toBeCloseTo(85,4);
+  align('hcenter');align('vcenter');
+  expect(overlay(0)).toMatchObject({xPercent:27.5,yPercent:42.5});
+ });
+
  it('keeps the millimetre ratio while resizing a locked picture and frees it with Shift',()=>{
   act(()=>useAppStore.setState({overlays:[image()],selectedOverlayId:'i'}));render();
   const handle=()=>host.querySelector<HTMLElement>('[data-text-resize="se"]')!;

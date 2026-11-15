@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, KeyRound, Layers, RotateCcw, Save, Trash2, ChevronDown, X } from 'lucide-react';
+import { Check, KeyRound, Layers, Pencil, RotateCcw, Save, Trash2, ChevronDown, X } from 'lucide-react';
 import { useAppStore, type SettingsPresetEditError } from '../store/useAppStore';
 import { buildSheetPresetRows, type SheetPresetRow } from '../engine/sheetPresets';
 import { formatShortcut } from '@shared/models';
@@ -9,12 +9,16 @@ import { formatShortcut } from '@shared/models';
  *
  * A profile captures what happens to the *sheet* — imposition and placement, colour and effects,
  * watermark, page numbering — and nothing of the application's own preferences. That limit is the whole
- * point of the redesign: switching a profile on a loaded job is a press change, and an operator must not
- * lose their language, unit or tariff settings because they picked a layout they use every morning.
+ * point of the design: switching a profile on a loaded job is a press change, and an operator must not
+ * lose their language, unit or tariff settings because they picked the layout they use every morning.
  *
  * The list always starts with one built-in row, «Shipped defaults», which is not stored anywhere: it is
  * the reset action with the `Alt+F6` chord on it. That is what makes the shortcut and the list the same
- * feature instead of two ways to do one thing, and it is why the entry cannot be renamed or deleted.
+ * feature instead of two ways to do one thing, and it is why that entry cannot be renamed or deleted.
+ *
+ * Every other row is a single click to apply, and an explicit **edit** button that opens the four things
+ * that need room — rename, the chord recorder, re-capturing today's sheet, delete. A list where every row
+ * is a form is how a quick-access list stops being quick.
  */
 
 const errorHint: Record<SettingsPresetEditError, [string, string]> = {
@@ -42,7 +46,7 @@ function ShortcutChip({ shortcut, isFa }: { shortcut: string; isFa: boolean }) {
  * the flag is what tells the application-level chord handler to stand aside, and the capture phase is
  * what keeps the browser from acting on the key being recorded.
  */
-function ShortcutRecorder({ presetId, shortcut, isFa, onNotice }: {
+export function ShortcutRecorder({ presetId, shortcut, isFa, onNotice }: {
   presetId: string;
   shortcut: string;
   isFa: boolean;
@@ -51,9 +55,6 @@ function ShortcutRecorder({ presetId, shortcut, isFa, onNotice }: {
   const recording = useAppStore(state => state.shortcutRecordingFor === presetId);
   const beginRecording = useAppStore(state => state.beginShortcutRecording);
   const editSettingsPreset = useAppStore(state => state.editSettingsPreset);
-  const cancelRef = useRef<() => void>(() => {});
-  cancelRef.current = () => beginRecording(null);
-
   useEffect(() => {
     if (!recording) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -76,10 +77,11 @@ function ShortcutRecorder({ presetId, shortcut, isFa, onNotice }: {
   }, [recording, presetId, beginRecording, editSettingsPreset, onNotice, isFa]);
 
   return (
-    <span className="inline-flex items-center gap-1">
+    <span className="inline-flex items-center gap-1" data-shortcut-recorder={presetId}>
       <button
         type="button"
         data-shortcut-record={presetId}
+        aria-pressed={recording}
         onClick={() => beginRecording(recording ? null : presetId)}
         title={isFa
           ? 'برای ثبت کلید میانبر، این را بزنید و بعد ترکیب مورد نظر را فشار دهید (Esc لغو)'
@@ -90,9 +92,9 @@ function ShortcutRecorder({ presetId, shortcut, isFa, onNotice }: {
       >
         {recording
           ? (isFa ? 'کلید را بزنید…' : 'Press a key…')
-          : (shortcut ? (isFa ? 'تغییر کلید' : 'Change key') : (isFa ? 'ثبت کلید' : 'Assign a key'))}
+          : (shortcut ? (isFa ? 'تغییر کلید' : 'Change key') : (isFa ? 'ثبت کلید میانبر' : 'Assign a key'))}
       </button>
-      {shortcut && !recording && (
+      {shortcut && (
         <button
           type="button"
           data-shortcut-clear={presetId}
@@ -106,6 +108,9 @@ function ShortcutRecorder({ presetId, shortcut, isFa, onNotice }: {
           <X className="h-3 w-3" />
         </button>
       )}
+      <span className="text-[9px] leading-3 text-slate-500">
+        {isFa ? 'Alt+F7 تا Alt+F12 یا Ctrl+Alt + حرف/رقم' : 'Alt+F7–Alt+F12, or Ctrl+Alt + a letter or digit'}
+      </span>
     </span>
   );
 }
@@ -116,6 +121,8 @@ export function SettingsPresetMenu() {
   const language = useAppStore(state => state.settings.language);
   const applySettingsPreset = useAppStore(state => state.applySettingsPreset);
   const saveSettingsPreset = useAppStore(state => state.saveSettingsPreset);
+  const beginEditPreset = useAppStore(state => state.beginEditPreset);
+  const setModalState = useAppStore(state => state.setModalState);
   const [open, setOpen] = useState(false);
   const host = useRef<HTMLDivElement | null>(null);
   const isFa = language === 'fa';
@@ -153,20 +160,20 @@ export function SettingsPresetMenu() {
         <div
           data-preset-menu
           dir={isFa ? 'rtl' : 'ltr'}
-          className="absolute z-50 mt-1 w-80 rounded-xl border border-slate-600 bg-slate-900 p-2 text-xs text-slate-100 shadow-2xl"
+          className="absolute z-50 mt-1 w-96 rounded-xl border border-slate-600 bg-slate-900 p-2 text-xs text-slate-100 shadow-2xl"
         >
           <div className="mb-1 px-1 text-[10px] font-bold text-slate-400">
             {isFa ? 'چیدمان شیت — با یک کلیک یا کلید میانبرش' : 'Sheet setup — one click, or its chord'}
           </div>
           <ul className="mb-1 max-h-64 overflow-y-auto">
             {rows.map(row => (
-              <li key={row.id}>
+              <li key={row.id} className="flex items-center gap-1">
                 <button
                   type="button"
                   data-preset-apply={row.name}
                   data-preset-builtin={row.builtin ? 'true' : undefined}
                   onClick={() => { applySettingsPreset(row.id); setOpen(false); }}
-                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-start hover:bg-slate-700 cursor-pointer"
+                  className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-start hover:bg-slate-700 cursor-pointer"
                 >
                   {row.builtin
                     ? <RotateCcw className="h-3.5 w-3.5 shrink-0 text-rose-300" aria-hidden="true" />
@@ -177,6 +184,18 @@ export function SettingsPresetMenu() {
                   </span>
                   <ShortcutChip shortcut={row.shortcut} isFa={isFa} />
                 </button>
+                {!row.builtin && (
+                  <button
+                    type="button"
+                    data-preset-edit={row.id}
+                    aria-label={isFa ? `ویرایش پروفایل ${row.name}` : `Edit the ${row.name} profile`}
+                    title={isFa ? 'نام، کلید میانبر، محتوا و حذف این پروفایل' : 'Rename this profile, give it a chord, re-capture it or delete it'}
+                    onClick={() => { beginEditPreset(row.id); setModalState('settings', true); setOpen(false); }}
+                    className="rounded-lg border border-slate-700 p-1.5 text-slate-300 hover:bg-slate-700 cursor-pointer"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -195,15 +214,17 @@ export function SettingsPresetMenu() {
   );
 }
 
-/** The managing half: rename, re-record the chord, re-capture the contents, delete. */
+/** The managing half: apply in one click, and an edit button that opens rename, chord, re-capture, delete. */
 export function SettingsPresetPanel() {
   const presets = useAppStore(state => state.settingsPresets);
   const language = useAppStore(state => state.settings.language);
-  const saveSettingsPreset = useAppStore(state => state.saveSettingsPreset);
   const applySettingsPreset = useAppStore(state => state.applySettingsPreset);
   const deleteSettingsPreset = useAppStore(state => state.deleteSettingsPreset);
   const editSettingsPreset = useAppStore(state => state.editSettingsPreset);
   const overwriteSettingsPreset = useAppStore(state => state.overwriteSettingsPreset);
+  const saveSettingsPreset = useAppStore(state => state.saveSettingsPreset);
+  const editingId = useAppStore(state => state.editingPresetId);
+  const beginEditPreset = useAppStore(state => state.beginEditPreset);
   const [name, setName] = useState('');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState('');
@@ -229,11 +250,12 @@ export function SettingsPresetPanel() {
   }, [confirmReset]);
 
   const commitDraft = (row: SheetPresetRow) => {
+    // The draft is the source of truth while a row is open for editing; committing the same text the
+    // store already has must not burn an undo step or flash "name taken" for the profile's own name.
     const draft = drafts[row.id];
-    if (draft === undefined || draft === row.name) { setDrafts(state => ({ ...state, [row.id]: '' })); return; }
+    if (draft === undefined || draft === row.name) return;
     const result = editSettingsPreset(row.id, { name: draft });
-    if (result.ok) setDrafts(state => { const next = { ...state }; delete next[row.id]; return next; });
-    else setNotice(isFa ? errorHint[result.error][0] : errorHint[result.error][1]);
+    if (!result.ok) setNotice(isFa ? errorHint[result.error][0] : errorHint[result.error][1]);
   };
 
   const applyRow = (row: SheetPresetRow) => {
@@ -247,7 +269,7 @@ export function SettingsPresetPanel() {
   };
 
   return (
-    <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+    <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/40 p-4" data-preset-panel>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h3 className="flex items-center gap-2 text-xs font-extrabold text-slate-200">
           <Layers className="h-4 w-4 text-violet-400" />
@@ -265,107 +287,147 @@ export function SettingsPresetPanel() {
       </p>
 
       <ul className="mb-3 grid gap-1.5">
-        {rows.map(row => (
-          <li
-            key={row.id}
-            data-preset-row={row.id}
-            className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/70 px-2.5 py-1.5"
-          >
-            <span className="min-w-0 flex-1 basis-40">
-              {row.builtin ? (
-                <span className="block truncate text-[11px] font-bold text-rose-200">{row.name}</span>
-              ) : (
-                <input
-                  type="text"
-                  data-preset-name={row.id}
-                  aria-label={isFa ? `نام پروفایل ${row.name}` : `Profile name for ${row.name}`}
-                  value={drafts[row.id] ?? row.name}
-                  onChange={(event) => setDrafts(state => ({ ...state, [row.id]: event.target.value.slice(0, 80) }))}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') { event.preventDefault(); commitDraft(row); }
-                    if (event.key === 'Escape') setDrafts(state => { const next = { ...state }; delete next[row.id]; return next; });
-                  }}
-                  onBlur={() => commitDraft(row)}
-                  className="w-full rounded-lg border border-transparent bg-transparent px-1 py-0.5 text-[11px] font-bold text-slate-100 hover:border-slate-600 focus:border-sky-500 focus:bg-slate-900"
-                />
-              )}
-              <span dir="ltr" className="block truncate text-[10px] text-slate-400">
-                {row.summary || (row.builtin
-                  ? (isFa ? 'بازنشانی چیدمان، افکت‌ها، واترمارک، شماره‌گذاری و تنظیمات برنامه' : 'resets layout, effects, watermark, numbering and app settings')
-                  : '')}
-                {row.changedAt && !row.builtin ? ` · ${formatStamp(row.changedAt, isFa)}` : ''}
+        {rows.map(row => {
+          const editing = editingId === row.id;
+          return (
+            <li
+              key={row.id}
+              data-preset-row={row.id}
+              data-preset-editing={editing ? 'true' : undefined}
+              className={`flex flex-wrap items-center gap-2 rounded-xl border px-2.5 py-1.5 ${
+                editing ? 'border-sky-500/60 bg-slate-800' : 'border-slate-700 bg-slate-800/70'
+              }`}
+            >
+              <span className="min-w-0 flex-1 basis-40">
+                {row.builtin ? (
+                  <span className="block truncate text-[11px] font-bold text-rose-200">{row.name}</span>
+                ) : editing ? (
+                  <input
+                    type="text"
+                    data-preset-name={row.id}
+                    autoFocus
+                    aria-label={isFa ? `نام پروفایل ${row.name}` : `Profile name for ${row.name}`}
+                    value={drafts[row.id] ?? row.name}
+                    onChange={(event) => setDrafts(state => ({ ...state, [row.id]: event.target.value.slice(0, 80) }))}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') { event.preventDefault(); commitDraft(row); }
+                      if (event.key === 'Escape') { event.preventDefault(); setDrafts(state => ({ ...state, [row.id]: row.name })); }
+                    }}
+                    onBlur={() => commitDraft(row)}
+                    className="w-full rounded-lg border border-slate-600 bg-slate-900 px-1.5 py-0.5 text-[11px] font-bold text-slate-100 focus:border-sky-500"
+                  />
+                ) : (
+                  <span className="block truncate text-[11px] font-bold text-slate-100">{row.name}</span>
+                )}
+                <span dir="ltr" className="block truncate text-[10px] text-slate-400">
+                  {row.summary || (row.builtin
+                    ? (isFa ? 'بازنشانی چیدمان، افکت‌ها، واترمارک، شماره‌گذاری و تنظیمات برنامه' : 'resets layout, effects, watermark, numbering and app settings')
+                    : '')}
+                  {row.changedAt && !row.builtin ? ` · ${formatStamp(row.changedAt, isFa)}` : ''}
+                </span>
               </span>
-            </span>
 
-            <span className="flex items-center gap-1.5">
-              <ShortcutChip shortcut={row.shortcut} isFa={isFa} />
-              {!row.builtin && <ShortcutRecorder presetId={row.id} shortcut={row.shortcut} isFa={isFa} onNotice={setNotice} />}
-            </span>
+              <span className="flex items-center gap-1.5">
+                {!editing && <ShortcutChip shortcut={row.shortcut} isFa={isFa} />}
+              </span>
 
-            <span className="flex items-center gap-1.5">
-              <button
-                type="button"
-                data-preset-apply={row.name}
-                data-reset-settings={row.builtin ? 'true' : undefined}
-                onClick={() => applyRow(row)}
-                className={`rounded-lg px-2.5 py-1 text-[11px] font-bold cursor-pointer ${
-                  row.builtin
+              <span className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  data-preset-apply={row.name}
+                  data-reset-settings={row.builtin ? 'true' : undefined}
+                  onClick={() => applyRow(row)}
+                  className={`rounded-lg px-2.5 py-1 text-[11px] font-bold cursor-pointer ${
+                    row.builtin
+                      ? (confirmReset
+                          ? 'bg-rose-600 text-white'
+                          : 'border border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20')
+                      : 'bg-sky-600 text-white hover:bg-sky-500'
+                  }`}
+                >
+                  {row.builtin
                     ? (confirmReset
-                        ? 'bg-rose-600 text-white'
-                        : 'border border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20')
-                    : 'bg-sky-600 text-white hover:bg-sky-500'
-                }`}
-              >
-                {row.builtin
-                  ? (confirmReset
-                      ? (isFa ? 'برای بازنشانی دوباره بزنید' : 'Press again to reset')
-                      : (isFa ? 'بازنشانی به پیش‌فرض' : 'Reset to defaults'))
-                  : (isFa ? 'اعمال' : 'Apply')}
-              </button>
-              {!row.builtin && (
-                <>
+                        ? (isFa ? 'برای بازنشانی دوباره بزنید' : 'Press again to reset')
+                        : (isFa ? 'بازنشانی به پیش‌فرض' : 'Reset to defaults'))
+                    : (isFa ? 'اعمال' : 'Apply')}
+                </button>
+                {!row.builtin && !editing && (
                   <button
                     type="button"
-                    data-preset-capture={row.id}
-                    title={isFa
-                      ? 'چیدمان، افکت‌ها، واترمارک و شماره‌گذاری فعلی روی همین پروفایل ذخیره می‌شود (نام و کلید میانبر می‌مانند)'
-                      : 'Store the current sheet setup into this profile (its name and chord stay)'}
-                    onClick={() => {
-                      const result = overwriteSettingsPreset(row.id);
-                      if (!result.ok) setNotice(isFa ? errorHint[result.error][0] : errorHint[result.error][1]);
-                    }}
-                    className="rounded-lg border border-slate-600 p-1 text-emerald-300 hover:bg-slate-700 cursor-pointer"
+                    data-preset-edit={row.id}
+                    onClick={() => { beginEditPreset(row.id); setDrafts(state => ({ ...state, [row.id]: row.name })); }}
+                    className="flex items-center gap-1 rounded-lg border border-slate-600 bg-slate-800 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-700 cursor-pointer"
                   >
-                    <Save className="h-3.5 w-3.5" />
+                    <Pencil className="h-3 w-3" aria-hidden="true" />
+                    {isFa ? 'ویرایش' : 'Edit'}
                   </button>
-                  <button
-                    type="button"
-                    aria-label={isFa ? `حذف پروفایل ${row.name}` : `Delete the ${row.name} profile`}
-                    data-preset-delete={confirmDelete === row.id ? 'confirm' : row.id}
-                    onClick={() => {
-                      if (confirmDelete === row.id) { deleteSettingsPreset(row.id); setConfirmDelete(null); return; }
-                      setConfirmDelete(row.id);
-                    }}
-                    className={`rounded-lg border p-1 cursor-pointer ${
-                      confirmDelete === row.id
-                        ? 'border-rose-400 bg-rose-600/30 text-rose-100'
-                        : 'border-slate-700 text-rose-300 hover:bg-rose-500/15'
-                    }`}
-                  >
-                    {confirmDelete === row.id
-                      ? <span className="px-1 text-[10px] font-bold">{isFa ? 'تأیید حذف' : 'Confirm'}</span>
-                      : <Trash2 className="h-3.5 w-3.5" />}
-                  </button>
-                </>
+                )}
+                {!row.builtin && editing && (
+                  <>
+                    <button
+                      type="button"
+                      data-preset-capture={row.id}
+                      title={isFa
+                        ? 'چیدمان، افکت‌ها، واترمارک و شماره‌گذاری فعلی روی همین پروفایل ذخیره می‌شود (نام و کلید میانبر می‌مانند)'
+                        : 'Store the current sheet setup into this profile (its name and chord stay)'}
+                      onClick={() => {
+                        const result = overwriteSettingsPreset(row.id);
+                        if (!result.ok) setNotice(isFa ? errorHint[result.error][0] : errorHint[result.error][1]);
+                      }}
+                      className="flex items-center gap-1 rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-200 hover:bg-emerald-500/20 cursor-pointer"
+                    >
+                      <Save className="h-3 w-3" aria-hidden="true" />
+                      {isFa ? 'ثبت محتوای فعلی' : 'Store current sheet'}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={isFa ? `حذف پروفایل ${row.name}` : `Delete the ${row.name} profile`}
+                      data-preset-delete={confirmDelete === row.id ? 'confirm' : row.id}
+                      onClick={() => {
+                        if (confirmDelete === row.id) { deleteSettingsPreset(row.id); setConfirmDelete(null); return; }
+                        setConfirmDelete(row.id);
+                      }}
+                      className={`rounded-lg border p-1 cursor-pointer ${
+                        confirmDelete === row.id
+                          ? 'border-rose-400 bg-rose-600/30 text-rose-100'
+                          : 'border-slate-700 text-rose-300 hover:bg-rose-500/15'
+                      }`}
+                    >
+                      {confirmDelete === row.id
+                        ? <span className="px-1 text-[10px] font-bold">{isFa ? 'تأیید حذف' : 'Confirm'}</span>
+                        : <Trash2 className="h-3.5 w-3.5" />}
+                    </button>
+                    <button
+                      type="button"
+                      data-preset-edit-done={row.id}
+                      onClick={() => { commitDraft(row); beginEditPreset(null); }}
+                      className="rounded-lg border border-slate-600 px-2 py-1 text-[10px] font-bold text-slate-300 hover:bg-slate-700 cursor-pointer"
+                    >
+                      {isFa ? 'پایان ویرایش' : 'Done'}
+                    </button>
+                  </>
+                )}
+              </span>
+
+              {editing && (
+                <span className="flex w-full flex-wrap items-center justify-between gap-2 border-t border-slate-700 pt-1.5">
+                  <span className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                    <KeyRound className="h-3 w-3 shrink-0 text-amber-300" aria-hidden="true" />
+                    {isFa ? 'کلید میانبر این پروفایل:' : 'Chord for this profile:'}
+                    <ShortcutChip shortcut={row.shortcut} isFa={isFa} />
+                  </span>
+                  <ShortcutRecorder presetId={row.id} shortcut={row.shortcut} isFa={isFa} onNotice={setNotice} />
+                </span>
               )}
-            </span>
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ul>
 
       <div className="flex flex-wrap items-center gap-2">
         <input
           type="text"
+          data-preset-new-name
           value={name}
           onChange={(event) => setName(event.target.value.slice(0, 80))}
           onKeyDown={(event) => {
