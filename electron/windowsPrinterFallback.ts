@@ -16,7 +16,9 @@ import type {
   SpoolerJobInfo,
   SpoolerJobStatus,
 } from '../shared/models';
-import { STANDARD_PAPER_SIZES } from '../shared/models';
+import { STANDARD_PAPER_SIZES, sanitizeDriverText } from '../shared/models';
+
+export { sanitizeDriverText };
 
 const execFileAsync = promisify(execFile);
 
@@ -156,7 +158,7 @@ function normalizeStringList(items?: unknown[], fallback: string[] = []): string
   const seen = new Set<string>();
   const out: string[] = [];
   for (const raw of items ?? []) {
-    const clean = typeof raw === 'string' ? raw.trim() : '';
+    const clean = typeof raw === 'string' ? sanitizeDriverText(raw) : '';
     if (!clean) continue;
     const key = clean.toLowerCase();
     if (!seen.has(key)) {
@@ -172,7 +174,7 @@ function buildPaperOptions(raw: RawWin32Printer): PrinterPaperOption[] {
   const seen = new Set<string>();
 
   for (const item of raw.PaperSizes ?? []) {
-    const name = (item.Name ?? '').trim();
+    const name = sanitizeDriverText(item.Name);
     const widthMm = Number(item.WidthMm);
     const heightMm = Number(item.HeightMm);
     if (!name || !Number.isFinite(widthMm) || !Number.isFinite(heightMm) || widthMm <= 0 || heightMm <= 0) {
@@ -193,7 +195,7 @@ function buildPaperOptions(raw: RawWin32Printer): PrinterPaperOption[] {
 
   if (options.length === 0 && raw.PaperNames?.length) {
     for (const rawName of raw.PaperNames) {
-      const clean = rawName.trim();
+      const clean = sanitizeDriverText(rawName);
       if (!clean) continue;
       const id = matchStandardPaperId(undefined, undefined, clean);
       const dims = id !== 'Custom' ? STANDARD_PAPER_SIZES[id] : { widthMm: 210, heightMm: 297 };
@@ -317,6 +319,7 @@ export async function queryWindowsPrintersViaPowerShell(): Promise<PrinterInfo[]
 
   const psScript = [
     "$ErrorActionPreference = 'SilentlyContinue'",
+    '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
     'Add-Type -AssemblyName System.Drawing',
     '$hasSysPrint = $false',
     'try { Add-Type -AssemblyName System.Printing; Add-Type -AssemblyName ReachFramework; $hasSysPrint = $true } catch {}',
@@ -450,7 +453,7 @@ export async function queryWindowsPrintersViaPowerShell(): Promise<PrinterInfo[]
   const { stdout } = await execFileAsync(
     'powershell.exe',
     ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
-    { timeout: 14000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 }
+    { timeout: 14000, windowsHide: true, maxBuffer: 8 * 1024 * 1024, encoding: 'utf8' }
   );
 
   const parsed = parseJsonSafe<RawWin32Printer | RawWin32Printer[]>(stdout);
@@ -458,11 +461,11 @@ export async function queryWindowsPrintersViaPowerShell(): Promise<PrinterInfo[]
   const list = Array.isArray(parsed) ? parsed : [parsed];
 
   return list
-    .filter((item): item is RawWin32Printer & { Name: string } => Boolean(item?.Name?.trim()))
+    .filter((item): item is RawWin32Printer & { Name: string } => Boolean(sanitizeDriverText(item?.Name)))
     .map((raw) => {
-      const name = raw.Name.trim();
-      const portName = (raw.PortName ?? '').trim() || 'LOCAL';
-      const driverName = (raw.DriverName ?? '').trim() || 'Windows Printer Driver';
+      const name = sanitizeDriverText(raw.Name);
+      const portName = sanitizeDriverText(raw.PortName) || 'LOCAL';
+      const driverName = sanitizeDriverText(raw.DriverName) || 'Windows Printer Driver';
 
       const paperOptions = buildPaperOptions(raw);
       const supportedPapers = mapPaperIdsFromOptions(paperOptions, raw.PaperNames);
@@ -482,7 +485,7 @@ export async function queryWindowsPrintersViaPowerShell(): Promise<PrinterInfo[]
       // Resolve active paper size + physical dimensions straight from driver DefaultPageSettings
       let defW = Number(raw.DefaultPaperWidthMm) || 0;
       let defH = Number(raw.DefaultPaperHeightMm) || 0;
-      const defPaperName = (raw.DefaultPaperName ?? '').trim();
+      const defPaperName = sanitizeDriverText(raw.DefaultPaperName);
       let activePaperId: PaperSizeId = matchStandardPaperId(defW, defH, defPaperName);
 
       if ((defW <= 0 || defH <= 0) && activePaperId !== 'Custom') {
@@ -503,14 +506,16 @@ export async function queryWindowsPrintersViaPowerShell(): Promise<PrinterInfo[]
         }
       }
 
+      const cleanDefTray = sanitizeDriverText(raw.DefaultTray);
       const activeTray =
-        raw.DefaultTray?.trim() && supportedTrays.includes(raw.DefaultTray.trim())
-          ? raw.DefaultTray.trim()
+        cleanDefTray && supportedTrays.includes(cleanDefTray)
+          ? cleanDefTray
           : supportedTrays.find((t) => /auto|automatically/i.test(t)) ?? supportedTrays[0] ?? 'Auto Select';
 
+      const cleanDefMedia = sanitizeDriverText(raw.DefaultMediaType);
       const activeMedia =
-        raw.DefaultMediaType?.trim() && supportedMediaTypes.includes(raw.DefaultMediaType.trim())
-          ? raw.DefaultMediaType.trim()
+        cleanDefMedia && supportedMediaTypes.includes(cleanDefMedia)
+          ? cleanDefMedia
           : supportedMediaTypes[0] ?? 'Plain Paper';
 
       const activeDpi =
@@ -607,6 +612,7 @@ export async function queryWindowsPrinterMarginsViaPowerShell(
 
   const psScript = [
     "$ErrorActionPreference = 'Stop'",
+    '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
     'Add-Type -AssemblyName System.Drawing',
     '$ps = New-Object System.Drawing.Printing.PrinterSettings',
     `$ps.PrinterName = '${escapedPrinter}'`,
@@ -643,7 +649,7 @@ export async function queryWindowsPrinterMarginsViaPowerShell(
     const { stdout } = await execFileAsync(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
-      { timeout: 8000, windowsHide: true, maxBuffer: 512 * 1024 }
+      { timeout: 8000, windowsHide: true, maxBuffer: 512 * 1024, encoding: 'utf8' }
     );
     const parsed = parseJsonSafe<{ top: number; right: number; bottom: number; left: number }>(stdout);
     if (
@@ -722,6 +728,7 @@ export async function printToWindowsPrinterViaPowerShell(
   const escapedJsonPath = jobFile.replace(/'/g, "''");
   const psScript = [
     "$ErrorActionPreference = 'Stop'",
+    '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
     'Add-Type -AssemblyName System.Drawing',
     `$cfg = Get-Content -LiteralPath '${escapedJsonPath}' -Raw -Encoding UTF8 | ConvertFrom-Json`,
     '$ps = New-Object System.Drawing.Printing.PrinterSettings',
@@ -826,7 +833,7 @@ export async function printToWindowsPrinterViaPowerShell(
     const { stdout } = await execFileAsync(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
-      { timeout: 60000, windowsHide: true, maxBuffer: 2 * 1024 * 1024 }
+      { timeout: 60000, windowsHide: true, maxBuffer: 2 * 1024 * 1024, encoding: 'utf8' }
     );
     const parsed = parseJsonSafe<{
       JobId?: number;
@@ -862,14 +869,14 @@ export function mapElectronPrintersToPrinterInfo(
   electronPrinters: ElectronNativePrinter[]
 ): PrinterInfo[] {
   return electronPrinters
-    .filter((item) => Boolean(item?.name?.trim()))
+    .filter((item) => Boolean(sanitizeDriverText(item?.name)))
     .map((item) => {
-      const name = item.name.trim();
+      const name = sanitizeDriverText(item.name);
       const opts = (item.options ?? {}) as Record<string, string | undefined>;
-      const portName = opts['printer-location'] || 'WINDOWS_SPOOLER';
+      const portName = sanitizeDriverText(opts['printer-location']) || 'WINDOWS_SPOOLER';
       const driverName =
-        opts['printer-make-and-model'] ||
-        item.description ||
+        sanitizeDriverText(opts['printer-make-and-model']) ||
+        sanitizeDriverText(item.description) ||
         'Windows Printer Driver';
 
       return {
@@ -918,6 +925,7 @@ export async function queryWindowsSpoolerJobsViaPowerShell(
 
   const psScript = [
     "$ErrorActionPreference = 'SilentlyContinue'",
+    '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
     '$jobs = Get-CimInstance -ClassName Win32_PrintJob',
     'if (-not $jobs) { $jobs = Get-WmiObject -Class Win32_PrintJob }',
     '$out = foreach ($j in @($jobs)) {',
@@ -940,7 +948,7 @@ export async function queryWindowsSpoolerJobsViaPowerShell(
   const { stdout } = await execFileAsync(
     'powershell.exe',
     ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
-    { timeout: 8000, windowsHide: true, maxBuffer: 2 * 1024 * 1024 }
+    { timeout: 8000, windowsHide: true, maxBuffer: 2 * 1024 * 1024, encoding: 'utf8' }
   );
 
   const parsed = parseJsonSafe<RawWin32PrintJob | RawWin32PrintJob[]>(stdout);

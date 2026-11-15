@@ -235,6 +235,7 @@ export const QuickBar: React.FC = () => {
           {/* Driver Paper Size + exact mm badge beside Quick Print */}
           <div className="hidden sm:flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-900 px-1.5 py-1">
             <select
+              dir="ltr"
               aria-label={isFa ? 'سایز کاغذ پرینتر' : 'Printer Paper Size'}
               title={
                 isFa
@@ -244,7 +245,7 @@ export const QuickBar: React.FC = () => {
               disabled={!currentPrinter}
               value={selectedPaperValue}
               onChange={(e) => handleQuickPaperChange(e.target.value)}
-              className="bg-transparent text-[11px] font-semibold text-sky-300 focus:outline-none max-w-[130px] truncate cursor-pointer disabled:opacity-50"
+              className="bg-transparent text-[11px] font-semibold text-sky-300 focus:outline-none max-w-[140px] truncate cursor-pointer disabled:opacity-50"
             >
               {paperOptions.map((opt) => (
                 <option
@@ -324,6 +325,7 @@ export const QuickBar: React.FC = () => {
                         {isFa ? 'اندازه کاغذ درایور:' : 'Paper Size:'}
                       </label>
                       <select
+                        dir="ltr"
                         value={selectedPaperValue}
                         onChange={(e) => handleQuickPaperChange(e.target.value)}
                         className="w-full rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"

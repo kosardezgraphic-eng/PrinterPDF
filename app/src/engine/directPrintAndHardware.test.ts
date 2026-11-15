@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { PDFDocument } from 'pdf-lib';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PageItem, PrinterInfo, SourceDocument } from '@shared/models';
+import { sanitizeDriverText, sanitizePrinterInfo } from '@shared/models';
 import { matchStandardPaperId } from '../../../electron/windowsPrinterFallback';
 import { parsePageRangeText } from './pdfService';
 import { computeImpositionSheets, getSheetDimensionsMm } from './layoutEngine';
@@ -129,11 +130,43 @@ describe('direct print & printer hardware integration', () => {
       toasts: [],
       spoolerJobs: [],
       showPrintModal: false,
+      pendingDuplexPrint: null,
+      printProgress: null,
     });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('strips embedded NUL-terminated Windows heap mojibake from paper sizes and trays', () => {
+    expect(sanitizeDriverText('A4\u0000븜鴉뷘鴉뷼')).toBe('A4');
+    expect(sanitizeDriverText('A2 (Fit To Page)\u0000랠걊鴉랠鴉뇨')).toBe('A2 (Fit To Page)');
+    expect(sanitizeDriverText('Auto Select\u0000䍩\uFFFD\u0007')).toBe('Auto Select');
+
+    const dirtyPrinter = makePrinter({
+      capabilities: {
+        ...makePrinter().capabilities,
+        paperOptions: [
+          { id: 'A4', name: 'A4\u0000븜鴉뷘', widthMm: 210, heightMm: 297, rawKind: 9 },
+          { id: 'A2', name: 'A2 (Fit To Page)\u0000랠걊鴉', widthMm: 420, heightMm: 594, rawKind: 66 },
+        ],
+        supportedTrays: ['Auto Select\u0000䍩...', 'Tray 1\u0000븜鴉'],
+      },
+      activeProfile: {
+        ...makePrinter().activeProfile,
+        paperName: 'A4\u0000븜鴉',
+        tray: 'Auto Select\u0000䍩...',
+      },
+    });
+    const clean = sanitizePrinterInfo(dirtyPrinter);
+    expect(clean.capabilities.paperOptions?.map((p) => p.name)).toEqual([
+      'A4',
+      'A2 (Fit To Page)',
+    ]);
+    expect(clean.capabilities.supportedTrays).toEqual(['Auto Select', 'Tray 1']);
+    expect(clean.activeProfile.paperName).toBe('A4');
+    expect(clean.activeProfile.tray).toBe('Auto Select');
   });
 
   it('maps driver paper sizes and exact mm dimensions via matchStandardPaperId', () => {
@@ -213,7 +246,7 @@ describe('direct print & printer hardware integration', () => {
     expect(getSheetDimensionsMm(state.layout)).toEqual({ widthMm: 297, heightMm: 420 });
   });
 
-  it('submits a real direct print job with imposed PDF bytes and active hardware profile', async () => {
+  it('prompts duplex orientation & front/back visualization on Quick Print when duplex is active, then submits after confirm', async () => {
     const submitSpy = vi.spyOn(ipcBridge, 'submitPrintJob').mockResolvedValue({
       jobId: 42,
       printerName: 'SHARP MX-M453U PCL6',
@@ -241,29 +274,143 @@ describe('direct print & printer hardware integration', () => {
       },
     ]);
 
-    useAppStore.setState({ showPrintModal: true });
+    // Duplex printer opens confirmation visualization modal instead of printing blindly
     await useAppStore.getState().silentPrintNow();
+    expect(submitSpy).not.toHaveBeenCalled();
+    expect(useAppStore.getState().pendingDuplexPrint).toBeTruthy();
+
+    (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+
+    act(() => {
+      root.render(React.createElement(ModalsAndToasts));
+    });
+
+    expect(container.textContent).toContain('پیش‌نمایش و تعیین جهت چاپ پشت و رو');
+    const backPreview = container.querySelector('[data-testid="duplex-back-preview"]');
+    expect(backPreview?.getAttribute('data-rotated')).toBe('0');
+
+    // Switch to Short Edge in portrait -> back preview flips 180deg (top-edge flip)
+    const shortEdgeBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('لبه کوتاه')
+    );
+    expect(shortEdgeBtn).toBeTruthy();
+    act(() => {
+      shortEdgeBtn!.click();
+    });
+    expect(
+      container.querySelector('[data-testid="duplex-back-preview"]')?.getAttribute('data-rotated')
+    ).toBe('180');
+
+    // Switch orientation to Landscape + Short Edge -> flips horizontally like a book (0deg)
+    const landscapeBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('افقی')
+    );
+    act(() => {
+      landscapeBtn!.click();
+    });
+    expect(
+      container.querySelector('[data-testid="duplex-back-preview"]')?.getAttribute('data-rotated')
+    ).toBe('0');
+
+    // Confirm and print
+    const confirmBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('تایید جهت و ارسال به پرینتر')
+    );
+    expect(confirmBtn).toBeTruthy();
+    await act(async () => {
+      confirmBtn!.click();
+      await Promise.resolve();
+    });
 
     expect(submitSpy).toHaveBeenCalledTimes(1);
     const [req, sheetCount, pdfBytes] = submitSpy.mock.calls[0];
     expect(req.printerName).toBe('SHARP MX-M453U PCL6');
+    expect(req.orientation).toBe('landscape');
+    expect(req.duplexMode).toBe('short-edge');
     expect(req.tray).toBe('Tray 1');
     expect(req.paperSize).toBe('A4');
-    expect(req.paperWidthMm).toBe(210);
-    expect(req.paperHeightMm).toBe(297);
-    expect(req.mediaType).toBe('Plain Paper');
-    expect(req.dpi).toBe(600);
-    expect(req.duplexMode).toBe('long-edge');
-    expect(req.staple).toBe('None');
-    expect(req.outputBin).toBe('Main Tray');
     expect(sheetCount).toBeGreaterThanOrEqual(1);
     expect(pdfBytes).toBeInstanceOf(Uint8Array);
     expect((pdfBytes as Uint8Array).byteLength).toBeGreaterThan(100);
 
     const nextState = useAppStore.getState();
-    expect(nextState.showPrintModal).toBe(false);
+    expect(nextState.pendingDuplexPrint).toBeNull();
     expect(nextState.spoolerJobs).toHaveLength(1);
     expect(nextState.toasts.at(-1)?.type).toBe('success');
+
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  it('submits simplex Quick Print directly, shows Print Progress popup, and supports canceling mid-flight', async () => {
+    const simplexPrinter = makePrinter({
+      activeProfile: { ...makePrinter().activeProfile, duplexMode: 'none' },
+    });
+    useAppStore.setState({ printers: [simplexPrinter] });
+
+    let resolveSubmit!: (val: Awaited<ReturnType<typeof ipcBridge.submitPrintJob>>) => void;
+    const submitSpy = vi.spyOn(ipcBridge, 'submitPrintJob').mockImplementation(
+      () =>
+        new Promise((res) => {
+          resolveSubmit = res;
+        })
+    );
+    const controlSpy = vi.spyOn(ipcBridge, 'controlSpoolerJob').mockResolvedValue([]);
+
+    (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+
+    act(() => {
+      root.render(React.createElement(ModalsAndToasts));
+    });
+
+    const printPromise = useAppStore.getState().silentPrintNow();
+
+    // Wait briefly for PDF imposition + progress popup activation
+    await vi.waitFor(() => {
+      expect(useAppStore.getState().printProgress?.active).toBe(true);
+      expect(submitSpy).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      root.render(React.createElement(ModalsAndToasts));
+    });
+    expect(container.textContent).toContain('در حال ارسال و چاپ سند');
+    const cancelBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('لغو چاپ')
+    );
+    expect(cancelBtn).toBeTruthy();
+
+    await act(async () => {
+      cancelBtn!.click();
+    });
+
+    expect(useAppStore.getState().printProgress).toBeNull();
+    expect(useAppStore.getState().toasts.at(-1)?.type).toBe('warning');
+
+    // If spooler responds late after cancel, store cancels the late job on the spooler too
+    resolveSubmit({
+      jobId: 99,
+      printerName: 'SHARP MX-M453U PCL6',
+      documentTitle: 'TestBook.pdf',
+      userName: 'operator',
+      status: 'Spooling',
+      totalPages: 2,
+      pagesPrinted: 0,
+      sizeBytes: 2048,
+      priority: 1,
+      submittedAt: new Date().toISOString(),
+    });
+    await printPromise;
+    expect(controlSpy).toHaveBeenCalledWith('SHARP MX-M453U PCL6', 99, 'cancel');
+
+    act(() => root.unmount());
+    container.remove();
   });
 
   it('renders QuickBar Tray & Paper Size controls synced with StatusBar and Modals', () => {

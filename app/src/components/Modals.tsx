@@ -6,11 +6,14 @@ import {
   Settings,
   HelpCircle,
   FlipHorizontal2,
+  FlipVertical2,
   Scissors,
   Download,
   CheckCircle2,
   AlertTriangle,
   Info,
+  Loader2,
+  ArrowUp,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { PrinterRetryButton, PrinterServiceStatus } from './PrinterStatus';
@@ -43,12 +46,18 @@ export const ModalsAndToasts: React.FC = () => {
     showManualDuplexModal,
     showSplitModal,
     showOnboardingTour,
+    pendingDuplexPrint,
+    printProgress,
     toasts,
     setModalState,
     selectPrinter,
     updatePrinterProfile,
     openPrinterPreferences,
     submitPrintJob,
+    confirmDuplexPrint,
+    dismissDuplexPrint,
+    cancelActivePrintJob,
+    closePrintProgress,
     splitEveryNPages,
     makePageArray,
     updateSettings,
@@ -88,6 +97,16 @@ export const ModalsAndToasts: React.FC = () => {
 
   // Onboarding tour step (0..5)
   const [tourStep, setTourStep] = useState(0);
+
+  // Duplex Quick Print confirmation local controls
+  const [quickDuplexOrientation, setQuickDuplexOrientation] = useState<PageOrientation>('portrait');
+  const [quickDuplexMode, setQuickDuplexMode] = useState<DuplexMode>('long-edge');
+
+  React.useEffect(() => {
+    if (!pendingDuplexPrint) return;
+    setQuickDuplexOrientation(pendingDuplexPrint.orientation ?? layout.orientation ?? 'portrait');
+    setQuickDuplexMode(pendingDuplexPrint.duplexMode ?? 'long-edge');
+  }, [pendingDuplexPrint, layout.orientation]);
 
   const selectedPrinter =
     printers.find((p) => p.name === selectedPrinterName) ?? printers[0];
@@ -448,6 +467,7 @@ export const ModalsAndToasts: React.FC = () => {
                       {isFa ? 'سایز کاغذ درایور:' : 'Driver Paper Size:'}
                     </label>
                     <select
+                      dir="ltr"
                       aria-label={isFa ? 'سایز کاغذ درایور' : 'Driver Paper Size'}
                       value={selectedPaperName}
                       onChange={(e) => {
@@ -1297,6 +1317,438 @@ export const ModalsAndToasts: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* 7. QUICK PRINT DUPLEX ORIENTATION & FRONT/BACK VISUALIZATION MODAL */}
+      {pendingDuplexPrint && (() => {
+        const isLandscapeSheet = quickDuplexOrientation === 'landscape';
+        // Vertical axis (book-style turn): portrait + long-edge OR landscape + short-edge
+        // Horizontal axis (top/calendar turn): portrait + short-edge OR landscape + long-edge
+        const isHorizontalTopFlip =
+          quickDuplexMode === 'short-edge'
+            ? !isLandscapeSheet
+            : quickDuplexMode === 'long-edge'
+              ? isLandscapeSheet
+              : false;
+        const backRotated180 = quickDuplexMode !== 'none' && isHorizontalTopFlip;
+        const flipHeadlineFa =
+          quickDuplexMode === 'none'
+            ? 'چاپ تک‌رو (فقط روی برگه چاپ می‌شود)'
+            : isHorizontalTopFlip
+              ? 'چرخش از لبه بالایی (حالت تقویمی / بالا به پایین)'
+              : 'چرخش از لبه کناری (حالت کتابی / چپ به راست)';
+        const flipHeadlineEn =
+          quickDuplexMode === 'none'
+            ? 'Simplex (Front side only)'
+            : isHorizontalTopFlip
+              ? 'Top-Edge Flip (Calendar / Notepad Binding)'
+              : 'Side-Edge Flip (Book Binding)';
+        const flipDetailFa =
+          quickDuplexMode === 'none'
+            ? 'تنها یک طرف کاغذ چاپ می‌شود و پشت برگه سفید باقی می‌ماند.'
+            : isHorizontalTopFlip
+              ? 'پشت برگه نسبت به محور افقی بالا/پایین برگردانده می‌شود؛ در ورق‌زدن عمودی از بالا (مانند تقویم یا جزوه افقی) هر دو سمت کاملاً هم‌جهت و خوانا هستند.'
+              : 'پشت برگه نسبت به لبه عمودی کناری برگردانده می‌شود؛ هنگام ورق‌زدن کتابی از چپ یا راست، صفحه ۱ و ۲ کاملاً تراز و رو به بالا قرار می‌گیرند.';
+        const flipDetailEn =
+          quickDuplexMode === 'none'
+            ? 'Only the front side of each sheet will be printed.'
+            : isHorizontalTopFlip
+              ? 'Sheet flips across its horizontal top edge. Flip upward like a wall calendar or notepad to read both sides upright.'
+              : 'Sheet flips across its vertical side edge. Turn sideways like a book to read both front and back upright.';
+
+        return (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={isFa ? 'تعیین جهت چاپ پشت و رو' : 'Duplex Print Orientation'}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
+          >
+            <div className="w-full max-w-2xl rounded-2xl border border-indigo-500/40 bg-slate-900 p-6 text-slate-100 shadow-2xl">
+              <div className="mb-4 flex items-center justify-between border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <FlipHorizontal2 className="h-5 w-5 text-indigo-400 shrink-0" />
+                  <div className="min-w-0">
+                    <h2 className="text-base font-extrabold truncate">
+                      {isFa
+                        ? 'پیش‌نمایش و تعیین جهت چاپ پشت و رو (Duplex)'
+                        : 'Confirm Duplex Orientation & Front/Back Preview'}
+                    </h2>
+                    <p className="text-[11px] text-slate-400 truncate">
+                      {pendingDuplexPrint.printerName} • {pendingDuplexPrint.paperName || pendingDuplexPrint.paperSize}{' '}
+                      ({Math.round(pendingDuplexPrint.paperWidthMm ?? sheetDims.widthMm)}×
+                      {Math.round(pendingDuplexPrint.paperHeightMm ?? sheetDims.heightMm)} mm) • {pendingDuplexPrint.tray}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={dismissDuplexPrint}
+                  aria-label={isFa ? 'بستن' : 'Close'}
+                  className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white cursor-pointer"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {/* Controls: Sheet Orientation & Flip Edge */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4 text-xs">
+                <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                  <div className="mb-2 font-bold text-slate-300">
+                    {isFa ? '۱. جهت صفحه (Orientation):' : '1. Page Orientation:'}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setQuickDuplexOrientation('portrait')}
+                      className={`rounded-lg border px-3 py-2 font-bold transition whitespace-nowrap cursor-pointer ${
+                        quickDuplexOrientation === 'portrait'
+                          ? 'border-sky-500 bg-sky-600/25 text-sky-200'
+                          : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      {isFa ? 'عمودی (Portrait)' : 'Portrait'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setQuickDuplexOrientation('landscape')}
+                      className={`rounded-lg border px-3 py-2 font-bold transition whitespace-nowrap cursor-pointer ${
+                        quickDuplexOrientation === 'landscape'
+                          ? 'border-sky-500 bg-sky-600/25 text-sky-200'
+                          : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      {isFa ? 'افقی (Landscape)' : 'Landscape'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                  <div className="mb-2 font-bold text-slate-300">
+                    {isFa ? '۲. لبه چرخش پشت و رو (Flip Edge):' : '2. Duplex Flip Edge:'}
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setQuickDuplexMode('long-edge')}
+                      className={`rounded-lg border px-2 py-2 text-[11px] font-bold transition whitespace-nowrap cursor-pointer ${
+                        quickDuplexMode === 'long-edge'
+                          ? 'border-indigo-500 bg-indigo-600/30 text-indigo-200'
+                          : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      {isFa ? 'لبه بلند' : 'Long Edge'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setQuickDuplexMode('short-edge')}
+                      className={`rounded-lg border px-2 py-2 text-[11px] font-bold transition whitespace-nowrap cursor-pointer ${
+                        quickDuplexMode === 'short-edge'
+                          ? 'border-amber-500 bg-amber-600/25 text-amber-200'
+                          : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      {isFa ? 'لبه کوتاه' : 'Short Edge'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setQuickDuplexMode('none')}
+                      className={`rounded-lg border px-2 py-2 text-[11px] font-bold transition whitespace-nowrap cursor-pointer ${
+                        quickDuplexMode === 'none'
+                          ? 'border-emerald-500 bg-emerald-600/25 text-emerald-200'
+                          : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      {isFa ? 'تک‌رو' : 'Simplex'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Interactive Front & Back Visual Sheet Preview */}
+              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-5">
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-6">
+                  {/* Front Side */}
+                  <div className="flex flex-col items-center gap-2">
+                    <span className="text-[11px] font-bold text-sky-300">
+                      {isFa ? 'روی برگه (صفحه ۱)' : 'Front Side (Page 1)'}
+                    </span>
+                    <div
+                      className={`relative flex flex-col items-center justify-between rounded-lg border-2 border-sky-400 bg-white p-3 text-slate-800 shadow-lg transition-all ${
+                        isLandscapeSheet ? 'h-28 w-40' : 'h-40 w-28'
+                      }`}
+                    >
+                      {/* Binding Spine Highlight */}
+                      {quickDuplexMode !== 'none' && (
+                        <div
+                          className={`absolute ${
+                            isHorizontalTopFlip
+                              ? 'inset-x-0 top-0 h-2 bg-amber-500/85'
+                              : 'inset-y-0 start-0 w-2 bg-indigo-500/85'
+                          }`}
+                          title={isFa ? 'محور چرخش کاغذ' : 'Flip hinge edge'}
+                        />
+                      )}
+                      <div className="flex items-center gap-1 text-[10px] font-bold text-sky-700">
+                        <ArrowUp className="h-3 w-3" />
+                        <span>{isFa ? 'بالا' : 'TOP'}</span>
+                      </div>
+                      <div className="flex flex-col items-center gap-1">
+                        <span className="text-xl font-black text-slate-900 tabular-nums">1</span>
+                        <div className="h-1 w-14 rounded bg-slate-300" />
+                        <div className="h-1 w-10 rounded bg-slate-200" />
+                      </div>
+                      <span className="text-[9px] font-semibold text-slate-400">FRONT</span>
+                    </div>
+                  </div>
+
+                  {/* Flip Axis Indicator */}
+                  <div className="flex flex-col items-center gap-1.5 text-center">
+                    {isHorizontalTopFlip ? (
+                      <FlipVertical2 className="h-8 w-8 text-amber-400 animate-pulse" />
+                    ) : (
+                      <FlipHorizontal2
+                        className={`h-8 w-8 ${
+                          quickDuplexMode === 'none'
+                            ? 'text-slate-600'
+                            : 'text-indigo-400 animate-pulse'
+                        }`}
+                      />
+                    )}
+                    <span className="rounded-md border border-slate-700 bg-slate-900 px-2.5 py-1 text-[10px] font-bold text-slate-200">
+                      {isFa
+                        ? quickDuplexMode === 'none'
+                          ? 'فقط یک‌رو'
+                          : isHorizontalTopFlip
+                            ? 'چرخش از بالا/پایین'
+                            : 'چرخش از لبه کناری'
+                        : quickDuplexMode}
+                    </span>
+                  </div>
+
+                  {/* Back Side */}
+                  <div className="flex flex-col items-center gap-2">
+                    <span className="text-[11px] font-bold text-amber-300">
+                      {quickDuplexMode === 'none'
+                        ? isFa
+                          ? 'پشت برگه (سفید)'
+                          : 'Back Side (Blank)'
+                        : isFa
+                          ? 'پشت برگه (صفحه ۲)'
+                          : 'Back Side (Page 2)'}
+                    </span>
+                    <div
+                      data-testid="duplex-back-preview"
+                      data-rotated={backRotated180 ? '180' : '0'}
+                      className={`relative flex flex-col items-center justify-between rounded-lg border-2 p-3 shadow-lg transition-all ${
+                        isLandscapeSheet ? 'h-28 w-40' : 'h-40 w-28'
+                      } ${
+                        quickDuplexMode === 'none'
+                          ? 'border-dashed border-slate-600 bg-slate-800/40 text-slate-500'
+                          : 'border-amber-400 bg-white text-slate-800'
+                      } ${backRotated180 ? 'rotate-180' : ''}`}
+                    >
+                      {quickDuplexMode !== 'none' && (
+                        <div
+                          className={`absolute ${
+                            isHorizontalTopFlip
+                              ? 'inset-x-0 top-0 h-2 bg-amber-500/85'
+                              : 'inset-y-0 start-0 w-2 bg-indigo-500/85'
+                          }`}
+                        />
+                      )}
+                      {quickDuplexMode === 'none' ? (
+                        <div className="my-auto text-center text-[10px] font-bold">
+                          {isFa ? 'بدون چاپ' : 'No Print'}
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-1 text-[10px] font-bold text-amber-700">
+                            <ArrowUp className="h-3 w-3" />
+                            <span>{isFa ? 'بالا' : 'TOP'}</span>
+                          </div>
+                          <div className="flex flex-col items-center gap-1">
+                            <span className="text-xl font-black text-slate-900 tabular-nums">2</span>
+                            <div className="h-1 w-14 rounded bg-slate-300" />
+                            <div className="h-1 w-10 rounded bg-slate-200" />
+                          </div>
+                          <span className="text-[9px] font-semibold text-slate-400">BACK</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 rounded-xl border border-indigo-500/30 bg-indigo-950/35 p-3 text-xs leading-relaxed">
+                  <div className="font-bold text-indigo-200">
+                    {isFa ? flipHeadlineFa : flipHeadlineEn}
+                  </div>
+                  <div className="mt-1 text-[11px] text-slate-300">
+                    {isFa ? flipDetailFa : flipDetailEn}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-800 pt-4">
+                <button
+                  type="button"
+                  onClick={dismissDuplexPrint}
+                  className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-xs text-slate-300 hover:bg-slate-700 whitespace-nowrap cursor-pointer"
+                >
+                  {isFa ? 'انصراف' : 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void confirmDuplexPrint({
+                      orientation: quickDuplexOrientation,
+                      duplexMode: quickDuplexMode,
+                    })
+                  }
+                  className="flex items-center gap-2 rounded-xl bg-sky-600 px-5 py-2 text-xs font-bold text-white hover:bg-sky-500 whitespace-nowrap cursor-pointer"
+                >
+                  <Printer className="h-4 w-4 shrink-0" />
+                  <span>
+                    {isFa ? 'تایید جهت و ارسال به پرینتر' : 'Confirm & Print Now'}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 8. PRINT PROGRESS & CANCEL POPUP MODAL */}
+      {printProgress?.active && (() => {
+        const isTerminal =
+          printProgress.stage === 'completed' ||
+          printProgress.stage === 'canceled' ||
+          printProgress.stage === 'error';
+        const stageTextFa: Record<typeof printProgress.stage, string> = {
+          preparing: 'در حال آماده‌سازی و چیدمان شیت‌ها...',
+          rendering: 'در حال رندر باکیفیت صفحات برای چاپ...',
+          sending: 'در حال ارسال مستقیم به صف پرینتر (Spooler)...',
+          printing: 'در حال چاپ توسط پرینتر...',
+          canceling: 'در حال لغو فرآیند چاپ...',
+          canceled: 'چاپ لغو شد',
+          completed: printProgress.spoolerJobId
+            ? `با موفقیت به پرینتر ارسال شد (کد کار #${printProgress.spoolerJobId})`
+            : 'با موفقیت به پرینتر ارسال شد',
+          error: printProgress.errorMessage || 'ارسال به پرینتر با خطا مواجه شد',
+        };
+        const stageTextEn: Record<typeof printProgress.stage, string> = {
+          preparing: 'Preparing imposed sheets...',
+          rendering: 'Rasterizing pages for printer...',
+          sending: 'Sending job to Windows Spooler...',
+          printing: 'Printing on device...',
+          canceling: 'Canceling print job...',
+          canceled: 'Print job canceled',
+          completed: printProgress.spoolerJobId
+            ? `Sent to printer (Job #${printProgress.spoolerJobId})`
+            : 'Sent to printer',
+          error: printProgress.errorMessage || 'Print failed',
+        };
+
+        return (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={isFa ? 'پیشرفت ارسال چاپ' : 'Print Progress'}
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
+          >
+            <div className="w-full max-w-md rounded-2xl border border-sky-500/40 bg-slate-900 p-6 text-slate-100 shadow-2xl">
+              <div className="mb-4 flex items-center gap-3">
+                <div
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${
+                    printProgress.stage === 'completed'
+                      ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-400'
+                      : printProgress.stage === 'error'
+                        ? 'border-rose-500/40 bg-rose-500/15 text-rose-400'
+                        : 'border-sky-500/40 bg-sky-500/15 text-sky-400'
+                  }`}
+                >
+                  {printProgress.stage === 'completed' ? (
+                    <CheckCircle2 className="h-5 w-5" />
+                  ) : printProgress.stage === 'error' ? (
+                    <AlertTriangle className="h-5 w-5" />
+                  ) : (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm font-extrabold text-white truncate">
+                    {isFa ? 'در حال ارسال و چاپ سند' : 'Printing Document'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400 truncate">
+                    {printProgress.printerName} • {printProgress.jobTitle}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4">
+                <div className="mb-2 flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-200">
+                    {isFa
+                      ? stageTextFa[printProgress.stage]
+                      : stageTextEn[printProgress.stage]}
+                  </span>
+                  <span className="font-mono font-bold text-sky-300 tabular-nums">
+                    {Math.round(printProgress.percent)}%
+                  </span>
+                </div>
+
+                <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-800">
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      printProgress.stage === 'completed'
+                        ? 'bg-emerald-500'
+                        : printProgress.stage === 'error'
+                          ? 'bg-rose-500'
+                          : 'bg-sky-500'
+                    }`}
+                    style={{
+                      width: `${Math.max(4, Math.min(100, printProgress.percent))}%`,
+                    }}
+                  />
+                </div>
+
+                <div className="mt-2.5 flex items-center justify-between text-[11px] text-slate-400 tabular-nums">
+                  <span>
+                    {isFa
+                      ? `شیت ${printProgress.currentSheet} از ${printProgress.totalSheets}`
+                      : `Sheet ${printProgress.currentSheet} of ${printProgress.totalSheets}`}
+                  </span>
+                  {printProgress.spoolerJobId && (
+                    <span className="font-mono text-emerald-300">
+                      Spooler #{printProgress.spoolerJobId}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-5 flex items-center justify-end gap-2">
+                {!isTerminal ? (
+                  <button
+                    type="button"
+                    disabled={printProgress.stage === 'canceling'}
+                    onClick={() => void cancelActivePrintJob()}
+                    className="flex items-center gap-1.5 rounded-xl border border-rose-500/50 bg-rose-600/20 px-4 py-2 text-xs font-bold text-rose-200 hover:bg-rose-600/35 disabled:opacity-50 whitespace-nowrap cursor-pointer"
+                  >
+                    <X className="h-4 w-4 shrink-0" />
+                    <span>{isFa ? 'لغو چاپ (Cancel)' : 'Cancel Print'}</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={closePrintProgress}
+                    className="rounded-xl bg-slate-800 px-4 py-2 text-xs font-bold text-slate-200 hover:bg-slate-700 whitespace-nowrap cursor-pointer"
+                  >
+                    {isFa ? 'بستن' : 'Close'}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* NON-INTRUSIVE TOAST NOTIFICATIONS */}
       <div className="pointer-events-none fixed bottom-11 end-4 z-50 flex flex-col gap-2 max-w-sm">

@@ -604,3 +604,114 @@ export interface PageOverlayImage extends OverlayBase {
   flipHorizontal?: boolean; flipVertical?: boolean;
 }
 export type PageOverlay = PageOverlayText | PageOverlayShape | PageOverlayNumbering | PageOverlayImage;
+
+/**
+ * Cleans Windows GDI / DEVMODE / WinSpool strings by truncating at the first
+ * embedded NUL character (where drivers leave uninitialized heap bytes) and
+ * stripping control characters, replacement glyphs, private-use glyphs, and
+ * unpaired UTF-16 surrogates.
+ */
+export function sanitizeDriverText(value?: string | null): string {
+  if (typeof value !== 'string' || value.length === 0) return '';
+  const nullIndex = value.indexOf('\u0000');
+  const beforeNull = nullIndex >= 0 ? value.slice(0, nullIndex) : value;
+  let cleaned = '';
+  for (let i = 0; i < beforeNull.length; i++) {
+    const code = beforeNull.charCodeAt(i);
+    if (
+      code <= 0x1f ||
+      (code >= 0x7f && code <= 0x9f) ||
+      code === 0xfffd ||
+      (code >= 0xe000 && code <= 0xf8ff)
+    ) {
+      continue;
+    }
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = i + 1 < beforeNull.length ? beforeNull.charCodeAt(i + 1) : 0;
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        cleaned += beforeNull[i] + beforeNull[i + 1];
+        i++;
+      }
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      continue;
+    }
+    cleaned += beforeNull[i];
+  }
+  return cleaned.replace(/\s+/g, ' ').trim();
+}
+
+export function sanitizePrinterInfo(printer: PrinterInfo): PrinterInfo {
+  const cleanList = (items: string[] | undefined, fallback: string[] = []): string[] => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of items ?? []) {
+      const text = sanitizeDriverText(raw);
+      if (!text) continue;
+      const key = text.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push(text);
+      }
+    }
+    return out.length > 0 ? out : fallback;
+  };
+
+  const paperOptions = printer.capabilities.paperOptions
+    ?.map((opt) => ({
+      ...opt,
+      name: sanitizeDriverText(opt.name) || opt.id,
+    }))
+    .filter((opt) => Boolean(opt.name));
+
+  const name = sanitizeDriverText(printer.name) || printer.name;
+  const supportedTrays = cleanList(printer.capabilities.supportedTrays, ['Auto Select']);
+  const supportedMediaTypes = cleanList(printer.capabilities.supportedMediaTypes, ['Plain Paper']);
+
+  const cleanTray = sanitizeDriverText(printer.activeProfile.tray);
+  const cleanMedia = sanitizeDriverText(printer.activeProfile.mediaType);
+  const cleanPaperName = sanitizeDriverText(printer.activeProfile.paperName);
+  const cleanStaple = sanitizeDriverText(printer.activeProfile.staple);
+  const cleanOutputBin = sanitizeDriverText(printer.activeProfile.outputBin);
+  const cleanHolePunch = sanitizeDriverText(printer.activeProfile.holePunch);
+  const cleanFold = sanitizeDriverText(printer.activeProfile.fold);
+
+  return {
+    ...printer,
+    name,
+    driverName: sanitizeDriverText(printer.driverName) || 'Windows Printer Driver',
+    portName: sanitizeDriverText(printer.portName) || 'LOCAL',
+    location: sanitizeDriverText(printer.location) || undefined,
+    capabilities: {
+      ...printer.capabilities,
+      ...(paperOptions ? { paperOptions } : {}),
+      supportedTrays,
+      supportedMediaTypes,
+      ...(printer.capabilities.supportedStapleModes
+        ? { supportedStapleModes: cleanList(printer.capabilities.supportedStapleModes) }
+        : {}),
+      ...(printer.capabilities.supportedHolePunchModes
+        ? { supportedHolePunchModes: cleanList(printer.capabilities.supportedHolePunchModes) }
+        : {}),
+      ...(printer.capabilities.supportedFoldModes
+        ? { supportedFoldModes: cleanList(printer.capabilities.supportedFoldModes) }
+        : {}),
+      ...(printer.capabilities.supportedOutputBins
+        ? { supportedOutputBins: cleanList(printer.capabilities.supportedOutputBins) }
+        : {}),
+    },
+    activeProfile: {
+      ...printer.activeProfile,
+      printerName: name,
+      paperName: cleanPaperName || printer.activeProfile.paperSize,
+      tray: cleanTray || supportedTrays[0] || 'Auto Select',
+      mediaType: cleanMedia || supportedMediaTypes[0] || 'Plain Paper',
+      ...(cleanStaple ? { staple: cleanStaple } : { staple: undefined }),
+      ...(cleanOutputBin ? { outputBin: cleanOutputBin } : { outputBin: undefined }),
+      ...(cleanHolePunch ? { holePunch: cleanHolePunch } : { holePunch: undefined }),
+      ...(cleanFold ? { fold: cleanFold } : { fold: undefined }),
+    },
+  };
+}
+

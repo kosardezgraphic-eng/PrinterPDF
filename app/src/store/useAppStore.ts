@@ -44,7 +44,7 @@ import {
   renderPdfToSheetPngs,
   triggerBlobDownload,
 } from '../engine/pdfService';
-import { STANDARD_PAPER_SIZES } from '@shared/models';
+import { STANDARD_PAPER_SIZES, sanitizePrinterInfo } from '@shared/models';
 import {
   imageDropPlacement,
   imageOverlayFromPlacement,
@@ -90,6 +90,11 @@ interface WorkspaceSnapshot {
 }
 
 const historyManager = new CommandHistoryManager<WorkspaceSnapshot>(300);
+
+let printRunSequence = 0;
+let activePrintRunId = 0;
+const canceledPrintRuns = new Set<number>();
+let activeSpoolerJob: { printerName: string; jobId: number } | null = null;
 
 export const DEFAULT_LAYOUT: LayoutSettings = {
   paperSize: 'A4',
@@ -152,6 +157,26 @@ export interface TextEditSession {
   selectionStart: number; selectionEnd: number;
 }
 
+export interface PrintProgressState {
+  active: boolean;
+  jobTitle: string;
+  printerName: string;
+  stage:
+    | 'preparing'
+    | 'rendering'
+    | 'sending'
+    | 'printing'
+    | 'canceling'
+    | 'canceled'
+    | 'completed'
+    | 'error';
+  percent: number;
+  currentSheet: number;
+  totalSheets: number;
+  spoolerJobId?: number;
+  errorMessage?: string;
+}
+
 interface AppState {
   // Core domain state
   documents: SourceDocument[];
@@ -204,6 +229,8 @@ interface AppState {
   showManualDuplexModal: boolean;
   showSplitModal: boolean;
   showOnboardingTour: boolean;
+  pendingDuplexPrint: PrintJobRequest | null;
+  printProgress: PrintProgressState | null;
 
   // Undo/Redo metadata
   canUndo: boolean;
@@ -300,6 +327,10 @@ interface AppState {
   openPrinterPreferences: (printerName: string) => Promise<void>;
   submitPrintJob: (request: PrintJobRequest) => Promise<void>;
   silentPrintNow: () => Promise<void>;
+  confirmDuplexPrint: (override?: Partial<PrintJobRequest>) => Promise<void>;
+  dismissDuplexPrint: () => void;
+  cancelActivePrintJob: () => Promise<void>;
+  closePrintProgress: () => void;
   controlSpoolerJob: (
     printerName: string,
     jobId: number,
@@ -421,6 +452,8 @@ export const useAppStore = create<AppState>((set, get) => {
     showManualDuplexModal: false,
     showSplitModal: false,
     showOnboardingTour: false,
+    pendingDuplexPrint: null,
+    printProgress: null,
 
     canUndo: false,
     canRedo: false,
@@ -441,7 +474,7 @@ export const useAppStore = create<AppState>((set, get) => {
         get().addToast({ type: 'error', title: get().settings.language === 'fa' ? 'بارگذاری نمونه ناموفق بود' : 'Could not load sample',
           message: sampleResult.error instanceof Error ? sampleResult.error.message : String(sampleResult.error) });
       }
-      const printers = printerResult.value;
+      const printers = printerResult.value.map(sanitizePrinterInfo);
       const spoolerJobs = jobResult.value;
       const error = printerResult.error ?? jobResult.error;
       if (error) {
@@ -1605,7 +1638,8 @@ export const useAppStore = create<AppState>((set, get) => {
       if (get().isRefreshingPrinters) return;
       set({ isRefreshingPrinters: true });
       try {
-        const printers = await ipcBridge.listPrinters();
+        const rawPrinters = await ipcBridge.listPrinters();
+        const printers = rawPrinters.map(sanitizePrinterInfo);
         const selected = get().selectedPrinterName;
         const fallback = printers.some((p) => p.name === selected)
           ? selected
@@ -1645,7 +1679,8 @@ export const useAppStore = create<AppState>((set, get) => {
 
     openPrinterPreferences: async (printerName) => {
       try {
-        const printers = await ipcBridge.openPrinterPreferences(printerName);
+        const rawPrinters = await ipcBridge.openPrinterPreferences(printerName);
+        const printers = rawPrinters.map(sanitizePrinterInfo);
         set({ printers });
         get().selectPrinter(printerName);
         get().addToast({
@@ -1729,10 +1764,17 @@ export const useAppStore = create<AppState>((set, get) => {
       }));
 
       try {
-        const updated = await ipcBridge.updatePrinterProfile(printerName, nextProfile);
+        const updated = sanitizePrinterInfo(
+          await ipcBridge.updatePrinterProfile(printerName, nextProfile)
+        );
         set((s) => ({
           printers: s.printers.map((p) =>
-            p.name === printerName ? { ...updated, activeProfile: { ...updated.activeProfile, ...nextProfile } } : p
+            p.name === printerName
+              ? sanitizePrinterInfo({
+                  ...updated,
+                  activeProfile: { ...updated.activeProfile, ...nextProfile },
+                })
+              : p
           ),
         }));
       } catch {
@@ -1742,7 +1784,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     setDefaultPrinter: async (printerName) => {
       await ipcBridge.setDefaultPrinter(printerName);
-      const printers = await ipcBridge.listPrinters();
+      const printers = (await ipcBridge.listPrinters()).map(sanitizePrinterInfo);
       const previousName = get().selectedPrinterName;
       set({ printers, selectedPrinterName: printerName });
       if (previousName === printerName) refreshPrinterMargins();
@@ -1844,8 +1886,38 @@ export const useAppStore = create<AppState>((set, get) => {
         borderless: request.borderless ?? profile?.borderless,
       };
 
-      set({ isExportingPdf: true, exportProgress: 15 });
+      const runId = ++printRunSequence;
+      activePrintRunId = runId;
+      activeSpoolerJob = null;
+      const estimatedSheets = Math.max(
+        1,
+        computeImpositionSheets(targetPages, printLayout).length
+      );
+
+      set({
+        isExportingPdf: true,
+        exportProgress: 8,
+        showPrintModal: false,
+        pendingDuplexPrint: null,
+        printProgress: {
+          active: true,
+          jobTitle: finalRequest.jobTitle || 'PrintStudio Document',
+          printerName,
+          stage: 'preparing',
+          percent: 8,
+          currentSheet: 0,
+          totalSheets: estimatedSheets,
+        },
+      });
+
+      const ensureNotCanceled = () => {
+        if (canceledPrintRuns.has(runId)) {
+          throw new Error('PRINT_CANCELED');
+        }
+      };
+
       try {
+        ensureNotCanceled();
         let imposedPdfBytes = await exportImposedPdf({
           documents: state.documents,
           pages: targetPages.map((p) => ({ ...p, selectedForPrint: true })),
@@ -1856,8 +1928,19 @@ export const useAppStore = create<AppState>((set, get) => {
           overlays: state.overlays,
           allPages: state.pages,
           userName: state.settings.userName,
-          onProgress: (percent) => set({ exportProgress: Math.max(15, Math.round(percent * 0.6)) }),
+          onProgress: (percent) => {
+            if (canceledPrintRuns.has(runId)) return;
+            const nextPct = Math.max(10, Math.round(percent * 0.5));
+            set((s) => ({
+              exportProgress: nextPct,
+              printProgress:
+                activePrintRunId === runId && s.printProgress
+                  ? { ...s.printProgress, stage: 'preparing', percent: nextPct }
+                  : s.printProgress,
+            }));
+          },
         });
+        ensureNotCanceled();
 
         // Apply sheet-level Odd/Even & Reverse filters directly on the imposed PDF sheets
         if (finalRequest.oddEvenFilter !== 'all' || finalRequest.reverseOrder) {
@@ -1883,31 +1966,92 @@ export const useAppStore = create<AppState>((set, get) => {
           for (const page of copied) filteredPdf.addPage(page);
           imposedPdfBytes = await filteredPdf.save();
         }
+        ensureNotCanceled();
 
-        set({ exportProgress: 75 });
-        const sheetPngs = await renderPdfToSheetPngs(imposedPdfBytes, finalRequest.dpi);
-        set({ exportProgress: 90 });
+        set((s) => ({
+          exportProgress: 55,
+          printProgress:
+            activePrintRunId === runId && s.printProgress
+              ? { ...s.printProgress, stage: 'rendering', percent: 55 }
+              : s.printProgress,
+        }));
+
+        const sheetPngs = await renderPdfToSheetPngs(
+          imposedPdfBytes,
+          finalRequest.dpi,
+          (rendered, total) => {
+            if (activePrintRunId !== runId || canceledPrintRuns.has(runId)) return;
+            const nextPct = 55 + Math.round((rendered / Math.max(1, total)) * 32);
+            set((s) => ({
+              exportProgress: nextPct,
+              printProgress: s.printProgress
+                ? {
+                    ...s.printProgress,
+                    stage: 'rendering',
+                    percent: nextPct,
+                    currentSheet: rendered,
+                    totalSheets: total,
+                  }
+                : null,
+            }));
+          },
+          () => canceledPrintRuns.has(runId)
+        );
+        ensureNotCanceled();
 
         const totalSheetSides = Math.max(
           1,
-          sheetPngs.length || computeImpositionSheets(targetPages, printLayout).length
+          sheetPngs.length || estimatedSheets
         );
+        set((s) => ({
+          exportProgress: 92,
+          printProgress:
+            activePrintRunId === runId && s.printProgress
+              ? {
+                  ...s.printProgress,
+                  stage: 'sending',
+                  percent: 92,
+                  currentSheet: totalSheetSides,
+                  totalSheets: totalSheetSides,
+                }
+              : s.printProgress,
+        }));
+
         const job = await ipcBridge.submitPrintJob(
           finalRequest,
           totalSheetSides,
           imposedPdfBytes,
           sheetPngs
         );
+        activeSpoolerJob = { printerName, jobId: job.jobId };
+
+        if (canceledPrintRuns.has(runId)) {
+          await ipcBridge
+            .controlSpoolerJob(printerName, job.jobId, 'cancel')
+            .catch(() => undefined);
+          throw new Error('PRINT_CANCELED');
+        }
 
         const refreshedJobs = await ipcBridge.listSpoolerJobs(printerName).catch(() => []);
         const mergedJobs = refreshedJobs.some((j) => j.jobId === job.jobId)
           ? refreshedJobs
           : [job, ...refreshedJobs];
 
-        set({
+        set((s) => ({
           spoolerJobs: mergedJobs,
           showPrintModal: false,
-        });
+          printProgress:
+            activePrintRunId === runId && s.printProgress
+              ? {
+                  ...s.printProgress,
+                  stage: 'completed',
+                  percent: 100,
+                  currentSheet: totalSheetSides,
+                  totalSheets: totalSheetSides,
+                  spoolerJobId: job.jobId,
+                }
+              : s.printProgress,
+        }));
 
         state.addToast({
           type: 'success',
@@ -1918,13 +2062,44 @@ export const useAppStore = create<AppState>((set, get) => {
             ? `${totalSheetSides} شیت • ${finalRequest.copies} کپی • سینی: ${finalRequest.tray} • کاغذ: ${finalRequest.paperName || effectivePaperSize}`
             : `${totalSheetSides} sheet(s) • ${finalRequest.copies} cop${finalRequest.copies === 1 ? 'y' : 'ies'} • Tray: ${finalRequest.tray}`,
         });
+
+        setTimeout(() => {
+          const cur = get().printProgress;
+          if (activePrintRunId === runId && cur?.stage === 'completed') {
+            set({ printProgress: null });
+          }
+        }, 1800);
       } catch (error) {
-        state.addToast({
-          type: 'error',
-          title: isFa ? 'ارسال به پرینتر ناموفق بود' : 'Print submission failed',
-          message: error instanceof Error ? error.message : String(error),
-        });
+        const wasCanceled =
+          canceledPrintRuns.has(runId) ||
+          (error instanceof Error && error.message === 'PRINT_CANCELED');
+        if (wasCanceled) {
+          if (activePrintRunId === runId) {
+            set({ printProgress: null });
+          }
+        } else {
+          const message = error instanceof Error ? error.message : String(error);
+          set((s) => ({
+            printProgress:
+              activePrintRunId === runId && s.printProgress
+                ? {
+                    ...s.printProgress,
+                    stage: 'error',
+                    errorMessage: message,
+                  }
+                : s.printProgress,
+          }));
+          state.addToast({
+            type: 'error',
+            title: isFa ? 'ارسال به پرینتر ناموفق بود' : 'Print submission failed',
+            message,
+          });
+        }
       } finally {
+        canceledPrintRuns.delete(runId);
+        if (activePrintRunId === runId) {
+          activeSpoolerJob = null;
+        }
         set({ isExportingPdf: false, exportProgress: 0 });
       }
     },
@@ -1937,7 +2112,9 @@ export const useAppStore = create<AppState>((set, get) => {
         state.printers[0];
       const printerName = targetPrinter?.name ?? '';
       const profile = targetPrinter?.activeProfile;
-      await state.submitPrintJob({
+      const effectiveDuplex = profile?.duplexMode ?? state.layout.duplexMode;
+
+      const request: PrintJobRequest = {
         printerName,
         jobTitle: state.documents[0]?.name ?? 'PrintStudio Direct Job',
         copies: 1,
@@ -1946,7 +2123,7 @@ export const useAppStore = create<AppState>((set, get) => {
         customRangeText: '',
         oddEvenFilter: 'all',
         reverseOrder: false,
-        duplexMode: profile?.duplexMode ?? state.layout.duplexMode,
+        duplexMode: effectiveDuplex,
         scaleMode: 'fit',
         dpi: profile?.dpi ?? 600,
         colorMode:
@@ -1969,7 +2146,90 @@ export const useAppStore = create<AppState>((set, get) => {
         holePunch: profile?.holePunch,
         fold: profile?.fold,
         borderless: profile?.borderless,
+      };
+
+      const hasPages = state.pages.some((p) => p.selectedForPrint);
+      if (printerName && hasPages && effectiveDuplex !== 'none') {
+        set({ pendingDuplexPrint: request });
+        return;
+      }
+
+      await state.submitPrintJob(request);
+    },
+
+    confirmDuplexPrint: async (override) => {
+      const pending = get().pendingDuplexPrint;
+      if (!pending) return;
+      const merged: PrintJobRequest = {
+        ...pending,
+        ...override,
+      };
+      set({ pendingDuplexPrint: null });
+      if (
+        merged.printerName &&
+        (override?.orientation || override?.duplexMode)
+      ) {
+        await get().updatePrinterProfile(merged.printerName, {
+          ...(override.orientation ? { orientation: override.orientation } : {}),
+          ...(override.duplexMode ? { duplexMode: override.duplexMode } : {}),
+        });
+      }
+      await get().submitPrintJob(merged);
+    },
+
+    dismissDuplexPrint: () => {
+      set({ pendingDuplexPrint: null });
+    },
+
+    cancelActivePrintJob: async () => {
+      const state = get();
+      const isFa = state.settings.language === 'fa';
+      const runId = activePrintRunId;
+      if (runId > 0) {
+        canceledPrintRuns.add(runId);
+      }
+      if (state.printProgress) {
+        set({
+          printProgress: {
+            ...state.printProgress,
+            stage: 'canceling',
+          },
+        });
+      }
+      const spoolTarget = activeSpoolerJob;
+      if (spoolTarget) {
+        try {
+          const jobs = await ipcBridge.controlSpoolerJob(
+            spoolTarget.printerName,
+            spoolTarget.jobId,
+            'cancel'
+          );
+          set({ spoolerJobs: jobs });
+        } catch {
+          // Best-effort spooler cancel
+        }
+        activeSpoolerJob = null;
+      }
+      set({
+        printProgress: null,
+        isExportingPdf: false,
+        exportProgress: 0,
       });
+      get().addToast({
+        type: 'warning',
+        title: isFa ? 'چاپ توسط کاربر لغو شد' : 'Print job canceled',
+        message: spoolTarget
+          ? isFa
+            ? `درخواست لغو کار #${spoolTarget.jobId} به اسپولر ارسال شد.`
+            : `Cancel request sent for spooler job #${spoolTarget.jobId}.`
+          : isFa
+            ? 'فرآیند آماده‌سازی و ارسال چاپ متوقف گردید.'
+            : 'Print preparation was stopped before sending.',
+      });
+    },
+
+    closePrintProgress: () => {
+      set({ printProgress: null });
     },
 
     controlSpoolerJob: async (printerName, jobId, action, priority) => {

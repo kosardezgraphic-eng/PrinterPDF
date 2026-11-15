@@ -59,9 +59,12 @@ public sealed class PrinterSpoolerService
                 try
                 {
                     queue.Refresh();
-                    var name = queue.FullName;
-                    var port = queue.QueuePort?.Name ?? "LOCAL";
-                    var driver = queue.QueueDriver?.Name ?? "Generic Driver";
+                    var name = SanitizeDriverText(queue.FullName);
+                    if (string.IsNullOrWhiteSpace(name)) continue;
+                    var port = SanitizeDriverText(queue.QueuePort?.Name);
+                    if (string.IsNullOrWhiteSpace(port)) port = "LOCAL";
+                    var driver = SanitizeDriverText(queue.QueueDriver?.Name);
+                    if (string.IsNullOrWhiteSpace(driver)) driver = "Generic Driver";
                     var status = MapQueueStatus(queue);
                     var caps = QueryCapabilities(name, port, queue);
 
@@ -70,13 +73,15 @@ public sealed class PrinterSpoolerService
                         : ReadActiveProfile(name, port, caps, queue, IntPtr.Zero);
                     _profiles[name] = profile;
 
+                    var location = SanitizeDriverText(queue.Location);
                     result.Add(new PrinterInfoDto(
                         Name: name, DriverName: driver, PortName: port,
                         IsDefault: string.Equals(name, defaultQueueName, StringComparison.OrdinalIgnoreCase),
                         IsNetwork: name.StartsWith(@"\\", StringComparison.Ordinal) || port.StartsWith("IP_", StringComparison.OrdinalIgnoreCase),
                         IsVirtual: IsVirtualPrinter(name), Status: status,
                         JobsInQueue: queue.NumberOfJobs, TonerLevelPercent: null, TotalPageCounter: null,
-                        Location: queue.Location, Capabilities: caps, ActiveProfile: profile
+                        Location: string.IsNullOrWhiteSpace(location) ? null : location,
+                        Capabilities: caps, ActiveProfile: profile
                     ));
                 }
                 catch (Exception ex)
@@ -93,6 +98,48 @@ public sealed class PrinterSpoolerService
         return result;
     }
 
+    private static string SanitizeDriverText(string? raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return string.Empty;
+        int nullIdx = raw.IndexOf('\0');
+        string head = nullIdx >= 0 ? raw[..nullIdx] : raw;
+        var sb = new System.Text.StringBuilder(head.Length);
+        bool prevSpace = false;
+        for (int i = 0; i < head.Length; i++)
+        {
+            char c = head[i];
+            if (char.IsControl(c) || c == '\uFFFD' || (c >= '\uE000' && c <= '\uF8FF'))
+                continue;
+            if (char.IsHighSurrogate(c))
+            {
+                if (i + 1 < head.Length && char.IsLowSurrogate(head[i + 1]))
+                {
+                    sb.Append(c);
+                    sb.Append(head[++i]);
+                    prevSpace = false;
+                }
+                continue;
+            }
+            if (char.IsLowSurrogate(c))
+                continue;
+
+            if (char.IsWhiteSpace(c))
+            {
+                if (!prevSpace && sb.Length > 0)
+                {
+                    sb.Append(' ');
+                    prevSpace = true;
+                }
+            }
+            else
+            {
+                sb.Append(c);
+                prevSpace = false;
+            }
+        }
+        return sb.ToString().Trim();
+    }
+
     private static string ReadDefaultPrinterName()
     {
         uint size = 0;
@@ -100,7 +147,7 @@ public sealed class PrinterSpoolerService
         if (size == 0) return string.Empty;
         var buffer = new System.Text.StringBuilder((int)size);
         if (!WinSpoolInterop.GetDefaultPrinter(buffer, ref size)) return string.Empty;
-        return buffer.ToString().TrimEnd('\0').Trim();
+        return SanitizeDriverText(buffer.ToString());
     }
 
     private static string SafeQueueName(PrintQueue queue)
@@ -144,10 +191,11 @@ public sealed class PrinterSpoolerService
             for (var i = 0; i < returned; i++)
             {
                 var info = Marshal.PtrToStructure<WinSpoolInterop.PRINTER_INFO_2>(IntPtr.Add(buffer, i * stride));
-                var name = Marshal.PtrToStringUni(info.pPrinterName);
+                var name = SanitizeDriverText(Marshal.PtrToStringUni(info.pPrinterName));
                 if (string.IsNullOrWhiteSpace(name)) continue;
-                var port = Marshal.PtrToStringUni(info.pPortName) ?? string.Empty;
-                var driver = Marshal.PtrToStringUni(info.pDriverName) ?? "Windows printer driver";
+                var port = SanitizeDriverText(Marshal.PtrToStringUni(info.pPortName));
+                var driver = SanitizeDriverText(Marshal.PtrToStringUni(info.pDriverName));
+                if (string.IsNullOrWhiteSpace(driver)) driver = "Windows printer driver";
                 queueMap.TryGetValue(name, out var queue);
 
                 var caps = QueryCapabilities(name, port, queue);
@@ -164,13 +212,14 @@ public sealed class PrinterSpoolerService
                     (info.Status & 0x00000010) != 0 ? "OutOfPaper" :
                     (info.Status & 0x00000001) != 0 ? "Paused" : "Ready";
 
+                var location = SanitizeDriverText(Marshal.PtrToStringUni(info.pLocation));
                 result.Add(new PrinterInfoDto(
                     Name: name, DriverName: driver, PortName: port,
                     IsDefault: string.Equals(name, defaultName, StringComparison.OrdinalIgnoreCase),
                     IsNetwork: (info.Attributes & 0x10) != 0 || name.StartsWith(@"\\", StringComparison.Ordinal),
                     IsVirtual: IsVirtualPrinter(name), Status: status,
                     JobsInQueue: (int)info.cJobs, TonerLevelPercent: null, TotalPageCounter: null,
-                    Location: Marshal.PtrToStringUni(info.pLocation),
+                    Location: string.IsNullOrWhiteSpace(location) ? null : location,
                     Capabilities: caps, ActiveProfile: profile));
             }
 
@@ -201,7 +250,7 @@ public sealed class PrinterSpoolerService
             for (var i = 0; i < returned; i++)
             {
                 var info = Marshal.PtrToStructure<WinSpoolInterop.PRINTER_INFO_4>(IntPtr.Add(buffer, i * stride));
-                var name = Marshal.PtrToStringUni(info.pPrinterName);
+                var name = SanitizeDriverText(Marshal.PtrToStringUni(info.pPrinterName));
                 if (string.IsNullOrWhiteSpace(name)) continue;
 
                 var caps = QueryCapabilities(name, string.Empty, null);
@@ -376,11 +425,11 @@ public sealed class PrinterSpoolerService
         if (nodes == null) return list;
         foreach (XmlNode opt in nodes)
         {
-            var dn = opt.SelectSingleNode("./*[local-name()='Property' and contains(@name,'DisplayName')]/*[local-name()='Value']")?.InnerText?.Trim();
+            var dn = opt.SelectSingleNode("./*[local-name()='Property' and contains(@name,'DisplayName')]/*[local-name()='Value']")?.InnerText;
             var rawName = (opt as XmlElement)?.GetAttribute("name") ?? string.Empty;
             var colonIdx = rawName.IndexOf(':');
             var cleanRaw = colonIdx >= 0 ? rawName[(colonIdx + 1)..] : rawName;
-            var val = !string.IsNullOrWhiteSpace(dn) ? dn : cleanRaw;
+            var val = SanitizeDriverText(!string.IsNullOrWhiteSpace(dn) ? dn : cleanRaw);
             if (!string.IsNullOrWhiteSpace(val) && !list.Contains(val, StringComparer.OrdinalIgnoreCase))
             {
                 list.Add(val);
@@ -537,9 +586,11 @@ public sealed class PrinterSpoolerService
         int count = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_BINS, IntPtr.Zero, IntPtr.Zero);
         if (count <= 0) return null;
         var names = ReadCapabilityStrings(printerName, portName, WinSpoolInterop.DC_BINNAMES, 24);
-        var idBuffer = Marshal.AllocHGlobal(count * sizeof(short));
+        int totalBytes = count * sizeof(short);
+        var idBuffer = Marshal.AllocHGlobal(totalBytes);
         try
         {
+            Marshal.Copy(new byte[totalBytes], 0, idBuffer, totalBytes);
             int fetched = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_BINS, idBuffer, IntPtr.Zero);
             for (int i = 0; i < Math.Min(Math.Min(count, fetched), names.Count); i++)
             {
@@ -585,10 +636,14 @@ public sealed class PrinterSpoolerService
         if (count <= 0) return new List<PrinterPaperOptionDto>();
 
         var names = ReadCapabilityStrings(printerName, portName, WinSpoolInterop.DC_PAPERNAMES, 64);
-        var idBuffer = Marshal.AllocHGlobal(count * sizeof(short));
-        var sizeBuffer = Marshal.AllocHGlobal(count * Marshal.SizeOf<WinSpoolInterop.POINT>());
+        int idBytes = count * sizeof(short);
+        int sizeBytes = count * Marshal.SizeOf<WinSpoolInterop.POINT>();
+        var idBuffer = Marshal.AllocHGlobal(idBytes);
+        var sizeBuffer = Marshal.AllocHGlobal(sizeBytes);
         try
         {
+            Marshal.Copy(new byte[idBytes], 0, idBuffer, idBytes);
+            Marshal.Copy(new byte[sizeBytes], 0, sizeBuffer, sizeBytes);
             int idsRead = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_PAPERS, idBuffer, IntPtr.Zero);
             int sizesRead = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_PAPERSIZE, sizeBuffer, IntPtr.Zero);
             int total = Math.Min(count, Math.Min(idsRead, sizesRead));
@@ -603,7 +658,10 @@ public sealed class PrinterSpoolerService
                 double hMm = size.Y > 0 ? Math.Round(size.Y / 10.0, 1) : 297;
                 string? id = MapPaperKindId(paperId);
                 id ??= size.X > 0 && size.Y > 0 ? MatchPaperSize(wMm, hMm) : "Custom";
-                string rawName = i < names.Count && !string.IsNullOrWhiteSpace(names[i]) ? names[i] : id;
+                string rawName = i < names.Count && !string.IsNullOrWhiteSpace(names[i])
+                    ? SanitizeDriverText(names[i])
+                    : id;
+                if (string.IsNullOrWhiteSpace(rawName)) rawName = id;
 
                 var key = $"{rawName}|{wMm}x{hMm}";
                 if (seen.Add(key))
@@ -624,9 +682,11 @@ public sealed class PrinterSpoolerService
     {
         int count = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_ENUMRESOLUTIONS, IntPtr.Zero, IntPtr.Zero);
         if (count <= 0) return new List<int>();
-        var buffer = Marshal.AllocHGlobal(count * Marshal.SizeOf<WinSpoolInterop.POINT>());
+        int totalBytes = count * Marshal.SizeOf<WinSpoolInterop.POINT>();
+        var buffer = Marshal.AllocHGlobal(totalBytes);
         try
         {
+            Marshal.Copy(new byte[totalBytes], 0, buffer, totalBytes);
             int fetched = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_ENUMRESOLUTIONS, buffer, IntPtr.Zero);
             var result = new SortedSet<int>();
             for (int i = 0; i < Math.Min(count, fetched); i++)
@@ -646,13 +706,20 @@ public sealed class PrinterSpoolerService
         int count = WinSpoolInterop.DeviceCapabilities(printerName, portName, capability, IntPtr.Zero, IntPtr.Zero);
         if (count <= 0) return items;
         int bytesPerEntry = charWidth * 2;
-        IntPtr buffer = Marshal.AllocHGlobal(count * bytesPerEntry);
+        int totalBytes = count * bytesPerEntry;
+        IntPtr buffer = Marshal.AllocHGlobal(totalBytes);
         try
         {
+            Marshal.Copy(new byte[totalBytes], 0, buffer, totalBytes);
             int fetched = WinSpoolInterop.DeviceCapabilities(printerName, portName, capability, buffer, IntPtr.Zero);
+            var chars = new char[charWidth];
             for (int i = 0; i < Math.Min(count, fetched); i++)
             {
-                string? text = Marshal.PtrToStringUni(IntPtr.Add(buffer, i * bytesPerEntry), charWidth)?.TrimEnd('\0').Trim();
+                IntPtr entryPtr = IntPtr.Add(buffer, i * bytesPerEntry);
+                Marshal.Copy(entryPtr, chars, 0, charWidth);
+                int nullPos = Array.IndexOf(chars, '\0');
+                int len = nullPos >= 0 ? nullPos : charWidth;
+                string text = SanitizeDriverText(new string(chars, 0, len));
                 if (!string.IsNullOrWhiteSpace(text)) items.Add(text);
             }
         }

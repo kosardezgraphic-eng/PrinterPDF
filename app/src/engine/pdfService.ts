@@ -906,8 +906,13 @@ export function parsePageRangeText(rangeText: string, maxNumber: number): number
  */
 export async function renderPdfToSheetPngs(
   pdfBytes: Uint8Array,
-  dpi = 300
+  dpi = 300,
+  onProgress?: (rendered: number, total: number) => void,
+  shouldCancel?: () => boolean
 ): Promise<Uint8Array[]> {
+  if (shouldCancel?.()) {
+    throw new Error('PRINT_CANCELED');
+  }
   let canUseDomCanvas = false;
   if (typeof document !== 'undefined') {
     try {
@@ -944,6 +949,9 @@ export async function renderPdfToSheetPngs(
   try {
     const pdf = await task.promise;
     for (let pageNo = 1; pageNo <= pdf.numPages; pageNo++) {
+      if (shouldCancel?.()) {
+        throw new Error('PRINT_CANCELED');
+      }
       const page = await pdf.getPage(pageNo);
       try {
         const baseViewport = page.getViewport({ scale: 1 });
@@ -983,8 +991,12 @@ export async function renderPdfToSheetPngs(
           const blob = await canvas.convertToBlob({ type: 'image/png' });
           pngs.push(new Uint8Array(await blob.arrayBuffer()));
         }
+        onProgress?.(pageNo, pdf.numPages);
       } finally {
         page.cleanup();
+      }
+      if (shouldCancel?.()) {
+        throw new Error('PRINT_CANCELED');
       }
     }
   } finally {
