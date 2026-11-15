@@ -40,6 +40,15 @@ if (pkgMain !== mainEntry) {
 }
 writeFileSync(path.join(distElectron, 'package.json'), `${JSON.stringify({ type: 'commonjs' }, null, 2)}\n`);
 
+const distIndexPath = path.join(root, 'dist', 'index.html');
+if (!existsSync(distIndexPath)) {
+  fail('no dist/index.html — run "vite build" first');
+}
+const distHtml = read('dist/index.html');
+if (/(?:src|href)=["']\/assets\//i.test(distHtml)) {
+  fail('dist/index.html references "/assets/..." instead of "./assets/...". Packaged Electron loads via file:// and would show a blank screen. Rebuild with base "./".');
+}
+
 /* ── 2. the .NET sidecar that electron-builder copies ───────────────────────── */
 const yml = read('electron-builder.yml');
 const from = /extraResources:\s*\n\s*-\s*from:\s*(\S+)/m.exec(yml)?.[1];

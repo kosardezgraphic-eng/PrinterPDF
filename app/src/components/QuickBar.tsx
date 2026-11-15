@@ -55,6 +55,7 @@ export const QuickBar: React.FC = () => {
   const currentPrinter = printers.find((p) => p.name === selectedPrinterName);
 
   const statusColor = (status?: string) => {
+    if (!status) return 'bg-slate-500';
     switch (status) {
       case 'Ready':
       case 'Printing':
@@ -154,7 +155,13 @@ export const QuickBar: React.FC = () => {
       <div className="hidden lg:flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/80 px-2.5 py-1">
         <span
           className={`h-2.5 w-2.5 rounded-full ${statusColor(currentPrinter?.status)}`}
-          title={`وضعیت پرینتر: ${currentPrinter?.status ?? 'Ready'}`}
+          title={
+            currentPrinter
+              ? `وضعیت پرینتر: ${currentPrinter.status}`
+              : lang === 'fa'
+                ? 'پرینتر ویندوز متصل نیست'
+                : 'No Windows printer connected'
+          }
         />
         <select
           aria-label="انتخاب پرینتر"

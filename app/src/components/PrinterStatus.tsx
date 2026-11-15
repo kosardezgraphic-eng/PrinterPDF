@@ -65,8 +65,8 @@ export function PrinterServiceStatus() {
         </pre>
         <p className="text-[11px] text-amber-200/70">
           {isFa
-            ? 'روی ویندوز: npm run build:service و بعد npm run electron:dev. در مرورگر، این برنامه عملاً به پرینتر واقعی دسترسی ندارد.'
-            : 'On Windows run: npm run build:service, then npm run electron:dev. A browser preview can never reach real printers.'}
+            ? 'هیچ پرینتر جعلی نمایش داده نمی‌شود. برای شناسایی پرینترهای واقعی ویندوز، برنامه را روی ویندوز با npm run electron:dev یا npm run dev اجرا کنید.'
+            : 'No fake printers are shown. On Windows run npm run electron:dev (or npm run dev locally on Windows) to read real Windows printers.'}
         </p>
         <PrinterRetryButton />
       </div>

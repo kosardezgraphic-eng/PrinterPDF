@@ -89,7 +89,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     updateSettings,
     selectPrinter,
     setDefaultPrinter,
-    simulatePrinterStatusChange,
+    openPrinterPreferences,
     controlSpoolerJob,
     purgePrinterQueue,
     removeBatchJob,
@@ -1042,41 +1042,35 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                           </span>
                         )}
                       </div>
-                      <div className="mt-0.5 flex items-center gap-2 text-[10px] text-slate-400">
-                        <span>{p.location}</span>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-slate-400">
+                        <span>{p.driverName}</span>
+                        <span>•</span>
+                        <span>{p.portName}</span>
+                        {p.location && (
+                          <>
+                            <span>•</span>
+                            <span>{p.location}</span>
+                          </>
+                        )}
                         <span>•</span>
                         <span>
                           {p.activeProfile.paperSize} / {p.activeProfile.dpi} DPI
                         </span>
-                        {p.tonerLevelPercent !== undefined && (
-                          <>
-                            <span>•</span>
-                            <span>Toner: {p.tonerLevelPercent}%</span>
-                          </>
-                        )}
                       </div>
                     </div>
 
                     <div className="flex items-center gap-2">
                       {renderPrinterStatusBadge(p.status)}
-                      <select
-                        value={p.status}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) =>
-                          void simulatePrinterStatusChange(
-                            p.name,
-                            e.target.value as PrinterInfo['status']
-                          )
-                        }
-                        title="شبیه‌سازی تغییر وضعیت سخت‌افزار پرینتر"
-                        className="rounded border border-slate-700 bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300"
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void openPrinterPreferences(p.name);
+                        }}
+                        className="rounded bg-slate-800 px-2 py-1 text-[10px] text-slate-300 hover:bg-slate-700 cursor-pointer"
                       >
-                        <option value="Ready">Ready</option>
-                        <option value="Offline">Offline</option>
-                        <option value="PaperJam">PaperJam</option>
-                        <option value="OutOfPaper">OutOfPaper</option>
-                        <option value="LowToner">LowToner</option>
-                      </select>
+                        {lang === 'fa' ? 'تنظیمات درایور' : 'Preferences'}
+                      </button>
                       {!p.isDefault && (
                         <button
                           type="button"

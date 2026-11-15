@@ -52,9 +52,88 @@ it('keeps printer lists empty and reports an initialization failure', async () =
 
 it('does not report simulated batch jobs as printed', async () => {
   const { useAppStore } = await import('../store/useAppStore');
+  expect(useAppStore.getState().batchQueue).toEqual([]);
   useAppStore.setState({ batchQueue: [{ id: 'batch-1', status: 'queued', progressPercent: 0 } as never] });
   await useAppStore.getState().runBatchQueue();
   expect(useAppStore.getState().batchQueue[0].status).toBe('failed');
   expect(useAppStore.getState().isBatchRunning).toBe(false);
   expect(useAppStore.getState().toasts.at(-1)?.type).toBe('error');
 });
+
+describe('Real Windows printer enforcement (no fake printers)', () => {
+  it('returns an empty printer and spooler list in non-Windows browser mode instead of fake printers', async () => {
+    vi.stubGlobal('window', { location: { protocol: 'http:' } });
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 Chrome/120' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        headers: { get: () => 'application/json' },
+        json: async () => ({
+          supported: false,
+          platform: 'linux',
+          printers: [],
+          note: 'Web server host is running on "linux" (not Windows).',
+        }),
+      })
+    );
+
+    expect(await ipcBridge.listPrinters()).toEqual([]);
+    expect(await ipcBridge.listSpoolerJobs()).toEqual([]);
+    expect(await ipcBridge.getPrinterStatusNote()).toContain('not Windows');
+  });
+
+  it('reads real Windows printers when served from a Windows host bridge', async () => {
+    const realPrinter = {
+      name: 'Microsoft Print to PDF',
+      driverName: 'Microsoft Print To PDF',
+      portName: 'PORTPROMPT:',
+      isDefault: true,
+      isNetwork: false,
+      isVirtual: true,
+      status: 'Ready',
+      jobsInQueue: 0,
+      capabilities: {
+        supportedPapers: ['A4', 'Letter'],
+        supportedTrays: ['Auto Select'],
+        supportedMediaTypes: ['Plain Paper'],
+        supportsDuplex: false,
+        supportsColor: true,
+        supportedDpi: [600],
+        maxCopies: 999,
+      },
+      activeProfile: {
+        printerName: 'Microsoft Print to PDF',
+        paperSize: 'A4',
+        tray: 'Auto Select',
+        mediaType: 'Plain Paper',
+        duplexMode: 'none',
+        orientation: 'portrait',
+        colorMode: 'color',
+        dpi: 600,
+        quality: 'normal',
+      },
+    };
+    vi.stubGlobal('window', { location: { protocol: 'http:' } });
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 Chrome/120' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        headers: { get: () => 'application/json' },
+        json: async () => ({
+          supported: true,
+          platform: 'win32',
+          printers: [realPrinter],
+          note: null,
+        }),
+      })
+    );
+
+    const printers = await ipcBridge.listPrinters();
+    expect(printers).toHaveLength(1);
+    expect(printers[0].name).toBe('Microsoft Print to PDF');
+    expect(await ipcBridge.getPrinterStatusNote()).toBeNull();
+  });
+});
+

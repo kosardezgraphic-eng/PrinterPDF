@@ -53,10 +53,10 @@ describe('printer imageable margins',()=>{
     await useAppStore.getState().openPspProjectFile({text:async()=>JSON.stringify({layout,pages:[],documents:[]})} as File);
     expect(useAppStore.getState().layout.marginMode).toBe('custom');expect(useAppStore.getState().layout.marginsMm.top).toBe(7);
   });
-  it('browser simulator labels virtual zero and cannot invent physical measurements',async()=>{
+  it('browser mode does not invent simulated printer measurements without Electron',async()=>{
     vi.restoreAllMocks();vi.stubGlobal('window',{});
-    const req:PrinterMarginRequest={printerName:'PrintStudio Virtual Printer',paperSize:'A4',orientation:'portrait',widthMm:210,heightMm:297};
-    expect(await ipcBridge.getPrinterMargins(req)).toMatchObject({status:'available',source:'simulated-virtual',marginsMm:{top:0,right:0,bottom:0,left:0}});
-    expect(await ipcBridge.getPrinterMargins({...req,printerName:'HP LaserJet Enterprise M611dn (High-Speed B&W)'})).toMatchObject({status:'unavailable'});
+    const req:PrinterMarginRequest={printerName:'Microsoft Print to PDF',paperSize:'A4',orientation:'portrait',widthMm:210,heightMm:297};
+    expect(await ipcBridge.getPrinterMargins(req)).toMatchObject({status:'unavailable'});
+    expect(await ipcBridge.getPrinterMargins({...req,printerName:'HP LaserJet'})).toMatchObject({status:'unavailable'});
   });
 });

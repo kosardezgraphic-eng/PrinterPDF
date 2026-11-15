@@ -141,54 +141,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoSelectPrinterByPaperAndColor: true,
 };
 
-const INITIAL_BATCH_QUEUE: BatchJobItem[] = [
-  {
-    id: 'batch-1',
-    fileName: 'جزوه-مدار-الکتریکی-دانشگاه-تهران.pdf',
-    fileSize: 6_420_000,
-    pageCount: 64,
-    printerName: 'HP LaserJet Enterprise M611dn (High-Speed B&W)',
-    copies: 5,
-    nUp: 2,
-    duplexMode: 'long-edge',
-    invert: false,
-    status: 'completed',
-    progressPercent: 100,
-    retryCount: 0,
-    addedAt: new Date(Date.now() - 600_000).toISOString(),
-    completedAt: new Date(Date.now() - 320_000).toISOString(),
-  },
-  {
-    id: 'batch-2',
-    fileName: 'کاتالوگ-نمایشگاه-بین‌المللی-چاپ.pdf',
-    fileSize: 18_910_000,
-    pageCount: 24,
-    printerName: 'Konica Minolta Bizhub C458 (Production Color)',
-    copies: 10,
-    nUp: 1,
-    duplexMode: 'long-edge',
-    invert: false,
-    status: 'queued',
-    progressPercent: 0,
-    retryCount: 0,
-    addedAt: new Date(Date.now() - 180_000).toISOString(),
-  },
-  {
-    id: 'batch-3',
-    fileName: 'اسلایدهای-تاریک-هوش-مصنوعی-Inverted.pdf',
-    fileSize: 4_120_000,
-    pageCount: 36,
-    printerName: 'HP LaserJet Enterprise M611dn (High-Speed B&W)',
-    copies: 2,
-    nUp: 4,
-    duplexMode: 'long-edge',
-    invert: true,
-    status: 'queued',
-    progressPercent: 0,
-    retryCount: 0,
-    addedAt: new Date(Date.now() - 90_000).toISOString(),
-  },
-];
+const INITIAL_BATCH_QUEUE: BatchJobItem[] = [];
 
 export interface TextEditSession {
   overlayId: string; occurrenceKey: string; text: string; ranges: TextScriptRange[];
@@ -338,7 +291,6 @@ interface AppState {
   updatePrinterProfile: (printerName: string, profile: PrinterProfileSettings) => Promise<void>;
   setDefaultPrinter: (printerName: string) => Promise<void>;
   openPrinterPreferences: (printerName: string) => Promise<void>;
-  simulatePrinterStatusChange: (printerName: string, status: PrinterInfo['status']) => Promise<void>;
   submitPrintJob: (request: PrintJobRequest) => Promise<void>;
   silentPrintNow: () => Promise<void>;
   controlSpoolerJob: (
@@ -1724,17 +1676,6 @@ export const useAppStore = create<AppState>((set, get) => {
       if (previousName === printerName) refreshPrinterMargins();
     },
 
-    simulatePrinterStatusChange: async (printerName, status) => {
-      const printers = await ipcBridge.setSimulatedPrinterStatus(
-        printerName,
-        status
-      );
-      set({ printers });
-      if (get().settings.autoSelectPrinterByPaperAndColor) {
-        get().autoSelectBestPrinter();
-      }
-    },
-
     submitPrintJob: async (_request) => {
       // The sidecar does not yet implement PDF submission. Do not claim that a
       // browser simulator or a request without PDF bytes was physically printed.
@@ -1748,7 +1689,7 @@ export const useAppStore = create<AppState>((set, get) => {
     silentPrintNow: async () => {
       const state = get();
       const printerName =
-        state.selectedPrinterName || state.printers[0]?.name || 'PrintStudio Virtual Printer';
+        state.selectedPrinterName || state.printers[0]?.name || '';
       await state.submitPrintJob({
         printerName,
         jobTitle: state.documents[0]?.name ?? 'PrintStudio Direct Job',
@@ -1803,7 +1744,7 @@ export const useAppStore = create<AppState>((set, get) => {
             : `پروژه-ادغامی-${state.documents.length}-فایل.pdf`,
         fileSize: state.documents.reduce((acc, d) => acc + d.fileSize, 0),
         pageCount: selectedCount,
-        printerName: state.selectedPrinterName || 'Konica Minolta Bizhub C458 (Production Color)',
+        printerName: state.selectedPrinterName || state.printers[0]?.name || '',
         copies: 1,
         nUp: state.layout.rows * state.layout.cols,
         duplexMode: state.layout.duplexMode,
@@ -1919,33 +1860,70 @@ async function safePrinterStatusNote(): Promise<string | null> {
 // A single subscription covers printer selection, initialization, project restore and
 // undo/redo. Results are keyed to the exact oriented media; old responses are discarded.
 let printerMarginSequence = 0;
-const marginKey = (state: AppState) => JSON.stringify([state.selectedPrinterName, state.layout.paperSize,
-  state.layout.orientation, state.layout.customWidthMm, state.layout.customHeightMm]);
+const marginKey = (state?: AppState | null) =>
+  state
+    ? JSON.stringify([
+        state.selectedPrinterName,
+        state.layout?.paperSize,
+        state.layout?.orientation,
+        state.layout?.customWidthMm,
+        state.layout?.customHeightMm,
+      ])
+    : '';
+
 function refreshPrinterMargins() {
   const state = useAppStore.getState();
   const sequence = ++printerMarginSequence;
   const key = marginKey(state);
   if (!state.selectedPrinterName) {
-    useAppStore.setState({printerMargins:{status:'unavailable',reason:'No printer selected'}});
+    useAppStore.setState({ printerMargins: { status: 'unavailable', reason: 'No printer selected' } });
     return;
   }
-  const request = {printerName:state.selectedPrinterName, paperSize:state.layout.paperSize,
-    orientation:state.layout.orientation, ...getSheetDimensionsMm(state.layout)};
-  useAppStore.setState({printerMargins:{status:'loading'}});
-  void ipcBridge.getPrinterMargins(request).then(result => {
-    const current = useAppStore.getState();
-    if (sequence !== printerMarginSequence || marginKey(current) !== key) return;
-    const margins = result.status === 'available' ? result.marginsMm : null;
-    const valid = margins && [margins.top,margins.right,margins.bottom,margins.left].every(v => Number.isFinite(v) && v >= 0) &&
-      margins.left + margins.right < request.widthMm && margins.top + margins.bottom < request.heightMm;
-    const safe: PrinterMarginResult = result.status === 'available' && !valid ? {status:'unavailable',reason:'Invalid printer margins'} : result;
-    useAppStore.setState({printerMargins:safe, ...(safe.status === 'available' && current.layout.marginMode === 'printer' ?
-      {layout:{...current.layout,marginsMm:{...safe.marginsMm}}} : {})});
-  }).catch(error => {
-    if (sequence === printerMarginSequence && marginKey(useAppStore.getState()) === key)
-      useAppStore.setState({printerMargins:{status:'unavailable',reason:error instanceof Error ? error.message : String(error)}});
-  });
+  const request = {
+    printerName: state.selectedPrinterName,
+    paperSize: state.layout.paperSize,
+    orientation: state.layout.orientation,
+    ...getSheetDimensionsMm(state.layout),
+  };
+  useAppStore.setState({ printerMargins: { status: 'loading' } });
+  void ipcBridge
+    .getPrinterMargins(request)
+    .then((result) => {
+      const current = useAppStore.getState();
+      if (sequence !== printerMarginSequence || marginKey(current) !== key) return;
+      const margins = result.status === 'available' ? result.marginsMm : null;
+      const valid =
+        margins &&
+        [margins.top, margins.right, margins.bottom, margins.left].every(
+          (v) => Number.isFinite(v) && v >= 0
+        ) &&
+        margins.left + margins.right < request.widthMm &&
+        margins.top + margins.bottom < request.heightMm;
+      const safe: PrinterMarginResult =
+        result.status === 'available' && !valid
+          ? { status: 'unavailable', reason: 'Invalid printer margins' }
+          : result;
+      useAppStore.setState({
+        printerMargins: safe,
+        ...(safe.status === 'available' && current.layout.marginMode === 'printer'
+          ? { layout: { ...current.layout, marginsMm: { ...safe.marginsMm } } }
+          : {}),
+      });
+    })
+    .catch((error) => {
+      if (sequence === printerMarginSequence && marginKey(useAppStore.getState()) === key)
+        useAppStore.setState({
+          printerMargins: {
+            status: 'unavailable',
+            reason: error instanceof Error ? error.message : String(error),
+          },
+        });
+    });
 }
+
 useAppStore.subscribe((state, previous) => {
-  if (marginKey(state) !== marginKey(previous)) refreshPrinterMargins();
+  if (previous && marginKey(state) !== marginKey(previous)) {
+    refreshPrinterMargins();
+  }
 });
+

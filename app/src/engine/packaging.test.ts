@@ -79,4 +79,12 @@ describe('windows packaging layout', () => {
     expect(builder).not.toMatch(/^\s*icon:/m);
     expect(builder).toContain('ext: psp');
   });
+
+  it('uses a relative base path so file:// packaged builds do not open a blank screen', () => {
+    const viteConfig = read('../../../vite.config.ts');
+    const prepare = read('../../../scripts/prepare-win-build.mjs');
+    expect(viteConfig).toMatch(/base:\s*['"]\.\/['"]/);
+    expect(prepare).toContain('(?:src|href)=["\']\\/assets\\/');
+    expect(mainProcess).toContain("default-src 'self' file:");
+  });
 });

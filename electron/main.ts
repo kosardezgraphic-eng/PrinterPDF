@@ -6,8 +6,15 @@ import fs from 'node:fs/promises';
 import { IPC_CHANNELS, type LocalFilePayload } from '../shared/ipc-channels';
 import { PrinterSidecarClient } from './printerSidecarClient';
 import { SessionStore } from './sessionStore';
+import {
+  mapElectronPrintersToPrinterInfo,
+  queryWindowsPrintersViaPowerShell,
+  queryWindowsSpoolerJobsViaPowerShell,
+  setWindowsDefaultPrinterViaPowerShell,
+} from './windowsPrinterFallback';
 import type {
   AppSettings,
+  PrinterInfo,
   PrinterProfileSettings,
   PrinterMarginRequest,
   PrintJobRequest,
@@ -28,6 +35,7 @@ const MIME_BY_EXTENSION: Record<string, string> = {
 const sidecar = new PrinterSidecarClient();
 let mainWindow: BrowserWindow | null = null;
 let sessionStore: SessionStore;
+let lastNativeFallbackWorked = false;
 /** Files that arrived before the renderer had a listener, flushed once it does. */
 let pendingOpenFiles: string[] = [];
 
@@ -70,7 +78,7 @@ async function createMainWindow(): Promise<void> {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self' blob: data:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:;",
+          "default-src 'self' file: blob: data:; script-src 'self' file: 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data: blob:; font-src 'self' file: data:; connect-src 'self' file: blob: data: https: http: wss: ws:; worker-src 'self' file: blob:;",
         ],
       },
     });
@@ -106,12 +114,62 @@ async function createMainWindow(): Promise<void> {
     }
   });
 
+  const escapeHtml = (value: string): string =>
+    value.replace(/[&<>"']/g, (ch) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] ?? ch)
+    );
+
+  const showLoadFailurePage = (title: string, details: string): void => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const html = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>PrintStudio Pro — Load Error</title></head>
+<body style="margin:0;padding:32px;background:#020617;color:#f8fafc;font-family:system-ui,-apple-system,sans-serif;">
+  <div style="max-width:680px;margin:48px auto;padding:24px;border-radius:12px;background:#0f172a;border:1px solid #334155;">
+    <h1 style="margin:0 0 12px;font-size:20px;color:#f87171;">${escapeHtml(title)}</h1>
+    <pre style="white-space:pre-wrap;word-break:break-word;background:#020617;padding:12px;border-radius:8px;border:1px solid #1e293b;color:#cbd5e1;font-size:13px;">${escapeHtml(details)}</pre>
+  </div>
+</body>
+</html>`;
+    void mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  };
+
+  let retriedLoopback = false;
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame || validatedURL.startsWith('data:text/html')) return;
+    const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+    if (!retriedLoopback && devServerUrl && devServerUrl.includes('localhost')) {
+      retriedLoopback = true;
+      const ipv4Url = devServerUrl.replace('localhost', '127.0.0.1');
+      void mainWindow?.loadURL(ipv4Url).catch(() => undefined);
+      return;
+    }
+    showLoadFailurePage(
+      'Failed to load PrintStudio Pro UI',
+      `Code: ${errorCode}\nDescription: ${errorDescription}\nURL: ${validatedURL}`
+    );
+  });
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    showLoadFailurePage(
+      'Renderer process exited unexpectedly',
+      `Reason: ${details.reason}\nExit Code: ${details.exitCode}`
+    );
+  });
+
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
-  if (devServerUrl) {
-    await mainWindow.loadURL(devServerUrl);
-  } else {
-    // `__dirname` is <resources>/dist-electron/electron once packed, so the renderer is two up.
-    await mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
+  try {
+    if (devServerUrl) {
+      await mainWindow.loadURL(devServerUrl);
+    } else {
+      // `__dirname` is <resources>/dist-electron/electron once packed, so the renderer is two up.
+      await mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
+    }
+  } catch (err) {
+    showLoadFailurePage(
+      'Failed to load PrintStudio Pro UI',
+      err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err)
+    );
   }
 }
 
@@ -130,12 +188,45 @@ async function withSidecarDiagnostics<TResult>(action: Promise<TResult>): Promis
   }
 }
 
+async function listRealWindowsPrinters(): Promise<PrinterInfo[]> {
+  try {
+    const printers = await withSidecarDiagnostics(sidecar.listPrinters());
+    lastNativeFallbackWorked = false;
+    return printers;
+  } catch (sidecarError) {
+    if (process.platform !== 'win32') {
+      throw sidecarError;
+    }
+
+    // On Windows, if PrinterService.exe has not been compiled (e.g. no .NET 8 SDK),
+    // enumerate real Windows printers directly via Win32_Printer PowerShell and Chromium Spooler.
+    const psPrinters = await queryWindowsPrintersViaPowerShell().catch(() => []);
+    if (psPrinters.length > 0) {
+      lastNativeFallbackWorked = true;
+      return psPrinters;
+    }
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      const nativePrinters = await mainWindow.webContents.getPrintersAsync().catch(() => []);
+      const mapped = mapElectronPrintersToPrinterInfo(nativePrinters);
+      if (mapped.length > 0) {
+        lastNativeFallbackWorked = true;
+        return mapped;
+      }
+    }
+
+    lastNativeFallbackWorked = false;
+    throw sidecarError;
+  }
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.PRINTER_LIST, async () => {
-    return withSidecarDiagnostics(sidecar.listPrinters());
+    return listRealWindowsPrinters();
   });
 
   ipcMain.handle(IPC_CHANNELS.PRINTER_STATUS_NOTE, async () => {
+    if (lastNativeFallbackWorked) return null;
     return sidecar.statusNote();
   });
 
@@ -158,7 +249,14 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(IPC_CHANNELS.PRINTER_SET_DEFAULT, async (_e, printerName: string) => {
-    return sidecar.setDefaultPrinter(printerName);
+    try {
+      return await withSidecarDiagnostics(sidecar.setDefaultPrinter(printerName));
+    } catch (error) {
+      if (process.platform === 'win32') {
+        return setWindowsDefaultPrinterViaPowerShell(printerName);
+      }
+      throw error;
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.PRINTER_OPEN_PREFERENCES, async (_e, printerName: string) => {
@@ -171,7 +269,7 @@ function registerIpcHandlers(): void {
       });
     });
     // Refresh after the native dialog closes so paper size and orientation reflect the driver.
-    return withSidecarDiagnostics(sidecar.listPrinters());
+    return listRealWindowsPrinters();
   });
 
   ipcMain.handle(
@@ -199,7 +297,14 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(IPC_CHANNELS.SPOOLER_LIST_JOBS, async (_e, printerName?: string) => {
-    return sidecar.listSpoolerJobs(printerName);
+    try {
+      return await withSidecarDiagnostics(sidecar.listSpoolerJobs(printerName));
+    } catch (error) {
+      if (process.platform === 'win32') {
+        return queryWindowsSpoolerJobsViaPowerShell(printerName);
+      }
+      throw error;
+    }
   });
 
   ipcMain.handle(

@@ -38,7 +38,7 @@ if (existsSync(exePath)) {
 if (process.platform !== 'win32') {
   note(
     `skipped: the print sidecar only runs on Windows (this system is "${process.platform}"). ` +
-      'The desktop app is not usable here; the browser preview will show simulated printers.'
+      'No fake printers will be shown in browser preview.'
   );
   process.exit(0);
 }

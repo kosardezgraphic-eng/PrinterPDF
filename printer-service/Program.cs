@@ -71,7 +71,7 @@ public static class Program
         // Nothing in this process has a window or a console. Without these two handlers a fault on
         // a background thread or an unobserved task is reduced to "exit code 0xC000041D" in the app.
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
-            Log($"UNHANDLER ({e.IsTerminating ? "terminating" : "non-terminating"}): {e.ExceptionObject}");
+            Log($"UNHANDLER ({(e.IsTerminating ? "terminating" : "non-terminating")}): {e.ExceptionObject}");
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {
             Log($"UNOBSERVED TASK: {e.Exception}");

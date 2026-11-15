@@ -547,7 +547,7 @@ export const ModalsAndToasts: React.FC = () => {
                 onClick={() =>
                   void submitPrintJob({
                     printerName:
-                      selectedPrinter?.name ?? 'PrintStudio Virtual Printer',
+                      selectedPrinter?.name ?? '',
                     jobTitle:
                       documents[0]?.name ?? 'PrintStudio Imposed Job',
                     copies,

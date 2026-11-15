@@ -108,10 +108,10 @@ describe('ipcBridge status note',()=>{
   // These exercise the real bridge, not the store-level spy installed above.
   beforeEach(()=>{vi.mocked(ipcBridge.getPrinterStatusNote).mockRestore();});
 
-  it('labels the browser preview as simulated instead of claiming it read Windows',async()=>{
+  it('explains that browser preview cannot access local Windows printers and shows no fake printers',async()=>{
     vi.stubGlobal('window',{});
     vi.stubGlobal('navigator',{userAgent:'Mozilla/5.0 Chrome/120'});
-    expect(await ipcBridge.getPrinterStatusNote()).toMatch(/simulated/i);
+    expect(await ipcBridge.getPrinterStatusNote()).toMatch(/no fake printers|cannot access local Windows printers/i);
   });
   it('forwards the desktop explanation and tolerates an older preload',async()=>{
     vi.stubGlobal('window',{printStudioAPI:{isElectron:true,getPrinterStatusNote:vi.fn().mockResolvedValue('PrinterService.exe is missing')}});
