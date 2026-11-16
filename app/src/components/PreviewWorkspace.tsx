@@ -375,6 +375,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     const bookletGapWidthMm = bookletCells.length >= 2
       ? Math.max(0, bookletCells[1].cellXMm - bookletGapLeftMm)
       : 0;
+    const bookletMarginMm = layout.booklet?.enabled ? Math.max(0, layout.booklet.outerMarginMm) : 0;
+    const bookletSpineWidthMm = layout.booklet?.enabled ? Math.max(0, layout.booklet.spineWidthMm) : 0;
 
     // Optional back-side sheet for Light Table Transparent Mode (J2)
     const pairedBackSide =
@@ -530,8 +532,10 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                   title={lang === 'fa' ? 'فاصله شیرازه؛ برای تغییر مقدار از پنل بوکلت استفاده کنید' : 'Spine gap; adjust its value in the booklet panel'}
                   className="absolute z-20 cursor-col-resize touch-none border-x border-dashed border-slate-500/70"
                   style={{
-                    left: bookletGapLeftMm * basePxPerMm,
-                    width: bookletGapWidthMm * basePxPerMm,
+                    // The full gap also contains the two inner page margins.
+                    // Keep the visible draggable hatch limited to the physical spine.
+                    left: (bookletGapLeftMm + bookletMarginMm) * basePxPerMm,
+                    width: Math.min(bookletSpineWidthMm, bookletGapWidthMm) * basePxPerMm,
                     top: layout.marginsMm.top * basePxPerMm,
                     bottom: layout.marginsMm.bottom * basePxPerMm,
                     backgroundImage: 'repeating-linear-gradient(135deg, rgba(100,116,139,0.30) 0px, rgba(100,116,139,0.30) 2px, rgba(148,163,184,0.10) 2px, rgba(148,163,184,0.10) 6px)',
