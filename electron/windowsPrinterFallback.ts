@@ -827,7 +827,7 @@ export async function printToWindowsPrinterViaPowerShell(
     '  Priority = if ($latestJob -and $latestJob.Priority) { [int]$latestJob.Priority } else { 1 }',
     '  SubmittedAt = [DateTime]::UtcNow.ToString("O")',
     '} | ConvertTo-Json -Compress',
-  ].join('; ');
+  ].join('\r\n');
 
   try {
     const { stdout } = await execFileAsync(
