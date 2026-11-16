@@ -106,6 +106,16 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
           <input type="number" min="0" max="40" step="0.5" value={booklet.outerMarginMm}
             onChange={e => patch({ outerMarginMm: Math.max(0, Math.min(40, Number(e.target.value) || 0)) })} className={input} />
         </label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={layout.showCropMarks}
+            onChange={e => updateLayout({ showCropMarks: e.target.checked })} className="accent-amber-500" />
+          {isFa ? 'نمایش علائم برش' : 'Show crop marks'}
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={layout.showCellBorders}
+            onChange={e => updateLayout({ showCellBorders: e.target.checked })} className="accent-amber-500" />
+          {isFa ? 'نمایش کادر دور صفحات' : 'Show page borders'}
+        </label>
       </div>
 
       <div className="rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] leading-5 text-amber-100">
