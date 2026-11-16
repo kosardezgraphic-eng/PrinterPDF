@@ -163,9 +163,20 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
 
   const outputSheets = useMemo(() => computeImpositionSheets(pages, layout), [pages, layout]);
   const previewOnlyPage = pages.find(page => page.id === previewOnlyPageId && !page.selectedForPrint);
-  const sheets = useMemo(() => previewOnlyPage
-    ? computeImpositionSheets([{ ...previewOnlyPage, selectedForPrint: true }], { ...layout, duplexMode:'none' })
-    : outputSheets, [previewOnlyPage, layout, outputSheets]);
+  // The imposition engine keeps an empty back side when duplex output has an odd
+  // number of sides. That blank side is required in the print PDF, but it is not
+  // an editable/visible page in the workspace preview.
+  const sheets = useMemo(() => {
+    const computed = previewOnlyPage
+      ? computeImpositionSheets([{ ...previewOnlyPage, selectedForPrint: true }], { ...layout, duplexMode: 'none' })
+      : outputSheets;
+    if (previewOnlyPage || layout.duplexMode === 'none' || computed.length === 0) return computed;
+
+    const last = computed[computed.length - 1];
+    const isPrintPaddingBackSide =
+      last.side === 'back' && last.cells.every(cell => cell.page === null);
+    return isPrintPaddingBackSide ? computed.slice(0, -1) : computed;
+  }, [previewOnlyPage, layout, outputSheets]);
   const pageNumbers = useMemo(() => new Map(pages.map((page, index) => [page.id, index + 1])), [pages]);
   const textEditing = useAppStore(s => !!s.textEdit || s.overlays.some(o=>o.id===s.selectedOverlayId && (o.kind==='numbering'||o.kind==='image')));
   useEffect(() => { if (textEditing) setCanvasTool('move'); }, [textEditing]);
