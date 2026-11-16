@@ -6,7 +6,7 @@ they are stored in the project JSON and in undo/redo history exactly like text o
 ## Adding and editing
 
 * **افزودن شماره صفحه / Add page number** on the Insert tab creates one numbering overlay for the whole workspace
-  (`target: page`, `targetScope: all`) with `{page}` as its template and Persian digits when the interface language is
+  (`target: page`, `targetScope: all`) with `{page}` as its template, attached to the full output sheet by default, and Persian digits when the interface language is
   Persian (English digits otherwise). It becomes selected, so the numbering panel opens immediately.
 * Drag the number to move it, use the eight handles to resize its box, and press the arrow keys for a 1 mm step
   (Shift for 5 mm). Ctrl/Command-drag creates an independent copy. `Alt`-style multi-select is not supported: every
