@@ -133,7 +133,7 @@ export function computeImpositionSheets(
 ): ComputedSheetSide[] {
   if (layout.booklet?.enabled) {
     layout = {
-      ...layout, rows: 1, cols: 2, placementMode: 'sequential',
+      ...layout, rows: 1, cols: 2, placementMode: 'sequential', scaleMode: 'fit', uniqueScale: true, autoRotateToFit: true,
       sheetOrder: layout.booklet.direction, duplexMode: layout.booklet.duplexMode,
       horizontalGutterMm: layout.booklet.spineWidthMm, verticalGutterMm: 0,
       orientation: 'landscape',
