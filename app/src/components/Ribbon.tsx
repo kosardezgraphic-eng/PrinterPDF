@@ -44,7 +44,7 @@ import {
   type SheetOrderMode,
 } from '@shared/models';
 
-export const Ribbon: React.FC = () => {
+export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void }> = ({ onOpenWatermarkPanel }) => {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const {
     activeRibbonTab,
@@ -682,8 +682,8 @@ export const Ribbon: React.FC = () => {
               <div className="flex items-center gap-1 border-e border-slate-800 pe-3">
                 <ShapePicker onPick={(type) => { addShapeOverlay(type); }} />
               </div>
-              <button type="button" aria-pressed={watermark.enabled}
-                onClick={() => updateWatermark({ enabled: !watermark.enabled })}
+              <button type="button" data-watermark-panel-trigger aria-pressed={watermark.enabled}
+                onClick={onOpenWatermarkPanel}
                 className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 font-semibold transition-colors ${watermark.enabled ? 'border-sky-400 bg-sky-600 text-white' : 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'}`}>
                 <Droplets className="h-4 w-4" />
                 {lang === 'fa' ? 'واترمارک' : 'Watermark'}
