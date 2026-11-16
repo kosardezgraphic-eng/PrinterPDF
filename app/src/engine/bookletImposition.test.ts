@@ -94,7 +94,8 @@ describe('booklet imposition', () => {
     expect(narrowCell.cellXMm).toBe(10);
     expect(wideCell.cellXMm).toBe(20);
   });
-\n  it('pads incomplete signatures with blank pages and splits fixed-size signatures', () => {
+
+  it('pads incomplete signatures with blank pages and splits fixed-size signatures', () => {
     const layout = { ...baseLayout, booklet: { ...baseLayout.booklet!, signatureSize: 4 as const } };
     const sheets = computeImpositionSheets(pages(5), layout);
     expect(sheets).toHaveLength(4);
