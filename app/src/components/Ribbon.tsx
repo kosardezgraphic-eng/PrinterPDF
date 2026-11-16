@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   FilePlus2,
   FolderOpen,
@@ -18,7 +18,6 @@ import {
   Contrast,
   SunMedium,
   Droplets,
-  Hash,
   Play,
   Pause,
   RefreshCw,
@@ -39,7 +38,6 @@ import { t } from '../i18n/translations';
 import {
   STANDARD_PAPER_SIZES,
   type DuplexMode,
-  type PageNumberFormat,
   type PageOrientation,
   type PaperSizeId,
   type ScaleMode,
@@ -48,6 +46,7 @@ import {
 
 export const Ribbon: React.FC = () => {
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const [watermarkPanelOpen, setWatermarkPanelOpen] = useState(false);
   const {
     activeRibbonTab,
     ribbonCollapsed,
@@ -686,60 +685,61 @@ export const Ribbon: React.FC = () => {
               <div className="flex items-center gap-1 border-e border-slate-800 pe-3">
                 <ShapePicker onPick={(type) => { addShapeOverlay(type); }} />
               </div>
-              {/* F1: Watermark */}
-              <div className="flex items-center gap-2.5 border-e border-slate-800 pe-4">
-                <label className="flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 font-bold text-sky-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={watermark.enabled}
-                    onChange={(e) => updateWatermark({ enabled: e.target.checked })}
-                    className="accent-sky-500"
-                  />
-                  <Droplets className="h-4 w-4" />
-                  <span>{lang === 'fa' ? 'واترمارک زنده (F1)' : 'Watermark'}</span>
-                </label>
-
-                <input
-                  type="text"
-                  value={watermark.text}
-                  onChange={(e) =>
-                    updateWatermark({ enabled: true, text: e.target.value })
-                  }
-                  placeholder="متن واترمارک با ماکرو {shamsi_date}..."
-                  className="w-60 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs text-white"
-                />
-
-                <div className="flex items-center gap-1">
-                  {['{shamsi_date}', '{page}', '{pages}', '{file}', '{user}'].map(
-                    (macro) => (
-                      <button
-                        key={macro}
-                        type="button"
-                        onClick={() =>
-                          updateWatermark({
-                            enabled: true,
-                            text: `${watermark.text} ${macro}`.trim(),
-                          })
-                        }
-                        className="rounded bg-slate-800 px-1.5 py-1 font-mono text-[10px] text-sky-300 hover:bg-slate-700 cursor-pointer"
-                      >
-                        {macro}
-                      </button>
-                    )
-                  )}
+              {/* F1: Consolidated watermark settings panel */}
+              <div className="relative border-e border-slate-800 pe-4">
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 font-bold text-sky-300 cursor-pointer">
+                    <input type="checkbox" checked={watermark.enabled}
+                      onChange={(e) => updateWatermark({ enabled: e.target.checked })}
+                      className="accent-sky-500" />
+                    <Droplets className="h-4 w-4" />
+                    <span>{lang === 'fa' ? 'فعال‌سازی واترمارک' : 'Enable watermark'}</span>
+                  </label>
+                  <button type="button" aria-expanded={watermarkPanelOpen}
+                    onClick={() => setWatermarkPanelOpen(open => !open)}
+                    className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 font-semibold text-slate-100 hover:bg-slate-700">
+                    {lang === 'fa' ? 'تنظیمات کامل واترمارک' : 'Watermark settings'}
+                  </button>
                 </div>
-
-                <label className="flex items-center gap-1 text-slate-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={watermark.tiled}
-                    onChange={(e) =>
-                      updateWatermark({ enabled: true, tiled: e.target.checked })
-                    }
-                    className="accent-sky-500"
-                  />
-                  <span>{lang === 'fa' ? 'کاشی‌کاری (Tile)' : 'Tile'}</span>
-                </label>
+                {watermarkPanelOpen && (
+                  <div data-watermark-settings-panel className="absolute start-0 top-full z-50 mt-2 grid min-w-[min(680px,90vw)] grid-cols-2 gap-3 rounded-xl border border-slate-700 bg-slate-900 p-4 shadow-2xl">
+                    <label className="col-span-2 flex flex-col gap-1 text-slate-300">
+                      <span>{lang === 'fa' ? 'متن واترمارک' : 'Watermark text'}</span>
+                      <textarea rows={2} value={watermark.text}
+                        onChange={e => updateWatermark({ enabled: true, text: e.target.value })}
+                        placeholder={lang === 'fa' ? 'متن یا متغیرهایی مانند {shamsi_date} و {page}' : 'Text or macros such as {date} and {page}'}
+                        className="w-full resize-y rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white" />
+                    </label>
+                    <div className="col-span-2 flex flex-wrap gap-1.5">
+                      {['{page}', '{pages}', '{sheet}', '{sheets}', '{date}', '{shamsi_date}', '{file}', '{user}'].map(macro => (
+                        <button key={macro} type="button"
+                          onClick={() => updateWatermark({ enabled: true, text: `${watermark.text}${watermark.text.trim() ? ' ' : ''}${macro}` })}
+                          className="rounded bg-slate-800 px-2 py-1 font-mono text-[11px] text-sky-300 hover:bg-slate-700">{macro}</button>
+                      ))}
+                    </div>
+                    <label className="flex flex-col gap-1 text-slate-300">
+                      <span>{lang === 'fa' ? 'نوع قلم' : 'Font family'}</span>
+                      <select aria-label="Watermark font family" value={watermark.fontFamily}
+                        onChange={e => updateWatermark({ enabled: true, fontFamily: e.target.value as 'Vazirmatn' | 'Inter' })}
+                        className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-2 text-white">
+                        <option value="Vazirmatn">Vazirmatn</option><option value="Inter">Inter</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1 text-slate-300">
+                      <span>{lang === 'fa' ? 'اندازه قلم (pt)' : 'Font size (pt)'}</span>
+                      <input aria-label="Watermark font size" type="number" min="6" max="200" value={watermark.fontSizePt}
+                        onChange={e => updateWatermark({ enabled: true, fontSizePt: Math.max(6, Math.min(200, Number(e.target.valuleSpacingMm: Math.max(5, Math.min(500, Number(e.target.value) || 5)) })}
+                          className="w-24 rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-white disabled:opacity-40" />
+                      </label>
+                    </div>
+                    <div className="col-span-2 flex justify-end">
+                      <button type="button" onClick={() => setWatermarkPanelOpen(false)}
+                        className="rounded-lg bg-sky-700 px-3 py-1.5 font-semibold text-white hover:bg-sky-600">
+                        {lang === 'fa' ? 'بستن پنل' : 'Close panel'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2">
