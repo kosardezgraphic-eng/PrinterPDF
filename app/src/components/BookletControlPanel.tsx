@@ -45,7 +45,7 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
 
       <label className={label}>
         <span className="text-slate-400">{isFa ? 'اندازه کاغذ هر برگ چاپی' : 'Printed sheet size'}</span>
-        <select value={layout.paperSize} onChange={e => updateLayout({ paperSize: e.target.value as PaperSizeId, orientation: 'landscape' })} className={input}>
+        <select value={layout.paperSize} onChange={e => updateLayout({ paperSize: e.target.value as PaperSizeId })} className={input}>
           {Object.entries(STANDARD_PAPER_SIZES).map(([id, paper]) => <option key={id} value={id}>{paper.label}</option>)}
           <option value="Custom">{isFa ? 'ابعاد سفارشی' : 'Custom size'}</option>
         </select>
@@ -55,11 +55,11 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
         <div className="grid grid-cols-2 gap-2">
           <label className={label}><span className="text-slate-400">{isFa ? 'عرض (mm)' : 'Width (mm)'}</span>
             <input type="number" min="80" max="1000" value={layout.customWidthMm}
-              onChange={e => updateLayout({ customWidthMm: Math.max(80, Number(e.target.value) || 80), orientation: 'landscape' })} className={input} />
+              onChange={e => updateLayout({ customWidthMm: Math.max(80, Number(e.target.value) || 80) })} className={input} />
           </label>
           <label className={label}><span className="text-slate-400">{isFa ? 'ارتفاع (mm)' : 'Height (mm)'}</span>
             <input type="number" min="80" max="1400" value={layout.customHeightMm}
-              onChange={e => updateLayout({ customHeightMm: Math.max(80, Number(e.target.value) || 80), orientation: 'landscape' })} className={input} />
+              onChange={e => updateLayout({ customHeightMm: Math.max(80, Number(e.target.value) || 80) })} className={input} />
           </label>
         </div>
       )}
