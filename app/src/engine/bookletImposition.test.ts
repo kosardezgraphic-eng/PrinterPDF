@@ -73,7 +73,7 @@ describe('booklet imposition', () => {
 
   it('uses booklet outer margins to reduce page image size and keeps transformed content clipped to its half-page', () => {
     const pageWithOversizedTransform = pages(4).map((page, index) => index === 0
-      ? { ...page, overrides: { transform: { x: 0, y: 0, scaleX: 2, scaleY: 2 } } }
+      ? { ...page, overrides: { transform: { x: 0.35, y: -0.2, scaleX: 2, scaleY: 2 } } }
       : page);
     const narrowMargins = computeImpositionSheets(pageWithOversizedTransform, {
       ...baseLayout,
@@ -90,6 +90,10 @@ describe('booklet imposition', () => {
     expect(wideCell.cellHeightMm).toBeLessThan(narrowCell.cellHeightMm);
     expect(wideCell.contentWidthMm).toBeLessThan(narrowCell.contentWidthMm);
     // A stored page scale must not prevent booklet pages from refitting to margins.
+    expect(narrowCell.transform?.x).toBe(0);
+    expect(narrowCell.transform?.y).toBe(0);
+    expect(wideCell.transform?.x).toBe(0);
+    expect(wideCell.transform?.y).toBe(0);
     expect(narrowCell.transform?.scaleX).toBe(1);
     expect(narrowCell.transform?.scaleY).toBe(1);
     expect(wideCell.transform?.scaleX).toBe(1);
