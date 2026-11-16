@@ -44,7 +44,7 @@ import {
   type SheetOrderMode,
 } from '@shared/models';
 
-export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void }> = ({ onOpenWatermarkPanel }) => {
+export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletPanel: () => void }> = ({ onOpenWatermarkPanel, onOpenBookletPanel }) => {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const {
     activeRibbonTab,
@@ -686,6 +686,13 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void }> = ({ onOpenW
                 className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 font-semibold transition-colors ${watermark.enabled ? 'border-sky-400 bg-sky-600 text-white' : 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'}`}>
                 <Droplets className="h-4 w-4" />
                 {lang === 'fa' ? 'واترمارک' : 'Watermark'}
+              </button>
+
+              <button type="button" data-booklet-panel-trigger aria-pressed={!!layout.booklet?.enabled}
+                onClick={onOpenBookletPanel}
+                className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 font-semibold transition-colors ${layout.booklet?.enabled ? 'border-amber-400 bg-amber-600 text-white' : 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'}`}>
+                <FileStack className="h-4 w-4" />
+                {lang === 'fa' ? 'بوکلت' : 'Booklet'}
               </button>
 
               <div className="flex items-center gap-2">
