@@ -76,7 +76,7 @@ describe('booklet imposition', () => {
     expect(sheets).toHaveLength(4);
     expect(imposedPageNumbers(sheets)).toEqual([
       [1, 4],
-      [null, 2],
+      [3, 2],
       [5, null],
       [null, null],
     ]);
