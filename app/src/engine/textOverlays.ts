@@ -82,7 +82,7 @@ export function drawOverlayText(ctx:CanvasRenderingContext2D,item:PageOverlayTex
   ctx.clearRect(0,0,width,height);
   if(item.backgroundColor && item.backgroundColor!=='transparent'){ctx.fillStyle=item.backgroundColor;ctx.fillRect(0,0,width,height);}
   const lineHeight=Math.max(.8,Math.min(3,item.lineHeight??1.25));
-  const lineCount=Math.max(1,item.text.split('\\n').length);
+  const lineCount=Math.max(1,item.text.split('\n').length);
   const requestedSize=Math.max(8,Math.min(80,item.fontSize))*pixelsPerPoint;
   const size=item.verticalAlign==='middle'&&height>0
     ? Math.max(1,Math.min(requestedSize,height/(lineCount*lineHeight)))
@@ -98,10 +98,10 @@ export function drawOverlayText(ctx:CanvasRenderingContext2D,item:PageOverlayTex
   const x=item.align==='right'?inset+textWidth:item.align==='center'?width/2:inset;
   const verticalOffset=item.verticalAlign==='middle'?(height-lineCount*size*lineHeight)/2+size/2:0;
   ctx.font=font(size);ctx.textBaseline=item.verticalAlign==='middle'?'middle':'top';ctx.textAlign=item.align;
-  ctx.direction=/[\\u0590-\\u08ff]/.test(item.text)?'rtl':'ltr';ctx.fillStyle=item.color;
+  ctx.direction=/[\u0590-\u08ff]/.test(item.text)?'rtl':'ltr';ctx.fillStyle=item.color;
   const ranges=item.scriptRanges??[];
   let offset=0;
-  item.text.split('\\n').forEach((line,index)=>{
+  item.text.split('\n').forEach((line,index)=>{
     const y=verticalOffset+index*size*lineHeight;
     const relevant=ranges.filter(r=>r.start<offset+line.length && r.end>offset);
     if(!relevant.length){
