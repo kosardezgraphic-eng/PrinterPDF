@@ -1107,9 +1107,9 @@ export const ModalsAndToasts: React.FC = () => {
 
       {/* 5. SETTINGS MODAL (K1) */}
       {showSettingsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 text-slate-100 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 backdrop-blur-xs">
+          <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 p-4 text-slate-100 shadow-2xl">
+            <div className="mb-3 flex shrink-0 items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Settings className="h-5 w-5 text-sky-400" />
                 <h2 className="text-base font-extrabold">
@@ -1127,6 +1127,7 @@ export const ModalsAndToasts: React.FC = () => {
               </button>
             </div>
 
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pe-1">
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div>
                 <label className="mb-1 block text-slate-400">
@@ -1259,7 +1260,9 @@ export const ModalsAndToasts: React.FC = () => {
 
             <SettingsPresetPanel />
 
-            <div className="mt-6 flex justify-end border-t border-slate-800 pt-4">
+            </div>
+
+            <div className="mt-3 flex shrink-0 justify-end border-t border-slate-800 pt-3">
               <button
                 type="button"
                 onClick={() => setModalState('settings', false)}
