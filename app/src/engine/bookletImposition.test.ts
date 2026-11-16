@@ -71,51 +71,57 @@ describe('booklet imposition', () => {
   });
 
 
-  it('applies booklet outer margins inside each half-page and refits page images', () => {
+  it('applies each booklet margin side independently and sets middle gap strictly from Spine and fold', () => {
     const pageWithOversizedTransform = pages(4).map((page, index) => index === 0
       ? { ...page, overrides: { transform: { x: 0.35, y: -0.2, scaleX: 2, scaleY: 2 } } }
       : page);
-    const narrowMargins = computeImpositionSheets(pageWithOversizedTransform, {
+    const baseline = computeImpositionSheets(pageWithOversizedTransform, {
       ...baseLayout,
-      booklet: { ...baseLayout.booklet!, outerMarginMm: 10 },
+      marginsMm: { top: 10, right: 10, bottom: 10, left: 10 },
+      booklet: { ...baseLayout.booklet!, spineWidthMm: 4 },
     });
-    const wideMargins = computeImpositionSheets(pageWithOversizedTransform, {
+    const tallTopMargin = computeImpositionSheets(pageWithOversizedTransform, {
       ...baseLayout,
-      booklet: { ...baseLayout.booklet!, outerMarginMm: 20 },
+      marginsMm: { top: 30, right: 10, bottom: 10, left: 10 },
+      booklet: { ...baseLayout.booklet!, spineWidthMm: 4 },
     });
-    const narrowCell = narrowMargins[0].cells[0];
-    const wideCell = wideMargins[0].cells[0];
+    const wideSpineOnly = computeImpositionSheets(pageWithOversizedTransform, {
+      ...baseLayout,
+      marginsMm: { top: 30, right: 10, bottom: 10, left: 10 },
+      booklet: { ...baseLayout.booklet!, spineWidthMm: 16 },
+    });
 
-    expect(wideCell.cellWidthMm).toBeLessThan(narrowCell.cellWidthMm);
-    expect(wideCell.cellHeightMm).toBeLessThan(narrowCell.cellHeightMm);
-    expect(wideCell.contentWidthMm).toBeLessThan(narrowCell.contentWidthMm);
-    // A stored page scale must not prevent booklet pages from refitting to margins.
-    expect(narrowCell.transform?.x).toBe(0);
-    expect(narrowCell.transform?.y).toBe(0);
-    expect(wideCell.transform?.x).toBe(0);
-    expect(wideCell.transform?.y).toBe(0);
-    expect(narrowCell.transform?.scaleX).toBe(1);
-    expect(narrowCell.transform?.scaleY).toBe(1);
-    expect(wideCell.transform?.scaleX).toBe(1);
-    expect(wideCell.transform?.scaleY).toBe(1);
-    expect(narrowCell.allowOverflow).toBe(false);
-    expect(wideCell.allowOverflow).toBe(false);
-    // Margins shrink and reposition the actual imposed cells, exactly like
-    // increasing the spine gap. The physical spine remains centred in that gap.
-    const narrowGap = narrowMargins[0].cells[1].cellXMm -
-      (narrowCell.cellXMm + narrowCell.cellWidthMm);
-    const wideGap = wideMargins[0].cells[1].cellXMm -
-      (wideCell.cellXMm + wideCell.cellWidthMm);
-    expect(narrowGap).toBeCloseTo(baseLayout.booklet!.spineWidthMm + 20);
-    expect(wideGap).toBeCloseTo(baseLayout.booklet!.spineWidthMm + 40);
-    expect(narrowCell.cellXMm).toBe(10);
-    expect(wideCell.cellXMm).toBe(20);
-    expect(narrowCell.contentXMm).toBeGreaterThanOrEqual(narrowCell.cellXMm);
-    expect(wideCell.contentXMm).toBeGreaterThan(narrowCell.contentXMm);
-    expect(wideCell.contentYMm).toBeGreaterThan(narrowCell.contentYMm);
-    expect(narrowCell.contentWidthMm).toBeLessThanOrEqual(narrowCell.cellWidthMm);
-    expect(wideCell.contentWidthMm).toBeLessThanOrEqual(wideCell.cellWidthMm);
-    expect(wideCell.contentWidthMm).toBeLessThan(narrowCell.contentWidthMm);
+    const baseCell0 = baseline[0].cells[0];
+    const baseCell1 = baseline[0].cells[1];
+    const topCell0 = tallTopMargin[0].cells[0];
+    const topCell1 = tallTopMargin[0].cells[1];
+    const spineCell0 = wideSpineOnly[0].cells[0];
+    const spineCell1 = wideSpineOnly[0].cells[1];
+
+    // Changing only top margin shifts top edge to 30mm and shrinks cell height without moving left/right/bottom or middle gap.
+    expect(topCell0.cellXMm).toBe(10);
+    expect(topCell0.cellYMm).toBe(30);
+    expect(topCell0.cellHeightMm).toBeCloseTo(baseCell0.cellHeightMm - 20);
+    expect(topCell0.cellWidthMm).toBeCloseTo(baseCell0.cellWidthMm);
+    expect(topCell0.contentWidthMm).toBeLessThan(baseCell0.contentWidthMm);
+    expect(topCell0.contentYMm).toBeGreaterThanOrEqual(30);
+    expect(topCell1.cellXMm + topCell1.cellWidthMm).toBeCloseTo(baseCell1.cellXMm + baseCell1.cellWidthMm);
+
+    // Middle margin between the two booklet pages depends solely on Spine and fold (spineWidthMm).
+    const baseGap = baseCell1.cellXMm - (baseCell0.cellXMm + baseCell0.cellWidthMm);
+    const topChangedGap = topCell1.cellXMm - (topCell0.cellXMm + topCell0.cellWidthMm);
+    const wideSpineGap = spineCell1.cellXMm - (spineCell0.cellXMm + spineCell0.cellWidthMm);
+    expect(baseGap).toBeCloseTo(4);
+    expect(topChangedGap).toBeCloseTo(4);
+    expect(wideSpineGap).toBeCloseTo(16);
+
+    // Stored page overrides must not let content spill past the margin/spine bounds.
+    expect(topCell0.transform?.x).toBe(0);
+    expect(topCell0.transform?.y).toBe(0);
+    expect(topCell0.transform?.scaleX).toBe(1);
+    expect(topCell0.transform?.scaleY).toBe(1);
+    expect(topCell0.allowOverflow).toBe(false);
+    expect(spineCell0.contentWidthMm).toBeLessThanOrEqual(spineCell0.cellWidthMm);
   });
 
   it('pads incomplete signatures with blank pages and splits fixed-size signatures', () => {

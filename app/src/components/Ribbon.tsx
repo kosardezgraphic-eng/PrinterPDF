@@ -417,8 +417,8 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
                   {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
                     <label key={side} className="flex items-center gap-1 text-slate-300" title={lang === 'fa' ? `حاشیه ${ { top: 'بالا', right: 'راست', bottom: 'پایین', left: 'چپ' }[side] } (mm)` : `${side} margin (mm)`}>
                       <span>{lang === 'fa' ? { top: 'بالا', right: 'راست', bottom: 'پایین', left: 'چپ' }[side] : side}</span>
-                      <input type="number" min={0} max={layout.booklet?.enabled ? 40 : 200} step={layout.booklet?.enabled ? 0.5 : 1}
-                        value={layout.booklet?.enabled ? layout.booklet.outerMarginMm : layout.marginsMm[side]}
+                      <input type="number" min={0} max={200} step={layout.booklet?.enabled ? 0.5 : 1}
+                        value={layout.marginsMm[side]}
                         onChange={(e) => updateMargins({ [side]: Math.max(0, Math.min(200, Number(e.target.value) || 0)) })}
                         className="w-12 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-center text-xs text-white" />
                     </label>
@@ -773,9 +773,9 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
                     <input
                       type="number"
                       min={0}
-                      max={layout.booklet?.enabled ? 40 : 60}
+                      max={60}
                       step={layout.booklet?.enabled ? 0.5 : 1}
-                      value={layout.booklet?.enabled ? layout.booklet.outerMarginMm : layout.marginsMm[side]}
+                      value={layout.marginsMm[side]}
                       onChange={(e) =>
                         updateMargins({ [side]: Math.max(0, Number(e.target.value) || 0) })
                       }

@@ -6,6 +6,7 @@ import { STANDARD_PAPER_SIZES, type BookletSettings, type PaperSizeId } from '@s
 export function BookletControlPanel({ onClose }: { onClose: () => void }) {
   const layout = useAppStore(state => state.layout);
   const updateLayout = useAppStore(state => state.updateLayout);
+  const updateMargins = useAppStore(state => state.updateMargins);
   const language = useAppStore(state => state.settings.language);
   const isFa = language === 'fa';
   const booklet: BookletSettings = layout.booklet ?? {
@@ -16,6 +17,12 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
     updateLayout({ booklet: { ...booklet, ...value } });
   const input = 'w-full rounded border border-slate-600 bg-slate-800 p-1.5 text-xs text-white';
   const label = 'block space-y-1';
+  const marginSides: Array<{ side: 'top' | 'right' | 'bottom' | 'left'; faLabel: string; enLabel: string }> = [
+    { side: 'top', faLabel: 'حاشیه بالا', enLabel: 'Top margin' },
+    { side: 'right', faLabel: 'حاشیه راست', enLabel: 'Right margin' },
+    { side: 'bottom', faLabel: 'حاشیه پایین', enLabel: 'Bottom margin' },
+    { side: 'left', faLabel: 'حاشیه چپ', enLabel: 'Left margin' },
+  ];
 
   return (
     <aside data-booklet-control-panel aria-label={isFa ? 'تنظیمات بوکلت' : 'Booklet controls'}
@@ -82,7 +89,7 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
             aria-label={isFa ? 'ورود دستی عرض شیرازه به میلی‌متر' : 'Manually enter spine gap in millimeters'}
             onChange={e => patch({ spineWidthMm: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })} className={input} />
           <span className="text-[10px] leading-4 text-slate-500">
-            {isFa ? 'نوار هاشور خاکستری در پیش‌نمایش فقط راهنماست و در PDF و چاپ نمی‌آید.' : 'The gray hatched band is a preview guide only; it is excluded from PDF and print.'}
+            {isFa ? 'فاصله وسط بین دو صفحه فقط از روی شیرازه و عطف تنظیم می‌شود؛ نوار هاشور فقط راهنماست و چاپ نمی‌شود.' : 'The middle gap between pages is controlled solely by Spine and fold; the hatched band is a preview guide only.'}
           </span>
         </label>
         <label className={label}>
@@ -105,14 +112,38 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
             <option value="long-edge">{isFa ? 'برگشت از لبه بلند' : 'Flip on long edge'}</option>
           </select>
         </label>
-        <label className={label}>
-          <span className="flex justify-between text-slate-400"><span>{isFa ? 'حاشیه بیرونی (mm)' : 'Outer margin (mm)'}</span><span>{booklet.outerMarginMm} mm</span></span>
-          <input type="range" min="0" max="40" step="0.5" value={booklet.outerMarginMm}
-            onChange={e => patch({ outerMarginMm: Number(e.target.value) })} className="w-full accent-amber-500" />
-          <input type="number" min="0" max="40" step="0.1" value={booklet.outerMarginMm}
-            aria-label={isFa ? 'ورود دستی حاشیه بیرونی به میلی‌متر' : 'Manually enter outer margin in millimeters'}
-            onChange={e => patch({ outerMarginMm: Math.max(0, Math.min(40, Number(e.target.value) || 0)) })} className={input} />
-        </label>
+        <div className="grid grid-cols-2 gap-2">
+          {marginSides.map(({ side, faLabel, enLabel }) => (
+            <label key={side} className={label}>
+              <span className="flex justify-between text-[11px] text-slate-400">
+                <span>{isFa ? faLabel : enLabel}</span>
+                <span>{layout.marginsMm[side]} mm</span>
+              </span>
+              <input
+                type="range"
+                min="0"
+                max="60"
+                step="0.5"
+                value={layout.marginsMm[side]}
+                aria-label={isFa ? `${faLabel} (اسلایدر)` : `${enLabel} slider`}
+                data-booklet-margin-slider={side}
+                onChange={e => updateMargins({ [side]: Number(e.target.value) })}
+                className="w-full accent-amber-500"
+              />
+              <input
+                type="number"
+                min="0"
+                max="60"
+                step="0.1"
+                value={layout.marginsMm[side]}
+                aria-label={isFa ? `${faLabel} به میلی‌متر` : `${enLabel} in millimeters`}
+                data-booklet-margin-input={side}
+                onChange={e => updateMargins({ [side]: Math.max(0, Math.min(60, Number(e.target.value) || 0)) })}
+                className={input}
+              />
+            </label>
+          ))}
+        </div>
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={layout.showCropMarks}
             onChange={e => updateLayout({ showCropMarks: e.target.checked })} className="accent-amber-500" />

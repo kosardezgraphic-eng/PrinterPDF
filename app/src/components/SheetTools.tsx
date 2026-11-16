@@ -15,14 +15,18 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit
   const rectRef = useRef<HTMLDivElement>(null);
   const toEffectiveLayout = (source: LayoutSettings): LayoutSettings => {
     if (!source.booklet?.enabled) return source;
-    const outer = Math.max(0, source.booklet.outerMarginMm);
     const spine = Math.max(0, source.booklet.spineWidthMm);
     return {
       ...source,
       rows: 1,
       cols: 2,
-      marginsMm: { top: outer, right: outer, bottom: outer, left: outer },
-      horizontalGutterMm: spine + outer * 2,
+      marginsMm: {
+        top: Math.max(0, source.marginsMm.top),
+        right: Math.max(0, source.marginsMm.right),
+        bottom: Math.max(0, source.marginsMm.bottom),
+        left: Math.max(0, source.marginsMm.left),
+      },
+      horizontalGutterMm: spine,
       verticalGutterMm: 0,
     };
   };
@@ -44,14 +48,13 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit
     const moved = moveLayoutGuide(baseEffective, sheet, d.guide, dxMm, dyMm);
     if (!d.base.booklet?.enabled) return moved;
     if (d.guide.type === 'margin') {
-      const nextOuter = Math.max(0, Math.min(40, Math.round(moved.marginsMm[d.guide.side] * 10) / 10));
+      const nextSide = Math.max(0, Math.round(moved.marginsMm[d.guide.side] * 10) / 10);
       return {
         ...d.base,
-        booklet: { ...d.base.booklet, outerMarginMm: nextOuter },
+        marginsMm: { ...d.base.marginsMm, [d.guide.side]: nextSide },
       };
     }
-    const baseOuter = Math.max(0, d.base.booklet.outerMarginMm);
-    const nextSpine = Math.max(0, Math.min(30, Math.round((moved.horizontalGutterMm - baseOuter * 2) * 10) / 10));
+    const nextSpine = Math.max(0, Math.min(30, Math.round(moved.horizontalGutterMm * 10) / 10));
     return {
       ...d.base,
       booklet: { ...d.base.booklet, spineWidthMm: nextSpine },

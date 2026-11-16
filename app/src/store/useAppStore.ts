@@ -1463,36 +1463,16 @@ export const useAppStore = create<AppState>((set, get) => {
 
     updateMargins: (patch) => {
       const before = captureSnapshot(get());
-      set((state) => {
-        if (state.layout.booklet?.enabled) {
-          const nextValue = (['top', 'right', 'bottom', 'left'] as const)
-            .map(side => patch[side])
-            .find((val): val is number => typeof val === 'number' && Number.isFinite(val));
-          if (nextValue !== undefined) {
-            const outerMarginMm = Math.max(0, Math.min(40, Math.round(nextValue * 10) / 10));
-            return {
-              layout: {
-                ...state.layout,
-                marginMode: 'custom',
-                booklet: {
-                  ...state.layout.booklet,
-                  outerMarginMm,
-                },
-              },
-            };
-          }
-        }
-        return {
-          layout: {
-            ...state.layout,
-            marginMode: 'custom',
-            marginsMm: {
-              ...state.layout.marginsMm,
-              ...patch,
-            },
+      set((state) => ({
+        layout: {
+          ...state.layout,
+          marginMode: 'custom',
+          marginsMm: {
+            ...state.layout.marginsMm,
+            ...patch,
           },
-        };
-      });
+        },
+      }));
       pushUndo('تغییر حاشیه‌ها', 'Update margins', before, captureSnapshot(get()));
     },
 
@@ -1508,14 +1488,6 @@ export const useAppStore = create<AppState>((set, get) => {
           ...state.layout,
           marginMode: 'printer',
           marginsMm: { ...pm },
-          ...(state.layout.booklet?.enabled
-            ? {
-                booklet: {
-                  ...state.layout.booklet,
-                  outerMarginMm: Math.max(0, Math.min(40, Math.round(Math.max(pm.top, pm.right, pm.bottom, pm.left) * 10) / 10)),
-                },
-              }
-            : {}),
         },
       });
       pushUndo('بازنشانی حاشیه چاپگر', 'Reset printer margins', before, captureSnapshot(get()));

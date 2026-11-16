@@ -96,77 +96,72 @@ describe('booklet margin behavior parity with spine gap', () => {
     vi.restoreAllMocks();
   });
 
-  it('provides a range slider and numeric input for booklet margin and resizes/repositions rendered page images', () => {
+  it('provides independent per-side margin sliders and separate Spine and fold control in BookletControlPanel', () => {
     const panel = container.querySelector('[data-booklet-control-panel]')!;
-    const ranges = panel.querySelectorAll<HTMLInputElement>('input[type="range"]');
-    expect(ranges).toHaveLength(2);
+    const topSlider = panel.querySelector<HTMLInputElement>('[data-booklet-margin-slider="top"]')!;
+    const spineSlider = panel.querySelector<HTMLInputElement>('input[type="range"]:not([data-booklet-margin-slider])')!;
+    expect(topSlider).toBeTruthy();
+    expect(spineSlider).toBeTruthy();
 
-    const beforeLeft = parseFloat(
-      (container.querySelectorAll<HTMLElement>('[data-page-content]')[0]).style.left,
-    );
-    const beforeWidth = parseFloat(
-      (container.querySelectorAll<HTMLElement>('[data-page-content]')[0]).style.width,
-    );
+    const firstPage = () => container.querySelectorAll<HTMLElement>('[data-page-content]')[0];
+    const beforeTop = parseFloat(firstPage().style.top);
+    const beforeWidth = parseFloat(firstPage().style.width);
 
-    setInputValue(ranges[1], '22');
-    expect(useAppStore.getState().layout.booklet?.outerMarginMm).toBe(22);
+    // Changing only Top margin changes marginsMm.top alone and leaves right/bottom/left and spineWidthMm intact.
+    setInputValue(topSlider, '32');
+    expect(useAppStore.getState().layout.marginsMm).toEqual({ top: 32, right: 10, bottom: 10, left: 10 });
+    expect(useAppStore.getState().layout.booklet?.spineWidthMm).toBe(4);
+    expect(parseFloat(firstPage().style.top)).toBeGreaterThan(beforeTop);
+    expect(parseFloat(firstPage().style.width)).toBeLessThan(beforeWidth);
 
-    const afterLeft = parseFloat(
-      (container.querySelectorAll<HTMLElement>('[data-page-content]')[0]).style.left,
-    );
-    const afterWidth = parseFloat(
-      (container.querySelectorAll<HTMLElement>('[data-page-content]')[0]).style.width,
-    );
-
-    expect(afterLeft).toBeGreaterThan(beforeLeft);
-    expect(afterWidth).toBeLessThan(beforeWidth);
-
-    // The spine guide vertical span also aligns with the updated booklet top/bottom margins.
     const spineGuide = container.querySelector<HTMLElement>('[data-booklet-spine-guide]')!;
-    expect(parseFloat(spineGuide.style.top)).toBeCloseTo(22 * PREVIEW_PX_PER_MM);
-    expect(parseFloat(spineGuide.style.bottom)).toBeCloseTo(22 * PREVIEW_PX_PER_MM);
+    expect(parseFloat(spineGuide.style.top)).toBeCloseTo(32 * PREVIEW_PX_PER_MM);
+    expect(parseFloat(spineGuide.style.bottom)).toBeCloseTo(10 * PREVIEW_PX_PER_MM);
+    expect(parseFloat(spineGuide.style.width)).toBeCloseTo(4 * PREVIEW_PX_PER_MM);
+
+    // Changing Spine and fold affects only the middle gap width and leaves all 4 margins unchanged.
+    setInputValue(spineSlider, '14');
+    expect(useAppStore.getState().layout.booklet?.spineWidthMm).toBe(14);
+    expect(useAppStore.getState().layout.marginsMm).toEqual({ top: 32, right: 10, bottom: 10, left: 10 });
+    expect(parseFloat(container.querySelector<HTMLElement>('[data-booklet-spine-guide]')!.style.width)).toBeCloseTo(14 * PREVIEW_PX_PER_MM);
   });
 
-  it('syncs Ribbon margin inputs with booklet outerMarginMm so editing them moves and resizes images', () => {
-    const beforeWidth = parseFloat(
-      (container.querySelectorAll<HTMLElement>('[data-page-content]')[0]).style.width,
-    );
+  it('syncs Ribbon margin inputs per side without changing the other three sides or spineWidthMm', () => {
+    const beforeTop = parseFloat(container.querySelectorAll<HTMLElement>('[data-page-content]')[0].style.top);
     const topLabel = Array.from(container.querySelectorAll('label')).find(
       el => el.getAttribute('title') === 'top margin (mm)',
     )!;
     const topInput = topLabel.querySelector<HTMLInputElement>('input[type="number"]')!;
     expect(topInput.value).toBe('10');
 
-    setInputValue(topInput, '24');
-    expect(useAppStore.getState().layout.booklet?.outerMarginMm).toBe(24);
-    expect(topInput.value).toBe('24');
-
-    const afterWidth = parseFloat(
-      (container.querySelectorAll<HTMLElement>('[data-page-content]')[0]).style.width,
-    );
-    expect(afterWidth).toBeLessThan(beforeWidth);
+    setInputValue(topInput, '28');
+    expect(useAppStore.getState().layout.marginsMm).toEqual({ top: 28, right: 10, bottom: 10, left: 10 });
+    expect(useAppStore.getState().layout.booklet?.spineWidthMm).toBe(4);
+    expect(topInput.value).toBe('28');
+    expect(parseFloat(container.querySelectorAll<HTMLElement>('[data-page-content]')[0].style.top)).toBeGreaterThan(beforeTop);
   });
 
-  it('resizes and moves booklet page images live when dragging direct margin border guides or LayoutGuides handles', () => {
+  it('resizes and moves booklet page images independently per side when dragging direct borders, spine guide, or LayoutGuides handles', () => {
     const firstPageContent = () => container.querySelectorAll<HTMLElement>('[data-page-content]')[0];
-    const initialLeft = parseFloat(firstPageContent().style.left);
+    const initialTop = parseFloat(firstPageContent().style.top);
     const initialWidth = parseFloat(firstPageContent().style.width);
 
-    // 1. Direct edge drag on the preview sheet (mirrors data-booklet-spine-guide)
-    const leftEdge = container.querySelector<HTMLElement>('[data-booklet-margin-guide="left"]')!;
-    const deltaPx = 10 * PREVIEW_PX_PER_MM;
-    dispatchPointer(leftEdge, 'pointerdown', 100, 100);
-    dispatchPointer(leftEdge, 'pointermove', 100 + deltaPx, 100);
-    expect(parseFloat(firstPageContent().style.left)).toBeGreaterThan(initialLeft);
+    // 1. Dragging ONLY the top direct border guide changes only marginsMm.top
+    const topEdge = container.querySelector<HTMLElement>('[data-booklet-margin-guide="top"]')!;
+    const deltaPx = 12 * PREVIEW_PX_PER_MM;
+    dispatchPointer(topEdge, 'pointerdown', 100, 100);
+    dispatchPointer(topEdge, 'pointermove', 100, 100 + deltaPx);
+    expect(parseFloat(firstPageContent().style.top)).toBeGreaterThan(initialTop);
     expect(parseFloat(firstPageContent().style.width)).toBeLessThan(initialWidth);
-    dispatchPointer(leftEdge, 'pointerup', 100 + deltaPx, 100);
-    expect(useAppStore.getState().layout.booklet?.outerMarginMm).toBeCloseTo(20);
+    dispatchPointer(topEdge, 'pointerup', 100, 100 + deltaPx);
+    expect(useAppStore.getState().layout.marginsMm).toEqual({ top: 22, right: 10, bottom: 10, left: 10 });
+    expect(useAppStore.getState().layout.booklet?.spineWidthMm).toBe(4);
 
-    // 2. Undo reverts the margin drag cleanly in one step
+    // 2. Undo reverts only that drag in one step
     act(() => useAppStore.getState().undo());
-    expect(useAppStore.getState().layout.booklet?.outerMarginMm).toBe(10);
+    expect(useAppStore.getState().layout.marginsMm).toEqual({ top: 10, right: 10, bottom: 10, left: 10 });
 
-    // 3. Clicking the sheet opens LayoutGuides at the booklet margin and dragging its green handle updates outerMarginMm
+    // 3. LayoutGuides green Left handle updates ONLY left margin, and purple gutter handle updates ONLY spineWidthMm
     act(() => (container.querySelector('[data-sheet-canvas-index]') as HTMLElement).click());
     const overlay = container.querySelector<HTMLElement>('[data-layout-guides]')!;
     vi.spyOn(overlay, 'getBoundingClientRect').mockReturnValue({
@@ -183,8 +178,15 @@ describe('booklet margin behavior parity with spine gap', () => {
     const leftHandle = container.querySelector('[aria-label="Left margin"]')!;
     dispatchPointer(leftHandle, 'pointerdown', 10, 50);
     dispatchPointer(leftHandle, 'pointermove', 18, 50);
-    expect(parseFloat(firstPageContent().style.width)).toBeLessThan(initialWidth);
     dispatchPointer(leftHandle, 'pointerup', 18, 50);
-    expect(useAppStore.getState().layout.booklet?.outerMarginMm).toBeCloseTo(18);
+    expect(useAppStore.getState().layout.marginsMm).toEqual({ top: 10, right: 10, bottom: 10, left: 18 });
+    expect(useAppStore.getState().layout.booklet?.spineWidthMm).toBe(4);
+
+    const spineHandle = container.querySelector('[aria-label^="Column gutter"]')!;
+    dispatchPointer(spineHandle, 'pointerdown', 150, 70);
+    dispatchPointer(spineHandle, 'pointermove', 155, 70);
+    dispatchPointer(spineHandle, 'pointerup', 155, 70);
+    expect(useAppStore.getState().layout.booklet?.spineWidthMm).toBe(14);
+    expect(useAppStore.getState().layout.marginsMm).toEqual({ top: 10, right: 10, bottom: 10, left: 18 });
   });
 });

@@ -137,16 +137,15 @@ export function computeImpositionSheets(
       sheetOrder: 'ltr', duplexMode: layout.booklet.duplexMode,
       verticalGutterMm: 0,
       orientation: 'landscape',
-      // Treat each booklet margin as part of the imposed cell geometry, just like
-      // the spine gap. This shrinks and repositions both page cells before fitting.
+      // Each outer margin side (top, right, bottom, left) is independent in booklet mode.
       marginsMm: {
-        top: Math.max(0, layout.booklet.outerMarginMm),
-        right: Math.max(0, layout.booklet.outerMarginMm),
-        bottom: Math.max(0, layout.booklet.outerMarginMm),
-        left: Math.max(0, layout.booklet.outerMarginMm),
+        top: Math.max(0, layout.marginsMm.top),
+        right: Math.max(0, layout.marginsMm.right),
+        bottom: Math.max(0, layout.marginsMm.bottom),
+        left: Math.max(0, layout.marginsMm.left),
       },
-      // The gutter contains the physical spine plus one margin on each side.
-      horizontalGutterMm: Math.max(0, layout.booklet.spineWidthMm) + Math.max(0, layout.booklet.outerMarginMm) * 2,
+      // The middle margin between the two booklet pages depends solely on Spine and fold.
+      horizontalGutterMm: Math.max(0, layout.booklet.spineWidthMm),
     };
   }
   const activePages = pages.filter((p) => p.selectedForPrint);
