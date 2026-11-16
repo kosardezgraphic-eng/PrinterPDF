@@ -79,7 +79,7 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
           <input type="range" min="0" max="30" step="0.5" value={booklet.spineWidthMm}
             onChange={e => patch({ spineWidthMm: Number(e.target.value) })} className="w-full accent-amber-500" />
           <input type="number" min="0" max="30" step="0.5" value={booklet.spineWidthMm}
-            onChange={e => patch({ spineWidthMm: Math.max(0, Math.min(30, Number(e.target.value) || 0)) }} className={input} />
+            onChange={e => patch({ spineWidthMm: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })} className={input} />
         </label>
         <label className={label}>
           <span className="flex justify-between text-slate-400"><span>{isFa ? 'جبران ضخامت کاغذ / Creep (mm)' : 'Creep compensation (mm)'}</span><span>{booklet.creepMm} mm</span></span>
