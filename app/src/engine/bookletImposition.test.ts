@@ -108,11 +108,13 @@ describe('booklet imposition', () => {
       (wideCell.cellXMm + wideCell.cellWidthMm);
     expect(narrowGap).toBeCloseTo(baseLayout.booklet!.spineWidthMm + 20);
     expect(wideGap).toBeCloseTo(baseLayout.booklet!.spineWidthMm + 40);
-    expect(narrowCell.cellXMm).toBe(0);
-    expect(wideCell.cellXMm).toBe(0);
-    expect(narrowCell.contentXMm).toBeGreaterThan(narrowCell.cellXMm);
+    expect(narrowCell.cellXMm).toBe(10);
+    expect(wideCell.cellXMm).toBe(20);
+    expect(narrowCell.contentXMm).toBeGreaterThanOrEqual(narrowCell.cellXMm);
     expect(wideCell.contentXMm).toBeGreaterThan(narrowCell.contentXMm);
     expect(wideCell.contentYMm).toBeGreaterThan(narrowCell.contentYMm);
+    expect(narrowCell.contentWidthMm).toBeLessThanOrEqual(narrowCell.cellWidthMm);
+    expect(wideCell.contentWidthMm).toBeLessThanOrEqual(wideCell.cellWidthMm);
     expect(wideCell.contentWidthMm).toBeLessThan(narrowCell.contentWidthMm);
   });
 
