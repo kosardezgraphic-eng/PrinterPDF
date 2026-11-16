@@ -134,7 +134,7 @@ export function computeImpositionSheets(
   if (layout.booklet?.enabled) {
     layout = {
       ...layout, rows: 1, cols: 2, placementMode: 'sequential', scaleMode: 'fit', uniqueScale: true, autoRotateToFit: true,
-      sheetOrder: layout.booklet.direction, duplexMode: layout.booklet.duplexMode,
+      sheetOrder: 'ltr', duplexMode: layout.booklet.duplexMode,
       horizontalGutterMm: layout.booklet.spineWidthMm, verticalGutterMm: 0,
       orientation: 'landscape',
       marginsMm: {
@@ -189,8 +189,10 @@ export function computeImpositionSheets(
         const outerRight = padded[depth * 2];
         const innerLeft = padded[depth * 2 + 1];
         const innerRight = padded[last - depth * 2 - 1];
-        const front = layout.booklet.direction === 'rtl' ? [outerRight, outerLeft] : [outerLeft, outerRight];
-        const back = layout.booklet.direction === 'rtl' ? [innerRight, innerLeft] : [innerLeft, innerRight];
+        // Coordinates are always laid out physically from left to right. Apply the reading
+        // direction exactly once here; reversing the grid as well would cancel this ordering.
+        const front = layout.booklet.direction === 'rtl' ? [outerLeft, outerRight] : [outerRight, outerLeft];
+        const back = layout.booklet.direction === 'rtl' ? [innerLeft, innerRight] : [innerRight, innerLeft];
         sidePageGroups.push(front);
         sidePageGroups.push(back);
       }

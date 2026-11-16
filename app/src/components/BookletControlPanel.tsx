@@ -78,8 +78,12 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
           <span className="flex justify-between text-slate-400"><span>{isFa ? 'عرض فضای شیرازه (mm)' : 'Spine gap (mm)'}</span><span>{booklet.spineWidthMm} mm</span></span>
           <input type="range" min="0" max="30" step="0.5" value={booklet.spineWidthMm}
             onChange={e => patch({ spineWidthMm: Number(e.target.value) })} className="w-full accent-amber-500" />
-          <input type="number" min="0" max="30" step="0.5" value={booklet.spineWidthMm}
+          <input type="number" min="0" max="30" step="0.1" value={booklet.spineWidthMm}
+            aria-label={isFa ? 'ورود دستی عرض شیرازه به میلی‌متر' : 'Manually enter spine gap in millimeters'}
             onChange={e => patch({ spineWidthMm: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })} className={input} />
+          <span className="text-[10px] leading-4 text-slate-500">
+            {isFa ? 'نوار هاشور خاکستری در پیش‌نمایش فقط راهنماست و در PDF و چاپ نمی‌آید.' : 'The gray hatched band is a preview guide only; it is excluded from PDF and print.'}
+          </span>
         </label>
         <label className={label}>
           <span className="flex justify-between text-slate-400"><span>{isFa ? 'جبران ضخامت کاغذ / Creep (mm)' : 'Creep compensation (mm)'}</span><span>{booklet.creepMm} mm</span></span>

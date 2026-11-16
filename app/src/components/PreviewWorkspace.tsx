@@ -365,6 +365,15 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const renderSingleSheet = (sheetSide: ComputedSheetSide, idxInList: number) => {
     const widthPx = Math.round(sheetSide.widthMm * basePxPerMm);
     const heightPx = Math.round(sheetSide.heightMm * basePxPerMm);
+    const bookletCells = layout.booklet?.enabled
+      ? sheetSide.cells.filter(cell => cell.cellWidthMm > 0).slice().sort((a, b) => a.cellXMm - b.cellXMm)
+      : [];
+    const bookletGapLeftMm = bookletCells.length >= 2
+      ? bookletCells[0].cellXMm + bookletCells[0].cellWidthMm
+      : 0;
+    const bookletGapWidthMm = bookletCells.length >= 2
+      ? Math.max(0, bookletCells[1].cellXMm - bookletGapLeftMm)
+      : 0;
 
     // Optional back-side sheet for Light Table Transparent Mode (J2)
     const pairedBackSide =
@@ -511,6 +520,23 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 <div style={{left:layout.marginsMm.left*basePxPerMm,top:layout.marginsMm.top*basePxPerMm,right:layout.marginsMm.right*basePxPerMm,bottom:layout.marginsMm.bottom*basePxPerMm}}
                   className="absolute border border-dashed border-slate-500/70" />
               </div>
+
+              {/* Preview-only booklet fold guide. This DOM layer is not part of PDF rendering or printing. */}
+              {layout.booklet?.enabled && bookletGapWidthMm > 0 && (
+                <div
+                  data-booklet-spine-guide
+                  aria-label={lang === 'fa' ? 'راهنمای غیرقابل چاپ فاصله شیرازه' : 'Non-printing booklet spine guide'}
+                  title={lang === 'fa' ? 'فاصله شیرازه؛ برای تغییر مقدار از پنل بوکلت استفاده کنید' : 'Spine gap; adjust its value in the booklet panel'}
+                  className="pointer-events-none absolute z-20 border-x border-dashed border-slate-500/70"
+                  style={{
+                    left: bookletGapLeftMm * basePxPerMm,
+                    width: bookletGapWidthMm * basePxPerMm,
+                    top: layout.marginsMm.top * basePxPerMm,
+                    bottom: layout.marginsMm.bottom * basePxPerMm,
+                    backgroundImage: 'repeating-linear-gradient(135deg, rgba(100,116,139,0.30) 0px, rgba(100,116,139,0.30) 2px, rgba(148,163,184,0.10) 2px, rgba(148,163,184,0.10) 6px)',
+                  }}
+                />
+              )}
 
               {/* Transparent Mode Back-Side Ghost Overlay (J2) */}
               {pairedBackSide &&
