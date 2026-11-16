@@ -100,8 +100,14 @@ describe('booklet imposition', () => {
     expect(wideCell.transform?.scaleY).toBe(1);
     expect(narrowCell.allowOverflow).toBe(false);
     expect(wideCell.allowOverflow).toBe(false);
-    // Each imposed page keeps its full half-sheet cell, while its content is
-    // inset by the configured margin on all four sides.
+    // Margins shrink and reposition the actual imposed cells, exactly like
+    // increasing the spine gap. The physical spine remains centred in that gap.
+    const narrowGap = narrowMargins[0].cells[1].cellXMm -
+      (narrowCell.cellXMm + narrowCell.cellWidthMm);
+    const wideGap = wideMargins[0].cells[1].cellXMm -
+      (wideCell.cellXMm + wideCell.cellWidthMm);
+    expect(narrowGap).toBeCloseTo(baseLayout.booklet!.spineWidthMm + 20);
+    expect(wideGap).toBeCloseTo(baseLayout.booklet!.spineWidthMm + 40);
     expect(narrowCell.cellXMm).toBe(0);
     expect(wideCell.cellXMm).toBe(0);
     expect(narrowCell.contentXMm).toBeGreaterThan(narrowCell.cellXMm);
