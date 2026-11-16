@@ -138,10 +138,10 @@ export function computeImpositionSheets(
       horizontalGutterMm: layout.booklet.spineWidthMm, verticalGutterMm: 0,
       orientation: 'landscape',
       marginsMm: {
-        top: Math.max(layout.marginsMm.top, layout.booklet.outerMarginMm),
-        right: Math.max(layout.marginsMm.right, layout.booklet.outerMarginMm),
-        bottom: Math.max(layout.marginsMm.bottom, layout.booklet.outerMarginMm),
-        left: Math.max(layout.marginsMm.left, layout.booklet.outerMarginMm),
+        top: layout.booklet.outerMarginMm,
+        right: layout.booklet.outerMarginMm,
+        bottom: layout.booklet.outerMarginMm,
+        left: layout.booklet.outerMarginMm,
       },
     };
   }
@@ -372,6 +372,9 @@ export function computeImpositionSheets(
         layout.alignment
       );
 
+      const creepShift = layout.booklet?.enabled && layout.booklet.compensateCreep
+        ? Math.max(0, sheetNumber - 1) * Math.max(0, layout.booklet.creepMm)
+        : 0;
       const occurrenceKey = cellOccurrenceKey(item.page.id, layout.placementMode, item.row, item.col);
       const override = layout.cellOverrides?.[occurrenceKey];
       const transform = override?.transform ?? item.page.overrides?.transform ?? IDENTITY_TRANSFORM;
@@ -387,7 +390,7 @@ export function computeImpositionSheets(
         cellYMm: item.cellYMm,
         cellWidthMm: item.cellWidthMm,
         cellHeightMm: item.cellHeightMm,
-        contentXMm: item.cellXMm + offsetX + (contentWidthMm - finalWidth) / 2 + transform.x * item.cellWidthMm,
+        contentXMm: item.cellXMm + offsetX + (contentWidthMm - finalWidth) / 2 + transform.x * item.cellWidthMm + (layout.booklet?.enabled ? (item.col === 0 ? -creepShift : creepShift) : 0),
         contentYMm: item.cellYMm + offsetY + (contentHeightMm - finalHeight) / 2 + transform.y * item.cellHeightMm,
         contentWidthMm: finalWidth,
         contentHeightMm: finalHeight,
