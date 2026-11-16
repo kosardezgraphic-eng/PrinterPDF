@@ -84,7 +84,7 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
         <label className={label}>
           <span className="flex justify-between text-slate-400"><span>{isFa ? 'جبران ضخامت کاغذ / Creep (mm)' : 'Creep compensation (mm)'}</span><span>{booklet.creepMm} mm</span></span>
           <input type="number" min="0" max="5" step="0.05" value={booklet.creepMm}
-            onChange={e => patch({ creepMm: Math.max(0, Math.min(5, Number(e.target.value) || 0)) }} className={input} />
+            onChange={e => patch({ creepMm: Math.max(0, Math.min(5, Number(e.target.value) || 0)) })} className={input} />
         </label>
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={booklet.compensateCreep} onChange={e => patch({ compensateCreep: e.target.checked })} className="accent-amber-500" />
@@ -104,7 +104,7 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
         <label className={label}>
           <span className="text-slate-400">{isFa ? 'حاشیه بیرونی (mm)' : 'Outer margin (mm)'}</span>
           <input type="number" min="0" max="40" step="0.5" value={booklet.outerMarginMm}
-            onChange={e => patch({ outerMarginMm: Math.max(0, Math.min(40, Number(e.target.value) || 0)) }} className={input} />
+            onChange={e => patch({ outerMarginMm: Math.max(0, Math.min(40, Number(e.target.value) || 0)) })} className={input} />
         </label>
       </div>
 
