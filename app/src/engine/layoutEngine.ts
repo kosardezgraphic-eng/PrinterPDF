@@ -137,8 +137,16 @@ export function computeImpositionSheets(
       sheetOrder: 'ltr', duplexMode: layout.booklet.duplexMode,
       horizontalGutterMm: layout.booklet.spineWidthMm, verticalGutterMm: 0,
       orientation: 'landscape',
-      // In booklet mode, outerMarginMm is applied inside both imposed pages.
-      marginsMm: { top: 0, right: 0, bottom: 0, left: 0 },
+      // Treat each booklet margin as part of the imposed cell geometry, just like
+      // the spine gap. This shrinks and repositions both page cells before fitting.
+      marginsMm: {
+        top: Math.max(0, layout.booklet.outerMarginMm),
+        right: Math.max(0, layout.booklet.outerMarginMm),
+        bottom: Math.max(0, layout.booklet.outerMarginMm),
+        left: Math.max(0, layout.booklet.outerMarginMm),
+      },
+      // The gutter contains the physical spine plus one margin on each side.
+      horizontalGutterMm: Math.max(0, layout.booklet.spineWidthMm) + Math.max(0, layout.booklet.outerMarginMm) * 2,
     };
   }
   const activePages = pages.filter((p) => p.selectedForPrint);
@@ -264,9 +272,8 @@ export function computeImpositionSheets(
       const { page, globalPageNumber } = entry;
       let effectiveRotation: PageRotation = page.rotation;
       const crop = pageCropFractions(page);
-      const bookletInset = layout.booklet?.enabled ? Math.max(0, layout.booklet.outerMarginMm) : 0;
-      const availableCellWidthMm = Math.max(1, cellWidthMm - bookletInset * 2);
-      const availableCellHeightMm = Math.max(1, cellHeightMm - bookletInset * 2);
+      const availableCellWidthMm = cellWidthMm;
+      const availableCellHeightMm = cellHeightMm;
       const croppedWidth = page.widthMm * (1 - crop.left - crop.right);
       const croppedHeight = page.heightMm * (1 - crop.top - crop.bottom);
       const isRotated90 = effectiveRotation === 90 || effectiveRotation === 270;
@@ -275,7 +282,7 @@ export function computeImpositionSheets(
 
       // D3: Auto-rotate page to best fit the cell aspect ratio
       if (layout.autoRotateToFit && !page.overrides?.manualRotation) {
-        const cellIsLandscape = cellWidthMm > cellHeightMm;
+        const cellIsLandscape = availableCellWidthMm > availableCellHeightMm;
         const pageIsLandscape = pageW > pageH;
         if (cellIsLandscape !== pageIsLandscape && Math.abs(cellWidthMm - cellHeightMm) > 2) {
           effectiveRotation = ((effectiveRotation + 90) % 360) as PageRotation;
@@ -356,9 +363,10 @@ export function computeImpositionSheets(
       const finalScale = unifiedScale ?? item.scaleFactor;
       const rawContentW = item.pageW * finalScale;
       const rawContentH = item.pageH * finalScale;
-      const bookletInset = layout.booklet?.enabled ? Math.max(0, layout.booklet.outerMarginMm) : 0;
-      const availableWidthMm = Math.max(1, item.cellWidthMm - bookletInset * 2);
-      const availableHeightMm = Math.max(1, item.cellHeightMm - bookletInset * 2);
+      // The cell itself is already reduced by the booklet margins above.
+      // Fit the page to that geometry exactly as the spine gap reduces cell width. 
+      const availableWidthMm = Math.max(1, item.cellWidthMm);
+      const availableHeightMm = Math.max(1, item.cellHeightMm);
       const contentWidthMm =
         layout.scaleMode === 'fit'
           ? Math.min(availableWidthMm, rawContentW)
@@ -401,8 +409,8 @@ export function computeImpositionSheets(
         cellYMm: item.cellYMm,
         cellWidthMm: item.cellWidthMm,
         cellHeightMm: item.cellHeightMm,
-        contentXMm: item.cellXMm + bookletInset + offsetX + (contentWidthMm - finalWidth) / 2 + transform.x * item.cellWidthMm + (layout.booklet?.enabled ? (item.col === 0 ? -creepShift : creepShift) : 0),
-        contentYMm: item.cellYMm + bookletInset + offsetY + (contentHeightMm - finalHeight) / 2 + transform.y * item.cellHeightMm,
+        contentXMm: item.cellXMm + offsetX + (contentWidthMm - finalWidth) / 2 + transform.x * item.cellWidthMm + (layout.booklet?.enabled ? (item.col === 0 ? -creepShift : creepShift) : 0),
+        contentYMm: item.cellYMm + offsetY + (contentHeightMm - finalHeight) / 2 + transform.y * item.cellHeightMm,
         contentWidthMm: finalWidth,
         contentHeightMm: finalHeight,
         scaleFactor: finalScale,
