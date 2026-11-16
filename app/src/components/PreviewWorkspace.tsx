@@ -111,6 +111,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const lastWheelStep = useRef(-Infinity);
   const pendingWheelEntry = useRef<{index:number; edge:'top'|'bottom'} | null>(null);
   const drag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+  const bookletSpineDrag = useRef<{ startX: number; startWidthMm: number } | null>(null);
   const suppressClick = useRef(false);
   const handledPreviewRequest = useRef<typeof previewPageRequest>(null);
   const suppressNavigationScroll = useRef(false);
@@ -527,7 +528,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                   data-booklet-spine-guide
                   aria-label={lang === 'fa' ? 'راهنمای غیرقابل چاپ فاصله شیرازه' : 'Non-printing booklet spine guide'}
                   title={lang === 'fa' ? 'فاصله شیرازه؛ برای تغییر مقدار از پنل بوکلت استفاده کنید' : 'Spine gap; adjust its value in the booklet panel'}
-                  className="pointer-events-none absolute z-20 border-x border-dashed border-slate-500/70"
+                  className="absolute z-20 cursor-col-resize touch-none border-x border-dashed border-slate-500/70"
                   style={{
                     left: bookletGapLeftMm * basePxPerMm,
                     width: bookletGapWidthMm * basePxPerMm,
@@ -535,6 +536,26 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                     bottom: layout.marginsMm.bottom * basePxPerMm,
                     backgroundImage: 'repeating-linear-gradient(135deg, rgba(100,116,139,0.30) 0px, rgba(100,116,139,0.30) 2px, rgba(148,163,184,0.10) 2px, rgba(148,163,184,0.10) 6px)',
                   }}
+                  onPointerDown={event => {
+                    if (event.button !== 0) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    bookletSpineDrag.current = { startX: event.clientX, startWidthMm: layout.booklet?.spineWidthMm ?? 0 };
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                  }}
+                  onPointerMove={event => {
+                    const dragState = bookletSpineDrag.current;
+                    if (!dragState || !layout.booklet?.enabled) return;
+                    event.preventDefault();
+                    const deltaMm = (event.clientX - dragState.startX) / Math.max(0.01, basePxPerMm);
+                    const nextWidth = Math.max(0, Math.min(30, dragState.startWidthMm + deltaMm * 2));
+                    useAppStore.getState().updateLayout({ booklet: { ...layout.booklet, spineWidthMm: Math.round(nextWidth * 10) / 10 } });
+                  }}
+                  onPointerUp={event => {
+                    bookletSpineDrag.current = null;
+                    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+                  }}
+                  onPointerCancel={() => { bookletSpineDrag.current = null; }}
                 />
               )}
 

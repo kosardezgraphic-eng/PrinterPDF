@@ -191,8 +191,8 @@ export function computeImpositionSheets(
         const innerRight = padded[last - depth * 2 - 1];
         // Coordinates are always laid out physically from left to right. Apply the reading
         // direction exactly once here; reversing the grid as well would cancel this ordering.
-        const front = layout.booklet.direction === 'rtl' ? [outerLeft, outerRight] : [outerRight, outerLeft];
-        const back = layout.booklet.direction === 'rtl' ? [innerLeft, innerRight] : [innerRight, innerLeft];
+        const front = layout.booklet.direction === 'rtl' ? [outerRight, outerLeft] : [outerLeft, outerRight];
+        const back = layout.booklet.direction === 'rtl' ? [innerRight, innerLeft] : [innerLeft, innerRight];
         sidePageGroups.push(front);
         sidePageGroups.push(back);
       }

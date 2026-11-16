@@ -57,16 +57,16 @@ const imposedPageNumbers = (sheets: ReturnType<typeof computeImpositionSheets>) 
 describe('booklet imposition', () => {
   it('imposes a four-page right-to-left booklet in reading order', () => {
     expect(imposedPageNumbers(computeImpositionSheets(pages(4), baseLayout))).toEqual([
-      [4, 1],
-      [2, 3],
+      [1, 4],
+      [3, 2],
     ]);
   });
 
   it('imposes a four-page left-to-right booklet in reading order', () => {
     const layout = { ...baseLayout, booklet: { ...baseLayout.booklet!, direction: 'ltr' as const } };
     expect(imposedPageNumbers(computeImpositionSheets(pages(4), layout))).toEqual([
-      [1, 4],
-      [3, 2],
+      [4, 1],
+      [2, 3],
     ]);
   });
 
@@ -77,7 +77,7 @@ describe('booklet imposition', () => {
     expect(imposedPageNumbers(sheets)).toEqual([
       [4, 1],
       [2, 3],
-      [null, 5],
+      [5, null],
       [null, null],
     ]);
   });
