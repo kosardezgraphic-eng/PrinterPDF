@@ -2287,7 +2287,7 @@ export const useAppStore = create<AppState>((set, get) => {
         ...state.layout,
         paperSize: effectivePaperSize,
         orientation: effectiveOrientation,
-        ...(request.paperWidthMm && request.paperHeightMm
+        ...(!bookletMode && request.paperWidthMm && request.paperHeightMm
           ? {
               customWidthMm: Math.min(request.paperWidthMm, request.paperHeightMm),
               customHeightMm: Math.max(request.paperWidthMm, request.paperHeightMm),
@@ -2312,9 +2312,9 @@ export const useAppStore = create<AppState>((set, get) => {
         ...request,
         printerName,
         paperSize: effectivePaperSize,
-        paperName: request.paperName ?? profile?.paperName ?? effectivePaperSize,
-        paperWidthMm: request.paperWidthMm ?? profile?.paperWidthMm ?? Math.min(dims.widthMm, dims.heightMm),
-        paperHeightMm: request.paperHeightMm ?? profile?.paperHeightMm ?? Math.max(dims.widthMm, dims.heightMm),
+        paperName: bookletMode ? effectivePaperSize : request.paperName ?? profile?.paperName ?? effectivePaperSize,
+        paperWidthMm: bookletMode ? Math.min(dims.widthMm, dims.heightMm) : request.paperWidthMm ?? profile?.paperWidthMm ?? Math.min(dims.widthMm, dims.heightMm),
+        paperHeightMm: bookletMode ? Math.max(dims.widthMm, dims.heightMm) : request.paperHeightMm ?? profile?.paperHeightMm ?? Math.max(dims.widthMm, dims.heightMm),
         orientation: effectiveOrientation,
         tray: request.tray || profile?.tray || 'Auto Select',
         mediaType: request.mediaType ?? profile?.mediaType ?? 'Plain Paper',
