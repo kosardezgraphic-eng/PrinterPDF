@@ -12,7 +12,7 @@ export function WatermarkControlPanel() {
 
   return (
     <aside data-watermark-control-panel aria-label={isFa ? 'تنظیمات واترمارک' : 'Watermark controls'}
-      className="w-64 shrink-0 overflow-y-auto border-s-slate-700 border-s bg-slate-900 p-3 text-xs text-slate-200 space-y-3">
+      className="w-64 shrink-0 overflow-y-auto border-s border-slate-700 bg-slate-900 p-3 text-xs text-slate-200 space-y-3">
       <div className="flex items-center justify-between">
         <strong className="flex items-center gap-1.5">
           <Droplets className="h-4 w-4 text-sky-300" />
