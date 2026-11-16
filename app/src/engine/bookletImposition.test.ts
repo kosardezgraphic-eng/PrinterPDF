@@ -70,7 +70,31 @@ describe('booklet imposition', () => {
     ]);
   });
 
-  it('pads incomplete signatures with blank pages and splits fixed-size signatures', () => {
+
+  it('uses booklet outer margins to reduce page image size and keeps transformed content clipped to its half-page', () => {
+    const pageWithOversizedTransform = pages(4).map((page, index) => index === 0
+      ? { ...page, overrides: { transform: { x: 0, y: 0, scaleX: 2, scaleY: 2 } } }
+      : page);
+    const narrowMargins = computeImpositionSheets(pageWithOversizedTransform, {
+      ...baseLayout,
+      booklet: { ...baseLayout.booklet!, outerMarginMm: 10 },
+    });
+    const wideMargins = computeImpositionSheets(pageWithOversizedTransform, {
+      ...baseLayout,
+      booklet: { ...baseLayout.booklet!, outerMarginMm: 20 },
+    });
+    const narrowCell = narrowMargins[0].cells[0];
+    const wideCell = wideMargins[0].cells[0];
+
+    expect(wideCell.cellWidthMm).toBeLessThan(narrowCell.cellWidthMm);
+    expect(wideCell.cellHeightMm).toBeLessThan(narrowCell.cellHeightMm);
+    expect(wideCell.contentWidthMm).toBe(narrowCell.contentWidthMm);
+    expect(narrowCell.allowOverflow).toBe(false);
+    expect(wideCell.allowOverflow).toBe(false);
+    expect(narrowCell.cellXMm).toBe(10);
+    expect(wideCell.cellXMm).toBe(20);
+  });
+\n  it('pads incomplete signatures with blank pages and splits fixed-size signatures', () => {
     const layout = { ...baseLayout, booklet: { ...baseLayout.booklet!, signatureSize: 4 as const } };
     const sheets = computeImpositionSheets(pages(5), layout);
     expect(sheets).toHaveLength(4);
