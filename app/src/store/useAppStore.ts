@@ -139,6 +139,7 @@ export const DEFAULT_LAYOUT: LayoutSettings = {
   manualDuplex: false,
   showCellBorders: false,
   showCropMarks: false,
+  booklet: { enabled: false, direction: 'rtl', signatureSize: 0, spineWidthMm: 4, creepMm: 0.2, duplexMode: 'short-edge', outerMarginMm: 10, compensateCreep: true },
 };
 
 export const DEFAULT_EFFECTS: EffectsSettings = {
@@ -2278,14 +2279,15 @@ export const useAppStore = create<AppState>((set, get) => {
 
       const targetPrinter = state.printers.find((p) => p.name === printerName);
       const profile = targetPrinter?.activeProfile;
-      const effectivePaperSize = request.paperSize ?? profile?.paperSize ?? state.layout.paperSize;
-      const effectiveOrientation = request.orientation ?? profile?.orientation ?? state.layout.orientation;
-      const effectiveDuplex = request.duplexMode ?? profile?.duplexMode ?? state.layout.duplexMode;
+      const bookletMode = state.layout.booklet?.enabled === true;
+      const effectivePaperSize = bookletMode ? state.layout.paperSize : request.paperSize ?? profile?.paperSize ?? state.layout.paperSize;
+      const effectiveOrientation = bookletMode ? 'landscape' : request.orientation ?? profile?.orientation ?? state.layout.orientation;
+      const effectiveDuplex = bookletMode ? state.layout.booklet!.duplexMode : request.duplexMode ?? profile?.duplexMode ?? state.layout.duplexMode;
       const dims = getSheetDimensionsMm({
         ...state.layout,
         paperSize: effectivePaperSize,
         orientation: effectiveOrientation,
-        ...(request.paperWidthMm && request.paperHeightMm
+        ...(!bookletMode && request.paperWidthMm && request.paperHeightMm
           ? {
               customWidthMm: Math.min(request.paperWidthMm, request.paperHeightMm),
               customHeightMm: Math.max(request.paperWidthMm, request.paperHeightMm),
@@ -2298,7 +2300,7 @@ export const useAppStore = create<AppState>((set, get) => {
         paperSize: effectivePaperSize,
         orientation: effectiveOrientation,
         duplexMode: effectiveDuplex,
-        ...(request.paperWidthMm && request.paperHeightMm
+        ...(!bookletMode && request.paperWidthMm && request.paperHeightMm
           ? {
               customWidthMm: Math.min(request.paperWidthMm, request.paperHeightMm),
               customHeightMm: Math.max(request.paperWidthMm, request.paperHeightMm),
@@ -2310,9 +2312,9 @@ export const useAppStore = create<AppState>((set, get) => {
         ...request,
         printerName,
         paperSize: effectivePaperSize,
-        paperName: request.paperName ?? profile?.paperName ?? effectivePaperSize,
-        paperWidthMm: request.paperWidthMm ?? profile?.paperWidthMm ?? Math.min(dims.widthMm, dims.heightMm),
-        paperHeightMm: request.paperHeightMm ?? profile?.paperHeightMm ?? Math.max(dims.widthMm, dims.heightMm),
+        paperName: bookletMode ? effectivePaperSize : request.paperName ?? profile?.paperName ?? effectivePaperSize,
+        paperWidthMm: bookletMode ? Math.min(dims.widthMm, dims.heightMm) : request.paperWidthMm ?? profile?.paperWidthMm ?? Math.min(dims.widthMm, dims.heightMm),
+        paperHeightMm: bookletMode ? Math.max(dims.widthMm, dims.heightMm) : request.paperHeightMm ?? profile?.paperHeightMm ?? Math.max(dims.widthMm, dims.heightMm),
         orientation: effectiveOrientation,
         tray: request.tray || profile?.tray || 'Auto Select',
         mediaType: request.mediaType ?? profile?.mediaType ?? 'Plain Paper',

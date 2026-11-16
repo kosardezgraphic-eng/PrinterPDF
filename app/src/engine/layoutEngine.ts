@@ -33,7 +33,7 @@ export function getSheetDimensionsMm(layout: LayoutSettings): {
   const shortSide = Math.min(baseWidth, baseHeight);
   const longSide = Math.max(baseWidth, baseHeight);
 
-  if (layout.orientation === 'landscape') {
+  if (layout.orientation === 'landscape' || layout.booklet?.enabled) {
     return { widthMm: longSide, heightMm: shortSide };
   }
   return { widthMm: shortSide, heightMm: longSide };
@@ -131,6 +131,20 @@ export function computeImpositionSheets(
   pages: PageItem[],
   layout: LayoutSettings
 ): ComputedSheetSide[] {
+  if (layout.booklet?.enabled) {
+    layout = {
+      ...layout, rows: 1, cols: 2, placementMode: 'sequential', scaleMode: 'fit', uniqueScale: true, autoRotateToFit: true,
+      sheetOrder: layout.booklet.direction, duplexMode: layout.booklet.duplexMode,
+      horizontalGutterMm: layout.booklet.spineWidthMm, verticalGutterMm: 0,
+      orientation: 'landscape',
+      marginsMm: {
+        top: layout.booklet.outerMarginMm,
+        right: layout.booklet.outerMarginMm,
+        bottom: layout.booklet.outerMarginMm,
+        left: layout.booklet.outerMarginMm,
+      },
+    };
+  }
   const activePages = pages.filter((p) => p.selectedForPrint);
   const { widthMm: sheetW, heightMm: sheetH } = getSheetDimensionsMm(layout);
 
@@ -159,10 +173,29 @@ export function computeImpositionSheets(
 
   const orderedGrid = getOrderedGridCoordinates(rows, cols, layout.sheetOrder);
 
-  // Build chunks of pages per sheet side
+  // Booklet imposition nests page pairs from the outside signature sheet toward the fold.
   const sidePageGroups: Array<Array<{ page: PageItem; globalPageNumber: number } | null>> = [];
 
-  if (layout.placementMode === 'step-and-repeat') {
+  if (layout.booklet?.enabled) {
+    const selected = activePages.map((page, index) => ({ page, globalPageNumber: index + 1 }));
+    const signatureSize = layout.booklet.signatureSize || Math.max(4, Math.ceil(selected.length / 4) * 4);
+    for (let offset = 0; offset < selected.length; offset += signatureSize) {
+      const signature = selected.slice(offset, offset + signatureSize);
+      const paddedLength = Math.max(4, Math.ceil(signature.length / 4) * 4);
+      const padded = [...signature, ...Array.from({ length: paddedLength - signature.length }, () => null)];
+      const last = padded.length - 1;
+      for (let depth = 0; depth < paddedLength / 4; depth++) {
+        const outerLeft = padded[last - depth * 2];
+        const outerRight = padded[depth * 2];
+        const innerLeft = padded[depth * 2 + 1];
+        const innerRight = padded[last - depth * 2 - 1];
+        const front = layout.booklet.direction === 'rtl' ? [outerRight, outerLeft] : [outerLeft, outerRight];
+        const back = layout.booklet.direction === 'rtl' ? [innerRight, innerLeft] : [innerLeft, innerRight];
+        sidePageGroups.push(front);
+        sidePageGroups.push(back);
+      }
+    }
+  } else if (layout.placementMode === 'step-and-repeat') {
     // D2: Repeat each active page in all cells of its sheet side
     activePages.forEach((page, idx) => {
       const repeated = Array.from({ length: cellsPerSide }, () => ({
@@ -339,6 +372,9 @@ export function computeImpositionSheets(
         layout.alignment
       );
 
+      const creepShift = layout.booklet?.enabled && layout.booklet.compensateCreep
+        ? Math.max(0, sheetNumber - 1) * Math.max(0, layout.booklet.creepMm)
+        : 0;
       const occurrenceKey = cellOccurrenceKey(item.page.id, layout.placementMode, item.row, item.col);
       const override = layout.cellOverrides?.[occurrenceKey];
       const transform = override?.transform ?? item.page.overrides?.transform ?? IDENTITY_TRANSFORM;
@@ -354,7 +390,7 @@ export function computeImpositionSheets(
         cellYMm: item.cellYMm,
         cellWidthMm: item.cellWidthMm,
         cellHeightMm: item.cellHeightMm,
-        contentXMm: item.cellXMm + offsetX + (contentWidthMm - finalWidth) / 2 + transform.x * item.cellWidthMm,
+        contentXMm: item.cellXMm + offsetX + (contentWidthMm - finalWidth) / 2 + transform.x * item.cellWidthMm + (layout.booklet?.enabled ? (item.col === 0 ? -creepShift : creepShift) : 0),
         contentYMm: item.cellYMm + offsetY + (contentHeightMm - finalHeight) / 2 + transform.y * item.cellHeightMm,
         contentWidthMm: finalWidth,
         contentHeightMm: finalHeight,

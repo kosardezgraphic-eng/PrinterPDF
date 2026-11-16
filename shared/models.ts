@@ -146,7 +146,21 @@ export interface MarginsMm {
 /** Non-printing ruler guides measured from the left or top edge of the output sheet. */
 export interface RulerGuide { id: string; axis: 'x' | 'y'; positionMm: number }
 
+export interface BookletSettings {
+  enabled: boolean;
+  direction: 'ltr' | 'rtl';
+  /** 0 means one signature containing all pages; otherwise a fixed multiple of four. */
+  signatureSize: 0 | 4 | 8 | 12 | 16 | 24 | 32;
+  spineWidthMm: number;
+  creepMm: number;
+  duplexMode: 'long-edge' | 'short-edge';
+  outerMarginMm: number;
+  compensateCreep: boolean;
+}
+
 export interface LayoutSettings {
+  /** Optional for compatibility with older saved projects and profiles. */
+  booklet?: BookletSettings;
   paperSize: PaperSizeId;
   customWidthMm: number;
   customHeightMm: number;

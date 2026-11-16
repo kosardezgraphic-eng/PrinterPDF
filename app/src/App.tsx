@@ -12,6 +12,7 @@ import { NumberingControlPanel } from './components/NumberingControlPanel';
 import { ImageControlPanel } from './components/ImageControlPanel';
 import { ShapeControlPanel } from './components/ShapeControlPanel';
 import { WatermarkControlPanel } from './components/WatermarkControlPanel';
+import { BookletControlPanel } from './components/BookletControlPanel';
 import { routeDroppedFiles } from './engine/imageImport';
 import { buildSheetPresetRows, findPresetIdByShortcut } from './engine/sheetPresets';
 import { formatShortcut } from '@shared/models';
@@ -46,6 +47,7 @@ export const App: React.FC = () => {
 
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
   const [watermarkPanelOpen, setWatermarkPanelOpen] = useState(false);
+  const [bookletPanelOpen, setBookletPanelOpen] = useState(false);
 
   useEffect(() => {
     void initializeWorkspace();
@@ -91,6 +93,17 @@ export const App: React.FC = () => {
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
   }, [watermarkPanelOpen]);
+
+  useEffect(() => {
+    if (!bookletPanelOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[data-booklet-control-panel],[data-booklet-panel-trigger]')) return;
+      setBookletPanelOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [bookletPanelOpen]);
 
   // Synchronize HTML dir (RTL/LTR) and lang
   useEffect(() => {
@@ -282,7 +295,7 @@ export const App: React.FC = () => {
         }`}
       >
         <QuickBar />
-        <Ribbon onOpenWatermarkPanel={() => setWatermarkPanelOpen(true)} />
+        <Ribbon onOpenWatermarkPanel={() => setWatermarkPanelOpen(true)} onOpenBookletPanel={() => setBookletPanelOpen(true)} />
         <div className="flex flex-1 overflow-hidden">
           <SidebarPages />
           <PreviewWorkspace onCursorMoveMm={setCursorPos} />
@@ -291,6 +304,7 @@ export const App: React.FC = () => {
           {selectedOverlayId && overlays.some(o=>o.id===selectedOverlayId && o.kind==='image') && <ImageControlPanel />}
           {selectedOverlayId && overlays.some(o=>o.id===selectedOverlayId && o.kind==='shape') && <ShapeControlPanel />}
           {watermarkPanelOpen && <WatermarkControlPanel onClose={() => setWatermarkPanelOpen(false)} />}
+          {bookletPanelOpen && <BookletControlPanel onClose={() => setBookletPanelOpen(false)} />}
         </div>
         <StatusBar cursorPos={cursorPos} />
         <ModalsAndToasts />
