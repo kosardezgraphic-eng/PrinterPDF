@@ -81,36 +81,49 @@ export function textPlacements(sheet:ComputedSheetSide,totalSheets:number,pages:
 export function drawOverlayText(ctx:CanvasRenderingContext2D,item:PageOverlayText,width:number,height:number,pixelsPerPoint:number){
   ctx.clearRect(0,0,width,height);
   if(item.backgroundColor && item.backgroundColor!=='transparent'){ctx.fillStyle=item.backgroundColor;ctx.fillRect(0,0,width,height);}
-  const size=Math.max(8,Math.min(80,item.fontSize))*pixelsPerPoint;
   const lineHeight=Math.max(.8,Math.min(3,item.lineHeight??1.25));
+  const lineCount=Math.max(1,item.text.split('\\n').length);
+  const requestedSize=Math.max(8,Math.min(80,item.fontSize))*pixelsPerPoint;
+  const size=item.verticalAlign==='middle'&&height>0
+    ? Math.max(1,Math.min(requestedSize,height/(lineCount*lineHeight)))
+    : requestedSize;
   const letter=Math.max(-2,Math.min(20,item.letterSpacingPt??0))*pixelsPerPoint;
   const word=Math.max(-2,Math.min(40,item.wordSpacingPt??0))*pixelsPerPoint;
   const spacing=ctx as CanvasRenderingContext2D & {letterSpacing?:string;wordSpacing?:string};
   if(typeof spacing.letterSpacing==='string')spacing.letterSpacing=`${letter}px`;
   if(typeof spacing.wordSpacing==='string')spacing.wordSpacing=`${word}px`;
-  const font=(pt:number)=>`${item.italic?'italic ':''}${item.bold?'bold ':''}${pt}px "${item.fontFamily.replace(/["\\]/g,'')}", sans-serif`;
-  ctx.font=font(size);ctx.textBaseline='top';ctx.textAlign=item.align;ctx.direction=/[\u0590-\u08ff]/.test(item.text)?'rtl':'ltr';ctx.fillStyle=item.color;
-  const x=item.align==='right'?width:item.align==='center'?width/2:0;
+  const font=(pt:number)=>`${item.italic?'italic ':''}${item.bold?'bold ':''}${pt}px "${item.fontFamily.replace(/["\\\\]/g,'')}", sans-serif`;
+  const inset=item.verticalAlign==='middle'?Math.min(width*.06,size*.35):0;
+  const textWidth=Math.max(1,width-inset*2);
+  const x=item.align==='right'?inset+textWidth:item.align==='center'?width/2:inset;
+  const verticalOffset=item.verticalAlign==='middle'?(height-lineCount*size*lineHeight)/2+size/2:0;
+  ctx.font=font(size);ctx.textBaseline=item.verticalAlign==='middle'?'middle':'top';ctx.textAlign=item.align;
+  ctx.direction=/[\\u0590-\\u08ff]/.test(item.text)?'rtl':'ltr';ctx.fillStyle=item.color;
   const ranges=item.scriptRanges??[];
   let offset=0;
-  item.text.split('\n').forEach((line,index)=>{
+  item.text.split('\\n').forEach((line,index)=>{
     const y=verticalOffset+index*size*lineHeight;
     const relevant=ranges.filter(r=>r.start<offset+line.length && r.end>offset);
     if(!relevant.length){
       ctx.font=font(size);ctx.textAlign=item.align;ctx.fillText(line,x,y,textWidth);
-      if(item.underline){const w=Math.min(textWidth,ctx.measureText(line).width);const left=x-(item.align==='right'?w:item.align==='center'?w/2:0);ctx.fillRect(left,y+size,w,Math.max(1,size*.06));}
+      if(item.underline){const w=Math.min(textWidth,ctx.measureText(line).width);const left=x-(item.align==='right'?w:item.align==='center'?w/2:0);ctx.fillRect(left,y+(item.verticalAlign==='middle'?size*.55:size),w,Math.max(1,size*.06));}
     }else{
-      const scripts=Array<'super'|'sub'|null>(line.length).fill(null);
+      const scripts:Array<'super'|'sub'|null>=Array(line.length).fill(null);
       for(const r of relevant)for(let j=Math.max(0,r.start-offset);j<Math.min(line.length,r.end-offset);j++)scripts[j]=r.script;
       const runs:{value:string;script:'super'|'sub'|null;width:number}[]=[];
       for(let j=0;j<line.length;){let end=j+1;while(end<line.length&&scripts[end]===scripts[j])end++;
         ctx.font=font(scripts[j]?size*.65:size);const value=line.slice(j,end);runs.push({value,script:scripts[j],width:ctx.measureText(value).width});j=end;
       }
-      const measured=runs.reduce((sum,r)=>sum+r.width,0), factor=measured>textWidth?textWidth/measured:1;
-      const used=measured*factor, left=item.align==='right'?inset+textWidth-used:item.align==='center'?(width-used)/2:inset;
+      const measured=runs.reduce((sum,r)=>sum+r.width,0),factor=measured>textWidth?textWidth/measured:1;
+      const used=measured*factor,left=item.align==='right'?inset+textWidth-used:item.align==='center'?(width-used)/2:inset;
       ctx.save();ctx.translate(left,0);ctx.scale(factor,1);const rtl=ctx.direction==='rtl';ctx.textAlign=rtl?'right':'left';let pos=rtl?measured:0;
-      for(const run of runs){ctx.font=font(run.script?size*.65:size);const baseline=y+(run.script==='super'?0:run.script==='sub'?size*.45:size*.18);
-        ctx.fillText(run.value,pos,baseline);if(item.underline)ctx.fillRect(rtl?pos-run.width:pos,baseline+(run.script?size*.65:size),run.width,Math.max(1,size*.06));
+      for(const run of runs){
+        ctx.font=font(run.script?size*.65:size);
+        const baseline=item.verticalAlign==='middle'
+          ? y+(run.script==='super'?-size*.3:run.script==='sub'?size*.3:0)
+          : y+(run.script==='super'?0:run.script==='sub'?size*.45:size*.18);
+        ctx.fillText(run.value,pos,baseline);
+        if(item.underline)ctx.fillRect(rtl?pos-run.width:pos,baseline+(run.script?size*.65:size),run.width,Math.max(1,size*.06));
         pos+=rtl?-run.width:run.width;
       }
       ctx.restore();
