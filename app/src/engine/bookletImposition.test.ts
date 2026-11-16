@@ -89,6 +89,11 @@ describe('booklet imposition', () => {
     expect(wideCell.cellWidthMm).toBeLessThan(narrowCell.cellWidthMm);
     expect(wideCell.cellHeightMm).toBeLessThan(narrowCell.cellHeightMm);
     expect(wideCell.contentWidthMm).toBeLessThan(narrowCell.contentWidthMm);
+    // A stored page scale must not prevent booklet pages from refitting to margins.
+    expect(narrowCell.transform?.scaleX).toBe(1);
+    expect(narrowCell.transform?.scaleY).toBe(1);
+    expect(wideCell.transform?.scaleX).toBe(1);
+    expect(wideCell.transform?.scaleY).toBe(1);
     expect(narrowCell.allowOverflow).toBe(false);
     expect(wideCell.allowOverflow).toBe(false);
     expect(narrowCell.cellXMm).toBe(10);
