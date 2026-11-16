@@ -379,7 +379,13 @@ export function computeImpositionSheets(
         : 0;
       const occurrenceKey = cellOccurrenceKey(item.page.id, layout.placementMode, item.row, item.col);
       const override = layout.cellOverrides?.[occurrenceKey];
-      const transform = override?.transform ?? item.page.overrides?.transform ?? IDENTITY_TRANSFORM;
+      const storedTransform = override?.transform ?? item.page.overrides?.transform ?? IDENTITY_TRANSFORM;
+      // In booklet mode, page images must refit to the current half-page after every
+      // outer-margin change. Preserve manual position/rotation, but do not let a
+      // previously stored scale override the newly calculated fit-to-cell scale.
+      const transform = layout.booklet?.enabled
+        ? { ...storedTransform, scaleX: 1, scaleY: 1 }
+        : storedTransform;
       const finalWidth = contentWidthMm * Math.max(0.05, Math.min(10, transform.scaleX));
       const finalHeight = contentHeightMm * Math.max(0.05, Math.min(10, transform.scaleY));
       return {
