@@ -44,9 +44,8 @@ export const App: React.FC = () => {
     restorePreferences,
   } = useAppStore();
 
-  const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(
-    null
-  );
+  const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
+  const [watermarkPanelOpen, setWatermarkPanelOpen] = useState(false);
 
   useEffect(() => {
     void initializeWorkspace();
@@ -79,6 +78,19 @@ export const App: React.FC = () => {
     );
     return stop;
   }, [importFiles, addToast, settings.language]);
+
+  // Close only the watermark settings panel when the user clicks outside it.
+  // The watermark's enabled state is independent and remains unchanged.
+  useEffect(() => {
+    if (!watermarkPanelOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[data-watermark-control-panel],[data-watermark-panel-trigger]')) return;
+      setWatermarkPanelOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [watermarkPanelOpen]);
 
   // Synchronize HTML dir (RTL/LTR) and lang
   useEffect(() => {
@@ -270,7 +282,7 @@ export const App: React.FC = () => {
         }`}
       >
         <QuickBar />
-        <Ribbon />
+        <Ribbon onOpenWatermarkPanel={() => setWatermarkPanelOpen(true)} />
         <div className="flex flex-1 overflow-hidden">
           <SidebarPages />
           <PreviewWorkspace onCursorMoveMm={setCursorPos} />
@@ -278,7 +290,7 @@ export const App: React.FC = () => {
           {selectedOverlayId && overlays.some(o=>o.id===selectedOverlayId && o.kind==='numbering') && <NumberingControlPanel />}
           {selectedOverlayId && overlays.some(o=>o.id===selectedOverlayId && o.kind==='image') && <ImageControlPanel />}
           {selectedOverlayId && overlays.some(o=>o.id===selectedOverlayId && o.kind==='shape') && <ShapeControlPanel />}
-          {watermark.enabled && <WatermarkControlPanel />}
+          {watermarkPanelOpen && <WatermarkControlPanel onClose={() => setWatermarkPanelOpen(false)} />}
         </div>
         <StatusBar cursorPos={cursorPos} />
         <ModalsAndToasts />
