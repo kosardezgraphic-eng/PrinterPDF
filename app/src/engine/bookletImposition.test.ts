@@ -71,7 +71,7 @@ describe('booklet imposition', () => {
   });
 
 
-  it('uses booklet outer margins to reduce page image size and keeps transformed content clipped to its half-page', () => {
+  it('applies booklet outer margins inside each half-page and refits page images', () => {
     const pageWithOversizedTransform = pages(4).map((page, index) => index === 0
       ? { ...page, overrides: { transform: { x: 0.35, y: -0.2, scaleX: 2, scaleY: 2 } } }
       : page);
@@ -100,8 +100,14 @@ describe('booklet imposition', () => {
     expect(wideCell.transform?.scaleY).toBe(1);
     expect(narrowCell.allowOverflow).toBe(false);
     expect(wideCell.allowOverflow).toBe(false);
-    expect(narrowCell.cellXMm).toBe(10);
-    expect(wideCell.cellXMm).toBe(20);
+    // Each imposed page keeps its full half-sheet cell, while its content is
+    // inset by the configured margin on all four sides.
+    expect(narrowCell.cellXMm).toBe(0);
+    expect(wideCell.cellXMm).toBe(0);
+    expect(narrowCell.contentXMm).toBeGreaterThan(narrowCell.cellXMm);
+    expect(wideCell.contentXMm).toBeGreaterThan(narrowCell.contentXMm);
+    expect(wideCell.contentYMm).toBeGreaterThan(narrowCell.contentYMm);
+    expect(wideCell.contentWidthMm).toBeLessThan(narrowCell.contentWidthMm);
   });
 
   it('pads incomplete signatures with blank pages and splits fixed-size signatures', () => {

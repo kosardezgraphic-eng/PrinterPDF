@@ -137,12 +137,8 @@ export function computeImpositionSheets(
       sheetOrder: 'ltr', duplexMode: layout.booklet.duplexMode,
       horizontalGutterMm: layout.booklet.spineWidthMm, verticalGutterMm: 0,
       orientation: 'landscape',
-      marginsMm: {
-        top: layout.booklet.outerMarginMm,
-        right: layout.booklet.outerMarginMm,
-        bottom: layout.booklet.outerMarginMm,
-        left: layout.booklet.outerMarginMm,
-      },
+      // In booklet mode, outerMarginMm is applied inside both imposed pages.
+      marginsMm: { top: 0, right: 0, bottom: 0, left: 0 },
     };
   }
   const activePages = pages.filter((p) => p.selectedForPrint);
@@ -268,6 +264,9 @@ export function computeImpositionSheets(
       const { page, globalPageNumber } = entry;
       let effectiveRotation: PageRotation = page.rotation;
       const crop = pageCropFractions(page);
+      const bookletInset = layout.booklet?.enabled ? Math.max(0, layout.booklet.outerMarginMm) : 0;
+      const availableCellWidthMm = Math.max(1, cellWidthMm - bookletInset * 2);
+      const availableCellHeightMm = Math.max(1, cellHeightMm - bookletInset * 2);
       const croppedWidth = page.widthMm * (1 - crop.left - crop.right);
       const croppedHeight = page.heightMm * (1 - crop.top - crop.bottom);
       const isRotated90 = effectiveRotation === 90 || effectiveRotation === 270;
@@ -287,8 +286,8 @@ export function computeImpositionSheets(
       }
 
       let scaleFactor = 1;
-      const scaleX = cellWidthMm / Math.max(1, pageW);
-      const scaleY = cellHeightMm / Math.max(1, pageH);
+      const scaleX = availableCellWidthMm / Math.max(1, pageW);
+      const scaleY = availableCellHeightMm / Math.max(1, pageH);
 
       // A cropped page is fitted automatically to its cell.
       const hasCrop = crop.top + crop.right + crop.bottom + crop.left > 0;
@@ -357,18 +356,21 @@ export function computeImpositionSheets(
       const finalScale = unifiedScale ?? item.scaleFactor;
       const rawContentW = item.pageW * finalScale;
       const rawContentH = item.pageH * finalScale;
+      const bookletInset = layout.booklet?.enabled ? Math.max(0, layout.booklet.outerMarginMm) : 0;
+      const availableWidthMm = Math.max(1, item.cellWidthMm - bookletInset * 2);
+      const availableHeightMm = Math.max(1, item.cellHeightMm - bookletInset * 2);
       const contentWidthMm =
         layout.scaleMode === 'fit'
-          ? Math.min(item.cellWidthMm, rawContentW)
+          ? Math.min(availableWidthMm, rawContentW)
           : rawContentW;
       const contentHeightMm =
         layout.scaleMode === 'fit'
-          ? Math.min(item.cellHeightMm, rawContentH)
+          ? Math.min(availableHeightMm, rawContentH)
           : rawContentH;
 
       const { offsetX, offsetY } = computeAlignedOffset(
-        item.cellWidthMm,
-        item.cellHeightMm,
+        availableWidthMm,
+        availableHeightMm,
         contentWidthMm,
         contentHeightMm,
         layout.alignment
@@ -399,8 +401,8 @@ export function computeImpositionSheets(
         cellYMm: item.cellYMm,
         cellWidthMm: item.cellWidthMm,
         cellHeightMm: item.cellHeightMm,
-        contentXMm: item.cellXMm + offsetX + (contentWidthMm - finalWidth) / 2 + transform.x * item.cellWidthMm + (layout.booklet?.enabled ? (item.col === 0 ? -creepShift : creepShift) : 0),
-        contentYMm: item.cellYMm + offsetY + (contentHeightMm - finalHeight) / 2 + transform.y * item.cellHeightMm,
+        contentXMm: item.cellXMm + bookletInset + offsetX + (contentWidthMm - finalWidth) / 2 + transform.x * item.cellWidthMm + (layout.booklet?.enabled ? (item.col === 0 ? -creepShift : creepShift) : 0),
+        contentYMm: item.cellYMm + bookletInset + offsetY + (contentHeightMm - finalHeight) / 2 + transform.y * item.cellHeightMm,
         contentWidthMm: finalWidth,
         contentHeightMm: finalHeight,
         scaleFactor: finalScale,
