@@ -597,7 +597,7 @@ export interface PspProjectFile {
   bookmarks: BookmarkItem[];
 }
 
-/** Overlay coordinates are percentages of the selected sheet or source-page box. */
+/** Overlay coordinates are percentages of the output sheet, imposed cell, or source-page box. */
 export type OverlayScope = 'current' | 'all' | 'even' | 'odd' | 'first' | 'last' | 'selected' | 'document' | 'selected-documents';
 export type OverlayTarget = 'page' | 'cell' | 'sheet';
 /** `badge` is a ring: a circle with a reversed circle cut out of the middle. */
