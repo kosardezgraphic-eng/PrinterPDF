@@ -41,8 +41,8 @@ export function NumberingControlPanel(){
    patch({target,targetScope:scope,targetPageIds:pageIds,targetSheetIndex:sheet,targetSheetIndices:target==='sheet'?sheetIds:undefined});
    setRange(scope==='selected'?formatCoverageSelection(target==='sheet'?sheetIds:pages.flatMap((p,i)=>pageIds.includes(p.id)?[i+1]:[])):'');setRangeError(false);
  };
- const applyRange=()=>{try{const numbers=parseCoverageSelection(range,item.target==='page'?pages.length:sheets.length);
-   patch(item.target==='page'?{targetScope:'selected',targetPageIds:numbers.map(n=>pages[n-1].id)}:{targetScope:'selected',targetSheetIndices:numbers});setRangeError(false);
+ const applyRange=()=>{try{const numbers=parseCoverageSelection(range,item.target==='sheet'?sheets.length:pages.length);
+   patch(item.target==='sheet'?{targetScope:'selected',targetSheetIndices:numbers}:{targetScope:'selected',targetPageIds:numbers.map(n=>pages[n-1].id)});setRangeError(false);
  }catch{setRangeError(true);}};
  const labels=fa?['همه','فرد','زوج','اول','آخر','صفحه / برگه جاری','انتخاب دلخواه']:['All','Odd','Even','First','Last','Current','Custom selection'];
  const scopes:OverlayScope[]=['all','odd','even','first','last','current','selected'];
@@ -71,9 +71,9 @@ export function NumberingControlPanel(){
      {fa?'قفل نسبت ابعاد در تغییر اندازه':'Lock aspect ratio while resizing'} <span className="text-slate-400">({fa?'Shift موقتاً باز می‌کند':'Shift unlocks it'})</span></label>
    <label className="block">{fa?'شفافیت':'Opacity'} {Math.round(item.opacity*100)}%<input aria-label={fa?'شفافیت شماره':'Number opacity'} type="range" min="10" max="100" value={item.opacity*100} onChange={e=>patch({opacity:+e.target.value/100})} className="w-full"/></label>
    <label className="block">{fa?'چرخش':'Rotation'} {item.rotation}°<input aria-label={fa?'چرخش شماره':'Number rotation'} type="range" min="0" max="360" value={item.rotation} onChange={e=>patch({rotation:+e.target.value})} className="w-full"/></label>
-   <label className="block">{fa?'مبنا':'Attach to'}<select aria-label={fa?'مبنای شماره':'Number target'} className={input} value={item.target} onChange={e=>setScope(item.targetScope,e.target.value as OverlayTarget)}><option value="page">{fa?'صفحه سند':'Document page'}</option><option value="sheet">{fa?'برگه خروجی':'Output sheet'}</option></select></label>
+   <label className="block">{fa?'مبنا':'Attach to'}<select aria-label={fa?'مبنای شماره':'Number target'} className={input} value={item.target} onChange={e=>setScope(item.targetScope,e.target.value as OverlayTarget)}><option value="page">{fa?'داخل محتوای صفحه':'Inside document page'}</option><option value="cell">{fa?'هر سلول / خانه چاپی':'Each imposed cell'}</option><option value="sheet">{fa?'کل برگه خروجی':'Whole output sheet'}</option></select></label>
    <label className="block">{fa?'دامنه':'Scope'}<select aria-label={fa?'دامنه شماره':'Number scope'} className={input} value={item.targetScope} onChange={e=>setScope(e.target.value as OverlayScope)}>{scopes.map((scope,i)=><option key={scope} value={scope}>{labels[i]}</option>)}</select></label>
-   <label className="block">{item.target==='page'?(fa?'صفحات دلخواه':'Chosen pages'):(fa?'برگه‌های دلخواه':'Chosen output sheets')}<input aria-label={fa?'بازه شماره‌گذاری':'Numbering range'} dir="ltr" className={input} value={range} placeholder="1, 3-5" onChange={e=>{setRange(e.target.value);setRangeError(false);}}/></label>
+   <label className="block">{item.target==='sheet'?(fa?'برگه‌های دلخواه':'Chosen output sheets'):(fa?'صفحات / سلول‌های دلخواه':'Chosen pages / cells')}<input aria-label={fa?'بازه شماره‌گذاری':'Numbering range'} dir="ltr" className={input} value={range} placeholder="1, 3-5" onChange={e=>{setRange(e.target.value);setRangeError(false);}}/></label>
    <button type="button" onClick={applyRange} className="rounded bg-slate-700 px-2 py-1">{fa?'اعمال بازه':'Apply range'}</button>
    {rangeError && <p role="alert" className="text-rose-300">{fa?'شماره یا بازه معتبر وارد کنید.':'Enter valid numbers or ranges.'}</p>}
    <p className="text-slate-400">{fa?'زوج و فرد بر اساس ترتیب صفحه‌های فضای کار یا برگه‌های خروجی است؛ انتخاب بازه وضعیت چاپ را تغییر نمی‌دهد.':'Odd/even use workspace page order or output-side order. Ranges do not change print selection.'}</p>

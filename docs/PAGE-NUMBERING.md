@@ -6,7 +6,7 @@ they are stored in the project JSON and in undo/redo history exactly like text o
 ## Adding and editing
 
 * **افزودن شماره صفحه / Add page number** on the Insert tab creates one numbering overlay for the whole workspace
-  (`target: page`, `targetScope: all`) with `{page}` as its template and Persian digits when the interface language is
+  (`target: page`, `targetScope: all`) with `{page}` as its template, attached to the full output sheet by default, and Persian digits when the interface language is
   Persian (English digits otherwise). It becomes selected, so the numbering panel opens immediately.
 * Drag the number to move it, use the eight handles to resize its box, and press the arrow keys for a 1 mm step
   (Shift for 5 mm). Ctrl/Command-drag creates an independent copy. `Alt`-style multi-select is not supported: every
@@ -34,9 +34,11 @@ export with a message naming the overlay, instead of exporting mis-numbered shee
 
 ## Target and scope
 
-`مبنا / Attach to` chooses whether the number belongs to a document page (placed inside the rotated page box, and
-clipped to the imposition cell unless the cell allows overflow) or to an output sheet (placed on the full sheet,
-numbered by output side order). Scope is `all`, `odd`, `even`, `first`, `last`, current page/sheet, or a typed range of
+`مبنا / Attach to` chooses among three coordinate systems: a document page (`page`, inside the placed content image),
+an imposed cell (`cell`, positioned relative to each complete matrix/booklet cell, including its margins), or the whole
+output sheet (`sheet`, positioned relative to the full physical sheet, independent of any page image). For `page` and
+`cell`, `{page}` follows the source page order; for `sheet`, `{page}` follows output-side order. These modes can be used
+as separate numbering overlays at the same time. Scope is `all`, `odd`, `even`, `first`, `last`, current page/sheet, or a typed range of
 page or output-sheet numbers (`1, 3-5`). Odd/even is evaluated against workspace page order for page targets and
 against output-side order for sheet targets; ranges are captured as page IDs or side indexes and do not change print
 selection.

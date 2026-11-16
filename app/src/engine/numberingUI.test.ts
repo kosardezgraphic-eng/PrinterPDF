@@ -25,8 +25,20 @@ beforeEach(()=>{
 });
 afterEach(()=>{act(()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
 describe('interactive page numbers',()=>{
+  it('supports numbering relative to each imposed cell as well as the whole output sheet',()=>{
+   act(()=>field('Add editable page number').click());
+   const target=field('Number target') as HTMLSelectElement;
+   expect([...target.options].map(option=>option.value)).toEqual(['page','cell','sheet']);
+   act(()=>{target.value='cell';target.dispatchEvent(new Event('change',{bubbles:true}));});
+   expect(number().target).toBe('cell');
+   setValue(field('Number template') as HTMLTextAreaElement,'Cell {page}/{total}');
+   expect(host.querySelector<HTMLElement>('[data-overlay-id]')!.getAttribute('aria-label')).toBe('Cell 1/3');
+   act(()=>{target.value='sheet';target.dispatchEvent(new Event('change',{bubbles:true}));});
+   expect(number().target).toBe('sheet');
+  });
+
  it('adds, edits, moves and resizes a numbering overlay with undo',()=>{
-  act(()=>field('Add editable page number').click());expect(number()).toMatchObject({target:'page',targetScope:'all',template:'{page}',enabled:true});
+  act(()=>field('Add editable page number').click());expect(number()).toMatchObject({target:'sheet',targetScope:'all',template:'{page}',enabled:true});
   setValue(field('Number template') as HTMLTextAreaElement,'Page {page}');setValue(field('Number formula') as HTMLInputElement,'page+1000');
   expect(number()).toMatchObject({template:'Page {page}',customScript:'page+1000'});
   let node=host.querySelector<HTMLElement>('[data-overlay-id]')!;expect(node.getAttribute('aria-label')).toBe('Page 1001');

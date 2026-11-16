@@ -1621,7 +1621,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const template=convertLegacy ? (legacy.format==='bates'?`${legacy.batesPrefix||'BATES-'}{serial}`:legacy.format==='persian'?'صفحه {page} از {total}':legacy.format==='english'?'Page {page} of {total}':'{page} / {total}') : '{page}';
       const position=convertLegacy?legacy.position:'bottom-center';
       const item:PageOverlayNumbering={id:globalThis.crypto?.randomUUID?.()??`number-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        kind:'numbering',enabled:true,target:convertLegacy?'sheet':'page',targetScope:'all',targetPageIds:[],targetSheetIndex:1,
+        kind:'numbering',enabled:true,target:'sheet',targetScope:'all',targetPageIds:[],targetSheetIndex:1,
         xPercent:position.endsWith('left')?5:position.endsWith('right')?55:30,yPercent:position.startsWith('top')?5:88,widthPercent:40,heightPercent:7,opacity:1,rotation:0,
         fontSize:convertLegacy?legacy.fontSizePt:14,fontFamily:'Vazirmatn',color:'#000000',bold:false,italic:false,align:'center',lockAspect:true,format,template,
         startOffset:convertLegacy?legacy.startNumber:1,padZeros:convertLegacy&&legacy.format==='bates'?Math.max(3,Math.min(10,legacy.batesDigits)):0,customScript:''};

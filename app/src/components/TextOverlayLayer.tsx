@@ -186,7 +186,7 @@ export function TextOverlayLayer({sheet,totalSheets,pages,pageIndices,pxPerMm,en
   const clip=c?`inset(${c.y*pxPerMm}px ${Math.max(0,(sheet.widthMm-c.x-c.width)*pxPerMm)}px ${Math.max(0,(sheet.heightMm-c.y-c.height)*pxPerMm)}px ${c.x*pxPerMm}px)`:undefined;
   return <div key={p.key} className="pointer-events-none absolute inset-0" style={{clipPath:clip}}>
     <div className="pointer-events-none absolute" style={{left:p.parentX*pxPerMm,top:p.parentY*pxPerMm,width:p.parentWidth*pxPerMm,height:p.parentHeight*pxPerMm,transform:`rotate(${p.parentRotation}deg)`}}>
-      <OverlayOccurrence p={p} pxPerMm={pxPerMm} sheetMm={sheetMm} selected={selected===item.id} enabled={enabled && (!previewOnly || item.target==='page')}/>
+      <OverlayOccurrence p={p} pxPerMm={pxPerMm} sheetMm={sheetMm} selected={selected===item.id} enabled={enabled && (!previewOnly || item.target!=='sheet')}/>
     </div>
   </div>;
  })}</div>;
