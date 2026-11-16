@@ -175,7 +175,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     if (!selectedOverlayId) return;
     const dismiss = (event: PointerEvent) => {
       const target = event.target instanceof Element ? event.target : null;
-      if (!target?.closest('[data-overlay-id],[data-text-control-panel]')) selectOverlay(null);
+      if (!target?.closest('[data-overlay-id],[data-text-control-panel],[data-shape-control-panel]')) selectOverlay(null);
     };
     document.addEventListener('pointerdown', dismiss, true);
     return () => document.removeEventListener('pointerdown', dismiss, true);
