@@ -599,7 +599,7 @@ export interface PspProjectFile {
 
 /** Overlay coordinates are percentages of the selected sheet or source-page box. */
 export type OverlayScope = 'current' | 'all' | 'even' | 'odd' | 'first' | 'last' | 'selected' | 'document' | 'selected-documents';
-export type OverlayTarget = 'page' | 'sheet';
+export type OverlayTarget = 'page' | 'cell' | 'sheet';
 /** `badge` is a ring: a circle with a reversed circle cut out of the middle. */
 export type ShapeType = 'rectangle' | 'square' | 'rounded-rect' | 'circle' | 'line' | 'arrow' | 'triangle' | 'polygon' | 'star' | 'diamond' | 'badge';
 export type NumberingNumberFormat = 'persian' | 'english' | 'roman' | 'abjad';
@@ -623,6 +623,8 @@ export interface PageOverlayText extends OverlayBase {
   kind: 'text'; text: string; fontSize: number; fontFamily: string; color: string;
   backgroundColor?: string; bold: boolean; italic: boolean; underline: boolean;
   align: 'right' | 'center' | 'left'; syncGroupId?: string;
+  /** Numbering overlays use vertical centring and a small safe inset inside their box. */
+  verticalAlign?: 'top' | 'middle';
   /** Document scopes use stable document IDs; ranges use UTF-16 offsets. */
   targetDocumentIds?: string[];
   /** Additional coverage is independent of the base scope and can be disabled. */
