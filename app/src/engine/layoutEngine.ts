@@ -401,7 +401,8 @@ export function computeImpositionSheets(
         occurrenceKey,
         transform,
         zIndex: override?.zIndex,
-        allowOverflow: override?.transform ? override.allowOverflow !== false : !!item.page.overrides?.transform,
+        // Booklet pages must stay inside their imposed half-page; the outer margin is a hard content boundary.
+        allowOverflow: layout.booklet?.enabled ? false : (override?.transform ? override.allowOverflow !== false : !!item.page.overrides?.transform),
       };
     });
 
