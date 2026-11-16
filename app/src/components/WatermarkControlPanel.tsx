@@ -2,12 +2,12 @@ import React from 'react';
 import { Droplets, X } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 
-export function WatermarkControlPanel() {
+export function WatermarkControlPanel({ onClose }: { onClose: () => void }) {
   const watermark = useAppStore(state => state.watermark);
   const updateWatermark = useAppStore(state => state.updateWatermark);
   const language = useAppStore(state => state.settings.language);
   const isFa = language === 'fa';
-  const patch = (value: Partial<typeof watermark>) => updateWatermark({ enabled: true, ...value });
+  const patch = (value: Partial<typeof watermark>) => updateWatermark(value);
   const input = 'w-full rounded border border-slate-600 bg-slate-800 p-1.5 text-xs text-white';
 
   return (
@@ -18,10 +18,16 @@ export function WatermarkControlPanel() {
           <Droplets className="h-4 w-4 text-sky-300" />
           {isFa ? 'تنظیمات واترمارک' : 'Watermark'}
         </strong>
-        <button type="button" onClick={() => updateWatermark({ enabled: false })}
-          title={isFa ? 'غیرفعال‌سازی واترمارک' : 'Disable watermark'}
+        <button type="button" onClick={onClose}
+          title={isFa ? 'بستن پنل تنظیمات' : 'Close settings panel'}
           className="rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-white"><X className="h-4 w-4" /></button>
       </div>
+
+      <label className="flex items-center gap-2 rounded border border-slate-700 bg-slate-800 p-2">
+        <input type="checkbox" checked={watermark.enabled}
+          onChange={e => updateWatermark({ enabled: e.target.checked })} className="accent-sky-500" />
+        <span className="font-semibold text-slate-100">{isFa ? 'نمایش واترمارک' : 'Show watermark'}</span>
+      </label>
 
       <label className="block space-y-1">
         <span className="text-slate-400">{isFa ? 'متن واترمارک' : 'Watermark text'}</span>
