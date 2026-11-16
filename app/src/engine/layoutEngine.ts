@@ -135,7 +135,7 @@ export function computeImpositionSheets(
     layout = {
       ...layout, rows: 1, cols: 2, placementMode: 'sequential', scaleMode: 'fit', uniqueScale: true, autoRotateToFit: true,
       sheetOrder: 'ltr', duplexMode: layout.booklet.duplexMode,
-      horizontalGutterMm: layout.booklet.spineWidthMm, verticalGutterMm: 0,
+      verticalGutterMm: 0,
       orientation: 'landscape',
       // Treat each booklet margin as part of the imposed cell geometry, just like
       // the spine gap. This shrinks and repositions both page cells before fitting.
