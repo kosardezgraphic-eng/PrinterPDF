@@ -56,7 +56,6 @@ export const Ribbon: React.FC = () => {
     printerMargins,
     effects,
     watermark,
-    pageNumbering,
     settings,
     pages,
     batchQueue,
@@ -81,7 +80,6 @@ export const Ribbon: React.FC = () => {
     updateSettings,
     clearCrispPreviewCacheNow,
     updateWatermark,
-    updatePageNumbering,
     addTextOverlay,
     addShapeOverlay,
     addNumberingOverlay,
@@ -690,7 +688,7 @@ export const Ribbon: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <label className="flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 font-bold text-sky-300 cursor-pointer">
                     <input type="checkbox" checked={watermark.enabled}
-                      onChange={(e) => updateWatermark({ enabled: e.target.checked })}
+                      onChange={e => updateWatermark({ enabled: e.target.checked })}
                       className="accent-sky-500" />
                     <Droplets className="h-4 w-4" />
                     <span>{lang === 'fa' ? 'فعال‌سازی واترمارک' : 'Enable watermark'}</span>
@@ -722,13 +720,43 @@ export const Ribbon: React.FC = () => {
                       <select aria-label="Watermark font family" value={watermark.fontFamily}
                         onChange={e => updateWatermark({ enabled: true, fontFamily: e.target.value as 'Vazirmatn' | 'Inter' })}
                         className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-2 text-white">
-                        <option value="Vazirmatn">Vazirmatn</option><option value="Inter">Inter</option>
+                        <option value="Vazirmatn">Vazirmatn</option>
+                        <option value="Inter">Inter</option>
                       </select>
                     </label>
                     <label className="flex flex-col gap-1 text-slate-300">
                       <span>{lang === 'fa' ? 'اندازه قلم (pt)' : 'Font size (pt)'}</span>
                       <input aria-label="Watermark font size" type="number" min="6" max="200" value={watermark.fontSizePt}
-                        onChange={e => updateWatermark({ enabled: true, fontSizePt: Math.max(6, Math.min(200, Number(e.target.valuleSpacingMm: Math.max(5, Math.min(500, Number(e.target.value) || 5)) })}
+                        onChange={e => updateWatermark({ enabled: true, fontSizePt: Math.max(6, Math.min(200, Number(e.target.value) || 6)) })}
+                        className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-2 text-white" />
+                    </label>
+                    <label className="flex items-center justify-between gap-2 text-slate-300">
+                      <span>{lang === 'fa' ? 'رنگ واترمارک' : 'Watermark color'}</span>
+                      <input aria-label="Watermark color" type="color" value={watermark.colorHex}
+                        onChange={e => updateWatermark({ enabled: true, colorHex: e.target.value })}
+                        className="h-9 w-14 cursor-pointer rounded border border-slate-700 bg-slate-800 p-1" />
+                    </label>
+                    <label className="flex flex-col gap-1 text-slate-300">
+                      <span>{lang === 'fa' ? 'شفافیت' : 'Opacity'} · {Math.round(watermark.opacity * 100)}%</span>
+                      <input aria-label="Watermark opacity" type="range" min="5" max="100" value={Math.round(watermark.opacity * 100)}
+                        onChange={e => updateWatermark({ enabled: true, opacity: Number(e.target.value) / 100 })} />
+                    </label>
+                    <label className="flex flex-col gap-1 text-slate-300">
+                      <span>{lang === 'fa' ? 'زاویه چرخش' : 'Rotation'} · {watermark.rotationDeg}°</span>
+                      <input aria-label="Watermark rotation" type="range" min="-90" max="90" value={watermark.rotationDeg}
+                        onChange={e => updateWatermark({ enabled: true, rotationDeg: Number(e.target.value) })} />
+                    </label>
+                    <div className="col-span-2 flex flex-wrap items-center gap-3 border-t border-slate-700 pt-3">
+                      <label className="flex items-center gap-2 text-slate-300">
+                        <input type="checkbox" checked={watermark.tiled}
+                          onChange={e => updateWatermark({ enabled: true, tiled: e.target.checked })} className="accent-sky-500" />
+                        {lang === 'fa' ? 'تکرار واترمارک در کل صفحه (Tile)' : 'Tile across the page'}
+                      </label>
+                      <label className="flex items-center gap-2 text-slate-300">
+                        <span>{lang === 'fa' ? 'فاصله تکرار (mm)' : 'Tile spacing (mm)'}</span>
+                        <input aria-label="Watermark tile spacing" type="number" min="5" max="500" value={watermark.tileSpacingMm}
+                          disabled={!watermark.tiled}
+                          onChange={e => updateWatermark({ enabled: true, tileSpacingMm: Math.max(5, Math.min(500, Number(e.target.value) || 5)) })}
                           className="w-24 rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-white disabled:opacity-40" />
                       </label>
                     </div>
