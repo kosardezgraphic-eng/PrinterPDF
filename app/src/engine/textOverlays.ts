@@ -51,7 +51,7 @@ export function textPlacements(sheet:ComputedSheetSide,totalSheets:number,pages:
         let value:string,ranges:TextScriptRange[]=[];
         try {const resolved=resolveNumberingTemplate(item,context.page,context.total);value=resolved.text;ranges=resolved.ranges;}
         catch {value=item.template;formulaError='Invalid numbering formula or format';}
-        renderText={...item,kind:'text',text:value,scriptRanges:ranges,underline:false,align:item.align??'center'};
+        renderText={...item,kind:'text',text:value,scriptRanges:ranges,underline:false,align:item.align??'center',verticalAlign:'middle'};
       }
       result.push({text:item,renderText,formulaError,key,x:rect.x+rect.width*item.xPercent/100,y:rect.y+rect.height*item.yPercent/100,
         width:rect.width*item.widthPercent/100,height:rect.height*item.heightPercent/100,
@@ -65,9 +65,13 @@ export function textPlacements(sheet:ComputedSheetSide,totalSheets:number,pages:
       for(const cell of sheet.cells){if(!cell.page)continue;
         const pageIndex=indices.get(cell.page.id);if(!pageIndex)continue;
         if(!matchesOverlayScope(item,{pageIndex,total:pages.length,pageId:cell.page.id,documentId:cell.page.documentId,sheetIndex:sheet.sideIndex,sheetPageIds}))continue;
-        add({x:cell.contentXMm,y:cell.contentYMm,width:cell.contentWidthMm,height:cell.contentHeightMm},`${item.id}-${cell.occurrenceKey??cell.cellIndex}`,cell.transform?.rotationDeg??0,
+        const cellTarget=item.target==='cell';
+        const rect=cellTarget
+          ? {x:cell.cellXMm,y:cell.cellYMm,width:cell.cellWidthMm,height:cell.cellHeightMm}
+          : {x:cell.contentXMm,y:cell.contentYMm,width:cell.contentWidthMm,height:cell.contentHeightMm};
+        add(rect,`${item.id}-${cell.occurrenceKey??cell.cellIndex}`,cell.transform?.rotationDeg??0,
           {page:pageIndex,total:pages.length,sheet:sheet.sideIndex,file:cell.page.documentName,docPage:cell.page.sourcePageNumber},
-          cell.allowOverflow?undefined:{x:cell.cellXMm,y:cell.cellYMm,width:cell.cellWidthMm,height:cell.cellHeightMm},cell.page.id);
+          cellTarget||cell.allowOverflow?undefined:{x:cell.cellXMm,y:cell.cellYMm,width:cell.cellWidthMm,height:cell.cellHeightMm},cell.page.id);
       }
     }
   }
@@ -90,11 +94,11 @@ export function drawOverlayText(ctx:CanvasRenderingContext2D,item:PageOverlayTex
   const ranges=item.scriptRanges??[];
   let offset=0;
   item.text.split('\n').forEach((line,index)=>{
-    const y=index*size*lineHeight;
+    const y=verticalOffset+index*size*lineHeight;
     const relevant=ranges.filter(r=>r.start<offset+line.length && r.end>offset);
     if(!relevant.length){
-      ctx.font=font(size);ctx.textAlign=item.align;ctx.fillText(line,x,y,width);
-      if(item.underline){const w=Math.min(width,ctx.measureText(line).width);const left=x-(item.align==='right'?w:item.align==='center'?w/2:0);ctx.fillRect(left,y+size,w,Math.max(1,size*.06));}
+      ctx.font=font(size);ctx.textAlign=item.align;ctx.fillText(line,x,y,textWidth);
+      if(item.underline){const w=Math.min(textWidth,ctx.measureText(line).width);const left=x-(item.align==='right'?w:item.align==='center'?w/2:0);ctx.fillRect(left,y+size,w,Math.max(1,size*.06));}
     }else{
       const scripts=Array<'super'|'sub'|null>(line.length).fill(null);
       for(const r of relevant)for(let j=Math.max(0,r.start-offset);j<Math.min(line.length,r.end-offset);j++)scripts[j]=r.script;
@@ -102,8 +106,8 @@ export function drawOverlayText(ctx:CanvasRenderingContext2D,item:PageOverlayTex
       for(let j=0;j<line.length;){let end=j+1;while(end<line.length&&scripts[end]===scripts[j])end++;
         ctx.font=font(scripts[j]?size*.65:size);const value=line.slice(j,end);runs.push({value,script:scripts[j],width:ctx.measureText(value).width});j=end;
       }
-      const measured=runs.reduce((sum,r)=>sum+r.width,0), factor=measured>width?width/measured:1;
-      const used=measured*factor, left=item.align==='right'?width-used:item.align==='center'?(width-used)/2:0;
+      const measured=runs.reduce((sum,r)=>sum+r.width,0), factor=measured>textWidth?textWidth/measured:1;
+      const used=measured*factor, left=item.align==='right'?inset+textWidth-used:item.align==='center'?(width-used)/2:inset;
       ctx.save();ctx.translate(left,0);ctx.scale(factor,1);const rtl=ctx.direction==='rtl';ctx.textAlign=rtl?'right':'left';let pos=rtl?measured:0;
       for(const run of runs){ctx.font=font(run.script?size*.65:size);const baseline=y+(run.script==='super'?0:run.script==='sub'?size*.45:size*.18);
         ctx.fillText(run.value,pos,baseline);if(item.underline)ctx.fillRect(rtl?pos-run.width:pos,baseline+(run.script?size*.65:size),run.width,Math.max(1,size*.06));
