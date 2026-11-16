@@ -727,7 +727,7 @@ export async function exportImposedPdf(params: {
       }
     }
 
-    // F1: Watermark on sheet
+    // F1: Watermark on sheet. All visual controls are applied to the exported PDF.
     if (watermark.enabled && watermark.text.trim().length > 0) {
       const firstPage = sheetSide.cells.find((c) => c.page !== null)?.page;
       const resolvedText = resolveTextMacros(watermark.text, {
@@ -738,17 +738,37 @@ export async function exportImposedPdf(params: {
         fileName: firstPage?.documentName ?? 'PrintStudio',
         userName,
       });
-      // Use ASCII-safe representation for StandardFonts in PDF stream while keeping full Persian in UI/Canvas
+      // Standard PDF fonts are ASCII-only here; preserve the configured color and opacity.
       const asciiSafeText = resolvedText.replace(/[^\x20-\x7E]/g, '').trim() || 'PrintStudio Pro';
-      outPage.drawText(asciiSafeText, {
-        x: sheetWidthPt * 0.25,
-        y: sheetHeightPt * 0.5,
-        size: Math.max(12, watermark.fontSizePt),
-        font: boldFont,
-        color: rgb(0.05, 0.45, 0.75),
-        opacity: watermark.opacity,
-        rotate: degrees(watermark.rotationDeg),
-      });
+      const hex = /^#[0-9a-f]{6}$/i.test(watermark.colorHex) ? watermark.colorHex.slice(1) : '0d73bf';
+      const watermarkColor = rgb(
+        parseInt(hex.slice(0, 2), 16) / 255,
+        parseInt(hex.slice(2, 4), 16) / 255,
+        parseInt(hex.slice(4, 6), 16) / 255,
+      );
+      const watermarkFont = watermark.fontFamily === 'Inter' ? font : boldFont;
+      const watermarkSize = Math.max(6, Math.min(200, watermark.fontSizePt));
+      const watermarkOptions = {
+        size: watermarkSize,
+        font: watermarkFont,
+        color: watermarkColor,
+        opacity: Math.max(0.05, Math.min(1, watermark.opacity)),
+        rotate: degrees(Math.max(-90, Math.min(90, watermark.rotationDeg))),
+      };
+      if (watermark.tiled) {
+        const spacingPt = Math.max(5, watermark.tileSpacingMm) * MM_TO_PT;
+        for (let y = spacingPt / 2; y < sheetHeightPt; y += spacingPt) {
+          for (let x = spacingPt / 2; x < sheetWidthPt; x += spacingPt) {
+            outPage.drawText(asciiSafeText, { ...watermarkOptions, x, y });
+          }
+        }
+      } else {
+        outPage.drawText(asciiSafeText, {
+          ...watermarkOptions,
+          x: sheetWidthPt * 0.25,
+          y: sheetHeightPt * 0.5,
+        });
+      }
     }
 
     // F2: Sheet / Bates Numbering on sheet footer
