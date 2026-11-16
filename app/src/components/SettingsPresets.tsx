@@ -269,21 +269,21 @@ export function SettingsPresetPanel() {
   };
 
   return (
-    <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/40 p-4" data-preset-panel>
+    <div className="mt-3 max-h-[42vh] overflow-y-auto overscroll-contain rounded-2xl border border-slate-800 bg-slate-950/40 p-3" data-preset-panel>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h3 className="flex items-center gap-2 text-xs font-extrabold text-slate-200">
           <Layers className="h-4 w-4 text-violet-400" />
-          {isFa ? 'پروفایل‌های تنظیمات شیت (K2)' : 'Sheet profiles (K2)'}
+          {isFa ? 'پروفایل‌های تنظیمات چاپ' : 'Print setup profiles'}
         </h3>
         <span className="text-[10px] text-slate-500">
-          {isFa ? 'بی‌زبان، واحد، تعرفه و تنظیمات برنامه' : 'no language, unit, tariffs or app settings'}
+          {isFa ? 'فقط تنظیمات خروجی چاپ؛ بدون تنظیمات محیط نرم‌افزار' : 'Print output only — no application preferences'}
         </span>
       </div>
 
       <p className="mb-3 text-[11px] leading-5 text-slate-400">
         {isFa
-          ? 'هر پروفایل فقط چیدمان، افکت‌ها، واترمارک و شماره‌گذاری صفحه را نگه می‌دارد؛ تنظیمات خود برنامه (زبان، واحد، تقویم، تعرفه، کش و کیفیت پیش‌فایل) در هیچ پروفایلی ذخیره یا بازیابی نمی‌شوند. سطر اول، «پیش‌فرض خود برنامه»، همان کاری را می‌کند که Alt+F6 می‌کند.'
-          : 'A profile stores the sheet only: layout, effects, watermark and page numbering. The application settings (language, unit, calendar, tariffs, cache and preview quality) are never captured or restored by a profile. The first row, "Shipped defaults", is what Alt+F6 does.'}
+          ? 'هر پروفایل فقط تنظیمات مؤثر بر خروجی چاپ را نگه می‌دارد: ابعاد و جهت کاغذ، حاشیه‌ها، چیدمان و تعداد خانه‌ها، دورو، افکت‌های رنگ و نور، واترمارک و شماره‌گذاری. زبان، تم، واحد رابط، تقویم، تعرفه و کیفیت پیش‌نمایش جزو پروفایل نیستند. سطر اول فقط بازنشانی تنظیمات پیش‌فرض برنامه است.'
+          : 'A profile stores print-output settings only: paper size and orientation, margins, layout and cells, duplex, colour/brightness effects, watermark and page numbering. Language, theme, UI units, calendar, tariffs and preview quality are not part of a profile. The first row resets application defaults.'}
       </p>
 
       <ul className="mb-3 grid gap-1.5">
