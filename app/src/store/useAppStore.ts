@@ -2279,9 +2279,10 @@ export const useAppStore = create<AppState>((set, get) => {
 
       const targetPrinter = state.printers.find((p) => p.name === printerName);
       const profile = targetPrinter?.activeProfile;
-      const effectivePaperSize = request.paperSize ?? profile?.paperSize ?? state.layout.paperSize;
-      const effectiveOrientation = request.orientation ?? profile?.orientation ?? state.layout.orientation;
-      const effectiveDuplex = request.duplexMode ?? profile?.duplexMode ?? state.layout.duplexMode;
+      const bookletMode = state.layout.booklet?.enabled === true;
+      const effectivePaperSize = bookletMode ? state.layout.paperSize : request.paperSize ?? profile?.paperSize ?? state.layout.paperSize;
+      const effectiveOrientation = bookletMode ? 'landscape' : request.orientation ?? profile?.orientation ?? state.layout.orientation;
+      const effectiveDuplex = bookletMode ? state.layout.booklet!.duplexMode : request.duplexMode ?? profile?.duplexMode ?? state.layout.duplexMode;
       const dims = getSheetDimensionsMm({
         ...state.layout,
         paperSize: effectivePaperSize,
