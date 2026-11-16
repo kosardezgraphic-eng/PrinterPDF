@@ -1388,10 +1388,16 @@ export const useAppStore = create<AppState>((set, get) => {
 
     updateLayout: (patch, recordUndo = true) => {
       const before = captureSnapshot(get());
-      set((state) => ({
-        layout: { ...state.layout, ...patch, ...(patch.marginsMm && !patch.marginMode ? {marginMode: 'custom' as const} : {}) },
-        activeSheetIndex: 0,
-      }));
+      set((state) => {
+        // While booklet imposition is active, editing its controls must not send the preview
+        // back to the first sheet. Keep the operator on the current sheet; the preview clamps
+        // the index if a changed signature size reduces the total sheet count.
+        const preserveBookletPreview = !!(state.layout.booklet?.enabled || patch.booklet?.enabled);
+        return {
+          layout: { ...state.layout, ...patch, ...(patch.marginsMm && !patch.marginMode ? {marginMode: 'custom' as const} : {}) },
+          ...(preserveBookletPreview ? {} : { activeSheetIndex: 0 }),
+        };
+      });
       if (recordUndo) {
         pushUndo(
           'تغییر چیدمان صفحه (Layout)',
