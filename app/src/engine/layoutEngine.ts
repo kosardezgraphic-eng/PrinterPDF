@@ -380,11 +380,12 @@ export function computeImpositionSheets(
       const occurrenceKey = cellOccurrenceKey(item.page.id, layout.placementMode, item.row, item.col);
       const override = layout.cellOverrides?.[occurrenceKey];
       const storedTransform = override?.transform ?? item.page.overrides?.transform ?? IDENTITY_TRANSFORM;
-      // In booklet mode, page images must refit to the current half-page after every
-      // outer-margin change. Preserve manual position/rotation, but do not let a
-      // previously stored scale override the newly calculated fit-to-cell scale.
+      // In booklet mode, each source page must be centred and refitted to the
+      // current margin-bounded half-page. Old free-position offsets and scale
+      // multipliers must not push content beyond the newly available area.
+      // Keep rotation, which is an intentional page-orientation choice.
       const transform = layout.booklet?.enabled
-        ? { ...storedTransform, scaleX: 1, scaleY: 1 }
+        ? { ...storedTransform, x: 0, y: 0, scaleX: 1, scaleY: 1 }
         : storedTransform;
       const finalWidth = contentWidthMm * Math.max(0.05, Math.min(10, transform.scaleX));
       const finalHeight = contentHeightMm * Math.max(0.05, Math.min(10, transform.scaleY));
