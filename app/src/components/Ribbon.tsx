@@ -417,7 +417,8 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
                   {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
                     <label key={side} className="flex items-center gap-1 text-slate-300" title={lang === 'fa' ? `حاشیه ${ { top: 'بالا', right: 'راست', bottom: 'پایین', left: 'چپ' }[side] } (mm)` : `${side} margin (mm)`}>
                       <span>{lang === 'fa' ? { top: 'بالا', right: 'راست', bottom: 'پایین', left: 'چپ' }[side] : side}</span>
-                      <input type="number" min={0} max={200} value={layout.marginsMm[side]}
+                      <input type="number" min={0} max={layout.booklet?.enabled ? 40 : 200} step={layout.booklet?.enabled ? 0.5 : 1}
+                        value={layout.booklet?.enabled ? layout.booklet.outerMarginMm : layout.marginsMm[side]}
                         onChange={(e) => updateMargins({ [side]: Math.max(0, Math.min(200, Number(e.target.value) || 0)) })}
                         className="w-12 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-center text-xs text-white" />
                     </label>
@@ -425,9 +426,19 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
                   {(['horizontalGutterMm', 'verticalGutterMm'] as const).map((field) => (
                     <label key={field} className="flex items-center gap-1 text-slate-300">
                       <span>{field === 'horizontalGutterMm' ? (lang === 'fa' ? 'افقی' : 'Gap X') : (lang === 'fa' ? 'عمودی' : 'Gap Y')}</span>
-                      <input type="number" min={0} max={200} value={layout[field]}
-                        onChange={(e) => updateLayout({ [field]: Math.max(0, Math.min(200, Number(e.target.value) || 0)) })}
-                        className="w-12 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-center text-xs text-white" />
+                      <input type="number" min={0} max={layout.booklet?.enabled && field === 'horizontalGutterMm' ? 30 : 200}
+                        step={layout.booklet?.enabled && field === 'horizontalGutterMm' ? 0.5 : 1}
+                        disabled={!!layout.booklet?.enabled && field === 'verticalGutterMm'}
+                        value={layout.booklet?.enabled ? (field === 'horizontalGutterMm' ? layout.booklet.spineWidthMm : 0) : layout[field]}
+                        onChange={(e) => {
+                          const val = Math.max(0, Math.min(200, Number(e.target.value) || 0));
+                          if (layout.booklet?.enabled && field === 'horizontalGutterMm') {
+                            updateLayout({ booklet: { ...layout.booklet, spineWidthMm: Math.min(30, val) } });
+                          } else {
+                            updateLayout({ [field]: val });
+                          }
+                        }}
+                        className="w-12 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-center text-xs text-white disabled:opacity-40" />
                     </label>
                   ))}
                   <select
@@ -762,10 +773,11 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
                     <input
                       type="number"
                       min={0}
-                      max={60}
-                      value={layout.marginsMm[side]}
+                      max={layout.booklet?.enabled ? 40 : 60}
+                      step={layout.booklet?.enabled ? 0.5 : 1}
+                      value={layout.booklet?.enabled ? layout.booklet.outerMarginMm : layout.marginsMm[side]}
                       onChange={(e) =>
-                        updateMargins({ [side]: Math.max(0, Number(e.target.value)) })
+                        updateMargins({ [side]: Math.max(0, Number(e.target.value) || 0) })
                       }
                       className="w-12 rounded border border-slate-700 bg-slate-800 px-1.5 py-1 text-center text-white"
                     />

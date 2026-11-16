@@ -13,6 +13,20 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit
   const guideId = useId();
   const dragging = useRef<{ pointer: number; x: number; y: number; scaleX: number; scaleY: number; guide: Guide; base: LayoutSettings } | null>(null);
   const rectRef = useRef<HTMLDivElement>(null);
+  const toEffectiveLayout = (source: LayoutSettings): LayoutSettings => {
+    if (!source.booklet?.enabled) return source;
+    const outer = Math.max(0, source.booklet.outerMarginMm);
+    const spine = Math.max(0, source.booklet.spineWidthMm);
+    return {
+      ...source,
+      rows: 1,
+      cols: 2,
+      marginsMm: { top: outer, right: outer, bottom: outer, left: outer },
+      horizontalGutterMm: spine + outer * 2,
+      verticalGutterMm: 0,
+    };
+  };
+  const effectiveLayout = toEffectiveLayout(layout);
   const begin = (e: PointerEvent<HTMLButtonElement>, guide: Guide) => {
     if (spaceDown || (e.pointerType === 'mouse' && e.button !== 0) || dragging.current) return;
     const rect = rectRef.current!.getBoundingClientRect();
@@ -23,7 +37,25 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit
   };
   const movedLayout = (e: PointerEvent<HTMLButtonElement>) => {
     const d = dragging.current;
-    return d && d.pointer === e.pointerId ? moveLayoutGuide(d.base, sheet, d.guide, (e.clientX-d.x)*d.scaleX, (e.clientY-d.y)*d.scaleY) : null;
+    if (!d || d.pointer !== e.pointerId) return null;
+    const baseEffective = toEffectiveLayout(d.base);
+    const dxMm = (e.clientX - d.x) * d.scaleX;
+    const dyMm = (e.clientY - d.y) * d.scaleY;
+    const moved = moveLayoutGuide(baseEffective, sheet, d.guide, dxMm, dyMm);
+    if (!d.base.booklet?.enabled) return moved;
+    if (d.guide.type === 'margin') {
+      const nextOuter = Math.max(0, Math.min(40, Math.round(moved.marginsMm[d.guide.side] * 10) / 10));
+      return {
+        ...d.base,
+        booklet: { ...d.base.booklet, outerMarginMm: nextOuter },
+      };
+    }
+    const baseOuter = Math.max(0, d.base.booklet.outerMarginMm);
+    const nextSpine = Math.max(0, Math.min(30, Math.round((moved.horizontalGutterMm - baseOuter * 2) * 10) / 10));
+    return {
+      ...d.base,
+      booklet: { ...d.base.booklet, spineWidthMm: nextSpine },
+    };
   };
   const move = (e: PointerEvent<HTMLButtonElement>) => { const next = movedLayout(e); if (next) { e.preventDefault(); e.stopPropagation(); onDraft(next); } };
   const finish = (e: PointerEvent<HTMLButtonElement>, cancel = false) => {
@@ -31,23 +63,23 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit
     if (!d || d.pointer !== e.pointerId) return;
     const next = cancel ? null : movedLayout(e);
     dragging.current = null; onDraft(null); e.preventDefault(); e.stopPropagation();
-    if (next && (JSON.stringify(next.marginsMm) !== JSON.stringify(d.base.marginsMm) || next.horizontalGutterMm !== d.base.horizontalGutterMm || next.verticalGutterMm !== d.base.verticalGutterMm)) onCommit(next);
+    if (next && (JSON.stringify(next.marginsMm) !== JSON.stringify(d.base.marginsMm) || next.horizontalGutterMm !== d.base.horizontalGutterMm || next.verticalGutterMm !== d.base.verticalGutterMm || JSON.stringify(next.booklet) !== JSON.stringify(d.base.booklet))) onCommit(next);
   };
   const fa = language === 'fa';
-  const margins = layout.marginsMm;
-  const rows = Math.max(1,Math.min(10,Math.floor(layout.rows))), cols = Math.max(1,Math.min(10,Math.floor(layout.cols)));
-  const cellW = Math.max(5, (Math.max(10,sheet.widthMm-margins.left-margins.right)-(cols-1)*Math.max(0,layout.horizontalGutterMm))/cols);
-  const cellH = Math.max(5, (Math.max(10,sheet.heightMm-margins.top-margins.bottom)-(rows-1)*Math.max(0,layout.verticalGutterMm))/rows);
+  const margins = effectiveLayout.marginsMm;
+  const rows = Math.max(1,Math.min(10,Math.floor(effectiveLayout.rows))), cols = Math.max(1,Math.min(10,Math.floor(effectiveLayout.cols)));
+  const cellW = Math.max(5, (Math.max(10,sheet.widthMm-margins.left-margins.right)-(cols-1)*Math.max(0,effectiveLayout.horizontalGutterMm))/cols);
+  const cellH = Math.max(5, (Math.max(10,sheet.heightMm-margins.top-margins.bottom)-(rows-1)*Math.max(0,effectiveLayout.verticalGutterMm))/rows);
   const guides: { guide:Guide; x:number; y:number; label:string; cursor:string }[] = [
     {guide:{type:'margin',side:'left'},x:margins.left,y:sheet.heightMm/4,label:fa?'حاشیه چپ':'Left margin',cursor:'ew-resize'},
     {guide:{type:'margin',side:'right'},x:sheet.widthMm-margins.right,y:sheet.heightMm/4,label:fa?'حاشیه راست':'Right margin',cursor:'ew-resize'},
     {guide:{type:'margin',side:'top'},x:sheet.widthMm/4,y:margins.top,label:fa?'حاشیه بالا':'Top margin',cursor:'ns-resize'},
     {guide:{type:'margin',side:'bottom'},x:sheet.widthMm/4,y:sheet.heightMm-margins.bottom,label:fa?'حاشیه پایین':'Bottom margin',cursor:'ns-resize'},
     ...Array.from({length:cols-1},(_,index) => ({guide:{type:'gutter',axis:'horizontal',index} as Guide,
-      x:margins.left+(index+1)*cellW+(index+1)*Math.max(0,layout.horizontalGutterMm),y:margins.top+(sheet.heightMm-margins.top-margins.bottom)*.35,
+      x:margins.left+(index+1)*cellW+(index+1)*Math.max(0,effectiveLayout.horizontalGutterMm),y:margins.top+(sheet.heightMm-margins.top-margins.bottom)*.35,
       label:fa?`فاصله ستون‌ها ${index+1} (همه ستون‌ها)`:`Column gutter ${index+1} (all columns)`,cursor:'ew-resize'})),
     ...Array.from({length:rows-1},(_,index) => ({guide:{type:'gutter',axis:'vertical',index} as Guide,
-      x:margins.left+(sheet.widthMm-margins.left-margins.right)*.35,y:margins.top+(index+1)*cellH+(index+1)*Math.max(0,layout.verticalGutterMm),
+      x:margins.left+(sheet.widthMm-margins.left-margins.right)*.35,y:margins.top+(index+1)*cellH+(index+1)*Math.max(0,effectiveLayout.verticalGutterMm),
       label:fa?`فاصله ردیف‌ها ${index+1} (همه ردیف‌ها)`:`Row gutter ${index+1} (all rows)`,cursor:'ns-resize'})),
   ];
   return <div ref={rectRef} data-layout-guides className="pointer-events-none absolute inset-0 z-[15]">
@@ -57,19 +89,22 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit
         ? {left:item.x*pxPerMm, top:margins.top*pxPerMm, bottom:margins.bottom*pxPerMm, borderLeftWidth:1}
         : {top:item.y*pxPerMm, left:margins.left*pxPerMm, right:margins.right*pxPerMm, borderTopWidth:1}} />)}
     {guides.map(({guide,x,y,label}, index) => {
-      const mm = guide.type === 'margin' ? margins[guide.side] : guide.axis === 'horizontal' ? layout.horizontalGutterMm : layout.verticalGutterMm;
+      const mm = guide.type === 'margin' ? margins[guide.side] : guide.axis === 'horizontal' ? (effectiveLayout.booklet?.enabled ? effectiveLayout.booklet.spineWidthMm : effectiveLayout.horizontalGutterMm) : effectiveLayout.verticalGutterMm;
       const value = `${convertMmToUnit(mm,unit)} ${unit}`;
       return <span key={`value-${label}`} id={`${guideId}-${index}`} data-guide-value={label} dir="ltr"
         style={{left:Math.max(2,Math.min(sheet.widthMm*pxPerMm-56,x*pxPerMm+18)),top:Math.max(2,Math.min(sheet.heightMm*pxPerMm-20,y*pxPerMm-10))}}
         className="absolute whitespace-nowrap rounded bg-white/90 px-1 text-[10px] font-semibold text-slate-800 shadow-sm">{value}</span>;
     })}
-    {guides.map(({guide,x,y,label,cursor}, index) => <button key={label} type="button" aria-describedby={`${guideId}-${index}`} title={`${label}: ${convertMmToUnit(guide.type === 'margin' ? margins[guide.side] : guide.axis === 'horizontal' ? layout.horizontalGutterMm : layout.verticalGutterMm,unit)} ${unit}`} aria-label={label}
+    {guides.map(({guide,x,y,label,cursor}, index) => {
+      const mm = guide.type === 'margin' ? margins[guide.side] : guide.axis === 'horizontal' ? (effectiveLayout.booklet?.enabled ? effectiveLayout.booklet.spineWidthMm : effectiveLayout.horizontalGutterMm) : effectiveLayout.verticalGutterMm;
+      return <button key={label} type="button" aria-describedby={`${guideId}-${index}`} title={`${label}: ${convertMmToUnit(mm,unit)} ${unit}`} aria-label={label}
       onClick={e => e.stopPropagation()} onPointerDown={e => begin(e,guide)} onPointerMove={move} onPointerUp={e => finish(e)} onPointerCancel={e => finish(e,true)}
       onLostPointerCapture={e => finish(e,true)}
       style={{ left:x*pxPerMm, top:y*pxPerMm, cursor, touchAction:'none', transform:'translate(-50%,-50%)' }}
       className="pointer-events-auto absolute flex h-10 w-10 items-center justify-center rounded-full">
       <span aria-hidden="true" className={`h-5 w-5 rounded-full border-2 border-white shadow-md ${guide.type === 'margin' ? 'bg-emerald-600' : 'bg-violet-600'}`} />
-    </button>)}
+    </button>;
+    })}
   </div>;
 }
 

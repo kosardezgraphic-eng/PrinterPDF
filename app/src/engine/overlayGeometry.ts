@@ -1,4 +1,4 @@
-import type {ComputedSheetSide, OverlayBase} from '@shared/models';
+import type {ComputedSheetSide, OverlayBase, OverlayTarget} from '@shared/models';
 export type OverlayHandle = 'nw'|'n'|'ne'|'e'|'se'|'s'|'sw'|'w';
 type Geometry = Pick<OverlayBase,'xPercent'|'yPercent'|'widthPercent'|'heightPercent'>;
 const clamp=(n:number,min:number,max:number)=>Math.max(min,Math.min(max,n));
@@ -145,7 +145,7 @@ export interface OverlayPanelFrame {
  */
 export function overlayPanelFrame(
   sheet: ComputedSheetSide | undefined,
-  item: { target: 'page' | 'sheet'; targetPageIds: string[] }
+  item: { target: OverlayTarget; targetPageIds: string[] }
 ): OverlayPanelFrame {
   const sheetMm = { width: sheet?.widthMm ?? 210, height: sheet?.heightMm ?? 297 };
   const cell = item.target === 'page' ? sheet?.cells.find(candidate => candidate.page?.id === item.targetPageIds[0]) : undefined;

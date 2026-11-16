@@ -112,6 +112,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const pendingWheelEntry = useRef<{index:number; edge:'top'|'bottom'} | null>(null);
   const drag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const bookletSpineDrag = useRef<{ startX: number; startWidthMm: number } | null>(null);
+  const bookletMarginDrag = useRef<{ side: 'left' | 'right' | 'top' | 'bottom'; pointerId: number; startX: number; startY: number; baseLayout: LayoutSettings } | null>(null);
   const suppressClick = useRef(false);
   const handledPreviewRequest = useRef<typeof previewPageRequest>(null);
   const suppressNavigationScroll = useRef(false);
@@ -528,6 +529,90 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                   className="absolute border border-dashed border-slate-500/70" />
               </div>
 
+              {/* Preview-only direct drag handles for booklet outer margins, matching the spine guide interaction. */}
+              {layout.booklet?.enabled && !previewOnlyPage && (
+                <>
+                  {(['left', 'right', 'top', 'bottom'] as const).map((side) => {
+                    const isHorizontal = side === 'left' || side === 'right';
+                    const style: React.CSSProperties =
+                      side === 'left'
+                        ? { left: Math.max(0, marginLeftMm * basePxPerMm - 4), top: marginTopMm * basePxPerMm, bottom: marginBottomMm * basePxPerMm, width: 8 }
+                        : side === 'right'
+                          ? { right: Math.max(0, marginRightMm * basePxPerMm - 4), top: marginTopMm * basePxPerMm, bottom: marginBottomMm * basePxPerMm, width: 8 }
+                          : side === 'top'
+                            ? { top: Math.max(0, marginTopMm * basePxPerMm - 4), left: marginLeftMm * basePxPerMm, right: marginRightMm * basePxPerMm, height: 8 }
+                            : { bottom: Math.max(0, marginBottomMm * basePxPerMm - 4), left: marginLeftMm * basePxPerMm, right: marginRightMm * basePxPerMm, height: 8 };
+                    const computeNextOuterMargin = (
+                      clientX: number,
+                      clientY: number,
+                      dragState: NonNullable<typeof bookletMarginDrag.current>,
+                    ) => {
+                      const deltaPx =
+                        side === 'left'
+                          ? clientX - dragState.startX
+                          : side === 'right'
+                            ? dragState.startX - clientX
+                            : side === 'top'
+                              ? clientY - dragState.startY
+                              : dragState.startY - clientY;
+                      const deltaMm = deltaPx / Math.max(0.01, basePxPerMm);
+                      const startMargin = dragState.baseLayout.booklet?.outerMarginMm ?? 0;
+                      const maxMargin = Math.min(40, Math.max(0, (sheetSide.widthMm - (dragState.baseLayout.booklet?.spineWidthMm ?? 0) - 10) / 4), Math.max(0, (sheetSide.heightMm - 10) / 2));
+                      return Math.round(Math.max(0, Math.min(maxMargin, startMargin + deltaMm)) * 10) / 10;
+                    };
+                    return (
+                      <div
+                        key={side}
+                        data-booklet-margin-guide={side}
+                        aria-label={lang === 'fa' ? `کشیدن حاشیه ${ { left: 'چپ', right: 'راست', top: 'بالا', bottom: 'پایین' }[side] } بوکلت` : `Drag booklet ${side} margin`}
+                        title={lang === 'fa' ? 'برای تغییر حاشیه بوکلت بکشید' : 'Drag to adjust booklet margin'}
+                        style={style}
+                        className={`absolute z-20 touch-none ${isHorizontal ? 'cursor-ew-resize' : 'cursor-ns-resize'}`}
+                        onClick={e => e.stopPropagation()}
+                        onPointerDown={event => {
+                          if (spaceDown || (event.pointerType === 'mouse' && event.button !== 0) || !layout.booklet?.enabled) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          bookletMarginDrag.current = { side, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, baseLayout: savedLayout };
+                          event.currentTarget.setPointerCapture(event.pointerId);
+                        }}
+                        onPointerMove={event => {
+                          const dragState = bookletMarginDrag.current;
+                          if (!dragState || dragState.pointerId !== event.pointerId || dragState.side !== side || !dragState.baseLayout.booklet?.enabled) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          const nextOuter = computeNextOuterMargin(event.clientX, event.clientY, dragState);
+                          setDraftLayout({
+                            ...dragState.baseLayout,
+                            booklet: { ...dragState.baseLayout.booklet, outerMarginMm: nextOuter },
+                          });
+                        }}
+                        onPointerUp={event => {
+                          const dragState = bookletMarginDrag.current;
+                          if (!dragState || dragState.pointerId !== event.pointerId || dragState.side !== side) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          bookletMarginDrag.current = null;
+                          if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture?.(event.pointerId);
+                          setDraftLayout(null);
+                          if (!dragState.baseLayout.booklet?.enabled) return;
+                          const nextOuter = computeNextOuterMargin(event.clientX, event.clientY, dragState);
+                          if (nextOuter !== dragState.baseLayout.booklet.outerMarginMm) {
+                            commitLayoutGuides({ booklet: { ...dragState.baseLayout.booklet, outerMarginMm: nextOuter } });
+                          }
+                        }}
+                        onPointerCancel={event => {
+                          const dragState = bookletMarginDrag.current;
+                          if (!dragState || dragState.pointerId !== event.pointerId) return;
+                          bookletMarginDrag.current = null;
+                          setDraftLayout(null);
+                        }}
+                      />
+                    );
+                  })}
+                </>
+              )}
+
               {/* Preview-only booklet fold guide. This DOM layer is not part of PDF rendering or printing. */}
               {layout.booklet?.enabled && bookletGapWidthMm > 0 && (
                 <div
@@ -540,8 +625,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                     // Keep the visible draggable hatch limited to the physical spine.
                     left: (bookletGapLeftMm + bookletMarginMm) * basePxPerMm,
                     width: Math.min(bookletSpineWidthMm, bookletGapWidthMm) * basePxPerMm,
-                    top: layout.marginsMm.top * basePxPerMm,
-                    bottom: layout.marginsMm.bottom * basePxPerMm,
+                    top: marginTopMm * basePxPerMm,
+                    bottom: marginBottomMm * basePxPerMm,
                     backgroundImage: 'repeating-linear-gradient(135deg, rgba(100,116,139,0.30) 0px, rgba(100,116,139,0.30) 2px, rgba(148,163,184,0.10) 2px, rgba(148,163,184,0.10) 6px)',
                   }}
                   onPointerDown={event => {
@@ -561,7 +646,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                   }}
                   onPointerUp={event => {
                     bookletSpineDrag.current = null;
-                    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+                    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture?.(event.pointerId);
                   }}
                   onPointerCancel={() => { bookletSpineDrag.current = null; }}
                 />
@@ -713,7 +798,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
               )}
 
               {(canvasTool === 'layout' || canvasTool === 'move') && activeGuideSheet === sheetSide.sideIndex - 1 && !previewOnlyPage && <LayoutGuides sheet={sheetSide} layout={layout} pxPerMm={basePxPerMm} spaceDown={spaceDown} language={lang} unit={settings.unit}
-                onDraft={setDraftLayout} onCommit={next => commitLayoutGuides({ marginsMm:next.marginsMm, horizontalGutterMm:next.horizontalGutterMm, verticalGutterMm:next.verticalGutterMm })} />}
+                onDraft={setDraftLayout} onCommit={next => commitLayoutGuides(next.booklet?.enabled ? { booklet: next.booklet } : { marginsMm:next.marginsMm, horizontalGutterMm:next.horizontalGutterMm, verticalGutterMm:next.verticalGutterMm })} />}
               {canvasTool === 'measure' && <MeasurementTool sheet={sheetSide} unit={settings.unit} language={lang} spaceDown={spaceDown} />}
               <UserGuideLines />
 

@@ -106,8 +106,11 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
           </select>
         </label>
         <label className={label}>
-          <span className="text-slate-400">{isFa ? 'حاشیه بیرونی (mm)' : 'Outer margin (mm)'}</span>
-          <input type="number" min="0" max="40" step="0.5" value={booklet.outerMarginMm}
+          <span className="flex justify-between text-slate-400"><span>{isFa ? 'حاشیه بیرونی (mm)' : 'Outer margin (mm)'}</span><span>{booklet.outerMarginMm} mm</span></span>
+          <input type="range" min="0" max="40" step="0.5" value={booklet.outerMarginMm}
+            onChange={e => patch({ outerMarginMm: Number(e.target.value) })} className="w-full accent-amber-500" />
+          <input type="number" min="0" max="40" step="0.1" value={booklet.outerMarginMm}
+            aria-label={isFa ? 'ورود دستی حاشیه بیرونی به میلی‌متر' : 'Manually enter outer margin in millimeters'}
             onChange={e => patch({ outerMarginMm: Math.max(0, Math.min(40, Number(e.target.value) || 0)) })} className={input} />
         </label>
         <label className="flex items-center gap-2">
