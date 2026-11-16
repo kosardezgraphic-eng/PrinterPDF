@@ -375,6 +375,12 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     const bookletGapWidthMm = bookletCells.length >= 2
       ? Math.max(0, bookletCells[1].cellXMm - bookletGapLeftMm)
       : 0;
+    const bookletMarginMm = layout.booklet?.enabled ? Math.max(0, layout.booklet.outerMarginMm) : 0;
+    const bookletSpineWidthMm = layout.booklet?.enabled ? Math.max(0, layout.booklet.spineWidthMm) : 0;
+    const marginTopMm = layout.booklet?.enabled ? bookletMarginMm : layout.marginsMm.top;
+    const marginRightMm = layout.booklet?.enabled ? bookletMarginMm : layout.marginsMm.right;
+    const marginBottomMm = layout.booklet?.enabled ? bookletMarginMm : layout.marginsMm.bottom;
+    const marginLeftMm = layout.booklet?.enabled ? bookletMarginMm : layout.marginsMm.left;
 
     // Optional back-side sheet for Light Table Transparent Mode (J2)
     const pairedBackSide =
@@ -514,11 +520,11 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
               {/* The shaded area is the configured layout margin, not a measured printer hard margin. */}
               <div data-layout-margin-shading aria-label={lang === 'fa' ? 'حاشیه تنظیم‌شدهٔ چیدمان' : 'Configured layout margin'}
                 className="pointer-events-none absolute inset-0 z-10">
-                <div className="absolute inset-x-0 top-0 bg-slate-500/15" style={{height:layout.marginsMm.top*basePxPerMm}} />
-                <div className="absolute inset-x-0 bottom-0 bg-slate-500/15" style={{height:layout.marginsMm.bottom*basePxPerMm}} />
-                <div className="absolute left-0 bg-slate-500/15" style={{top:layout.marginsMm.top*basePxPerMm,bottom:layout.marginsMm.bottom*basePxPerMm,width:layout.marginsMm.left*basePxPerMm}} />
-                <div className="absolute right-0 bg-slate-500/15" style={{top:layout.marginsMm.top*basePxPerMm,bottom:layout.marginsMm.bottom*basePxPerMm,width:layout.marginsMm.right*basePxPerMm}} />
-                <div style={{left:layout.marginsMm.left*basePxPerMm,top:layout.marginsMm.top*basePxPerMm,right:layout.marginsMm.right*basePxPerMm,bottom:layout.marginsMm.bottom*basePxPerMm}}
+                <div className="absolute inset-x-0 top-0 bg-slate-500/15" style={{height:marginTopMm*basePxPerMm}} />
+                <div className="absolute inset-x-0 bottom-0 bg-slate-500/15" style={{height:marginBottomMm*basePxPerMm}} />
+                <div className="absolute left-0 bg-slate-500/15" style={{top:marginTopMm*basePxPerMm,bottom:marginBottomMm*basePxPerMm,width:marginLeftMm*basePxPerMm}} />
+                <div className="absolute right-0 bg-slate-500/15" style={{top:marginTopMm*basePxPerMm,bottom:marginBottomMm*basePxPerMm,width:marginRightMm*basePxPerMm}} />
+                <div style={{left:marginLeftMm*basePxPerMm,top:marginTopMm*basePxPerMm,right:marginRightMm*basePxPerMm,bottom:marginBottomMm*basePxPerMm}}
                   className="absolute border border-dashed border-slate-500/70" />
               </div>
 
@@ -530,8 +536,10 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                   title={lang === 'fa' ? 'فاصله شیرازه؛ برای تغییر مقدار از پنل بوکلت استفاده کنید' : 'Spine gap; adjust its value in the booklet panel'}
                   className="absolute z-20 cursor-col-resize touch-none border-x border-dashed border-slate-500/70"
                   style={{
-                    left: bookletGapLeftMm * basePxPerMm,
-                    width: bookletGapWidthMm * basePxPerMm,
+                    // The full gap also contains the two inner page margins.
+                    // Keep the visible draggable hatch limited to the physical spine.
+                    left: (bookletGapLeftMm + bookletMarginMm) * basePxPerMm,
+                    width: Math.min(bookletSpineWidthMm, bookletGapWidthMm) * basePxPerMm,
                     top: layout.marginsMm.top * basePxPerMm,
                     bottom: layout.marginsMm.bottom * basePxPerMm,
                     backgroundImage: 'repeating-linear-gradient(135deg, rgba(100,116,139,0.30) 0px, rgba(100,116,139,0.30) 2px, rgba(148,163,184,0.10) 2px, rgba(148,163,184,0.10) 6px)',
