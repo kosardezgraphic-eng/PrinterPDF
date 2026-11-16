@@ -2300,7 +2300,7 @@ export const useAppStore = create<AppState>((set, get) => {
         paperSize: effectivePaperSize,
         orientation: effectiveOrientation,
         duplexMode: effectiveDuplex,
-        ...(request.paperWidthMm && request.paperHeightMm
+        ...(!bookletMode && request.paperWidthMm && request.paperHeightMm
           ? {
               customWidthMm: Math.min(request.paperWidthMm, request.paperHeightMm),
               customHeightMm: Math.max(request.paperWidthMm, request.paperHeightMm),
