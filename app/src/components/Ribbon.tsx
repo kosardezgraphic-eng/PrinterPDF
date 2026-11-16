@@ -78,7 +78,6 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void }> = ({ onOpenW
     resetEffects,
     updateSettings,
     clearCrispPreviewCacheNow,
-    updateWatermark,
     addTextOverlay,
     addShapeOverlay,
     addNumberingOverlay,
