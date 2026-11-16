@@ -139,6 +139,7 @@ export const DEFAULT_LAYOUT: LayoutSettings = {
   manualDuplex: false,
   showCellBorders: false,
   showCropMarks: false,
+  booklet: { enabled: false, direction: 'rtl', signatureSize: 0, spineWidthMm: 4, creepMm: 0.2, duplexMode: 'short-edge', outerMarginMm: 10, compensateCreep: true },
 };
 
 export const DEFAULT_EFFECTS: EffectsSettings = {
