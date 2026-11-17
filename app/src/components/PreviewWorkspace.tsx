@@ -553,12 +553,12 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                     const isHorizontal = side === 'left' || side === 'right';
                     const style: React.CSSProperties =
                       side === 'left'
-                        ? { left: Math.max(0, marginLeftMm * basePxPerMm - 4), top: marginTopMm * basePxPerMm, bottom: marginBottomMm * basePxPerMm, width: 8 }
+                        ? { left: Math.max(0, marginLeftMm * basePxPerMm - 5), top: marginTopMm * basePxPerMm, bottom: marginBottomMm * basePxPerMm, width: 10, backgroundImage: 'repeating-linear-gradient(135deg, rgba(100,116,139,0.42) 0px, rgba(100,116,139,0.42) 2px, rgba(148,163,184,0.14) 2px, rgba(148,163,184,0.14) 6px)' }
                         : side === 'right'
-                          ? { right: Math.max(0, marginRightMm * basePxPerMm - 4), top: marginTopMm * basePxPerMm, bottom: marginBottomMm * basePxPerMm, width: 8 }
+                          ? { right: Math.max(0, marginRightMm * basePxPerMm - 5), top: marginTopMm * basePxPerMm, bottom: marginBottomMm * basePxPerMm, width: 10, backgroundImage: 'repeating-linear-gradient(135deg, rgba(100,116,139,0.42) 0px, rgba(100,116,139,0.42) 2px, rgba(148,163,184,0.14) 2px, rgba(148,163,184,0.14) 6px)' }
                           : side === 'top'
-                            ? { top: Math.max(0, marginTopMm * basePxPerMm - 4), left: marginLeftMm * basePxPerMm, right: marginRightMm * basePxPerMm, height: 8 }
-                            : { bottom: Math.max(0, marginBottomMm * basePxPerMm - 4), left: marginLeftMm * basePxPerMm, right: marginRightMm * basePxPerMm, height: 8 };
+                            ? { top: Math.max(0, marginTopMm * basePxPerMm - 5), left: marginLeftMm * basePxPerMm, right: marginRightMm * basePxPerMm, height: 10, backgroundImage: 'repeating-linear-gradient(135deg, rgba(100,116,139,0.42) 0px, rgba(100,116,139,0.42) 2px, rgba(148,163,184,0.14) 2px, rgba(148,163,184,0.14) 6px)' }
+                            : { bottom: Math.max(0, marginBottomMm * basePxPerMm - 5), left: marginLeftMm * basePxPerMm, right: marginRightMm * basePxPerMm, height: 10, backgroundImage: 'repeating-linear-gradient(135deg, rgba(100,116,139,0.42) 0px, rgba(100,116,139,0.42) 2px, rgba(148,163,184,0.14) 2px, rgba(148,163,184,0.14) 6px)' };
                     const computeNextSideMargin = (
                       clientX: number,
                       clientY: number,
@@ -594,7 +594,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                         aria-label={lang === 'fa' ? `کشیدن حاشیه ${ { left: 'چپ', right: 'راست', top: 'بالا', bottom: 'پایین' }[side] } بوکلت` : `Drag booklet ${side} margin`}
                         title={lang === 'fa' ? 'برای تغییر همین ضلع حاشیه بکشید' : `Drag to adjust ${side} margin`}
                         style={style}
-                        className={`absolute z-[14] touch-none ${isHorizontal ? 'cursor-ew-resize' : 'cursor-ns-resize'}`}
+                        className={`absolute z-[14] touch-none border border-dashed border-slate-500/70 ${isHorizontal ? 'cursor-col-resize' : 'cursor-row-resize'}`}
                         onClick={e => e.stopPropagation()}
                         onPointerDown={event => {
                           if (spaceDown || (event.pointerType === 'mouse' && event.button !== 0) || !layout.booklet?.enabled) return;
