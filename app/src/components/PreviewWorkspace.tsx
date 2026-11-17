@@ -749,7 +749,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 );
               })}
 
-              {hasTextOverlays && <TextOverlayLayer sheet={sheetSide} totalSheets={outputSheets.length} pages={pages} pageIndices={pageNumbers} pxPerMm={basePxPerMm} enabled={canvasTool==='move' && !spaceDown} previewOnly={!!previewOnlyPage}/>}
+              {hasTextOverlays && <TextOverlayLayer sheet={sheetSide} totalSheets={outputSheets.length} pages={pages} pageIndices={pageNumbers} pxPerMm={basePxPerMm} enabled={(canvasTool==='move' || !!layout.booklet?.enabled) && !spaceDown} previewOnly={!!previewOnlyPage}/>}
               {pictureDropSheet === sheetSide.sideIndex - 1 && (
                 <div className="pointer-events-none absolute inset-0 z-20 bg-sky-500/10">
                   <span
