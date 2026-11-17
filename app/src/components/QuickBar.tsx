@@ -399,18 +399,14 @@ export const QuickBar: React.FC = () => {
                         {isFa ? 'چاپ دورو (Duplex):' : 'Duplex Mode:'}
                       </label>
                       <select
-                        disabled={!currentPrinter.capabilities.supportsDuplex}
-                        value={
-                          currentPrinter.capabilities.supportsDuplex
-                            ? currentPrinter.activeProfile.duplexMode
-                            : 'none'
-                        }
+                        aria-label={isFa ? 'چاپ دورو سخت‌افزاری' : 'Hardware Duplex Mode'}
+                        value={currentPrinter.activeProfile.duplexMode}
                         onChange={(e) =>
                           void updatePrinterProfile(currentPrinter.name, {
                             duplexMode: e.target.value as DuplexMode,
                           })
                         }
-                        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-white disabled:opacity-50"
+                        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
                       >
                         <option value="none">{isFa ? 'تک‌رو (Simplex)' : 'Simplex'}</option>
                         <option value="long-edge">{isFa ? 'دورو لبه بلند' : 'Long-Edge'}</option>

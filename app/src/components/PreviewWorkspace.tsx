@@ -36,6 +36,7 @@ import {
   convertMmToUnit,
 } from '../engine/layoutEngine';
 import { checkPreflight } from '../engine/preflight';
+import { moveLayoutGuide, resolvePrinterMinMargins } from '../engine/sheetInteraction';
 import { fitPageZoom, isAtWheelEdge, PREVIEW_PX_PER_MM, wheelSheetStep } from '../engine/viewNavigation';
 import {
   formatPageNumberLabel,
@@ -121,6 +122,11 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const [spaceDown, setSpaceDown] = useState(false);
   const [canvasTool, setCanvasTool] = useState<CanvasTool>('move');
   const [draftLayout, setDraftLayout] = useState<LayoutSettings | null>(null);
+  const [activeBandDrag, setActiveBandDrag] = useState<
+    | { sheetIndex: number; kind: 'margin'; side: 'left' | 'right' | 'top' | 'bottom' }
+    | { sheetIndex: number; kind: 'spine' }
+    | null
+  >(null);
   const [editScope, setEditScope] = useState<PageEditScope>('current');
   const [currentEditPageId, setCurrentEditPageId] = useState<string | null>(null);
   const [currentOccurrenceKey, setCurrentOccurrenceKey] = useState<string | null>(null);
@@ -377,10 +383,12 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
       ? Math.max(0, bookletCells[1].cellXMm - bookletGapLeftMm)
       : 0;
     const bookletSpineWidthMm = layout.booklet?.enabled ? Math.max(0, layout.booklet.spineWidthMm) : 0;
-    const marginTopMm = Math.max(0, layout.marginsMm.top);
-    const marginRightMm = Math.max(0, layout.marginsMm.right);
-    const marginBottomMm = Math.max(0, layout.marginsMm.bottom);
-    const marginLeftMm = Math.max(0, layout.marginsMm.left);
+    const activePrinterObj = printers.find((p) => p.name === selectedPrinterName);
+    const minMargins = resolvePrinterMinMargins(printerMargins, activePrinterObj);
+    const marginTopMm = Math.max(minMargins?.top ?? 0, layout.marginsMm.top);
+    const marginRightMm = Math.max(minMargins?.right ?? 0, layout.marginsMm.right);
+    const marginBottomMm = Math.max(minMargins?.bottom ?? 0, layout.marginsMm.bottom);
+    const marginLeftMm = Math.max(minMargins?.left ?? 0, layout.marginsMm.left);
 
     // Optional back-side sheet for Light Table Transparent Mode (J2)
     const pairedBackSide =
@@ -517,30 +525,86 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
               }}
               className="relative overflow-hidden rounded-sm bg-white shadow-[0_20px_50px_rgba(0,0,0,0.65)] ring-1 ring-slate-300 transition-all duration-150"
             >
-              {/* The shaded area is the configured layout margin, not a measured printer hard margin. */}
+              {/* Fixed hardware printable boundary from the selected printer driver (cannot shrink outward past this). */}
+              {minMargins && (minMargins.top > 0 || minMargins.right > 0 || minMargins.bottom > 0 || minMargins.left > 0) && (
+                <div
+                  data-printer-min-margins
+                  aria-hidden="true"
+                  style={{
+                    left: minMargins.left * basePxPerMm,
+                    top: minMargins.top * basePxPerMm,
+                    right: minMargins.right * basePxPerMm,
+                    bottom: minMargins.bottom * basePxPerMm,
+                  }}
+                  className="pointer-events-none absolute z-[9] border border-dashed border-rose-400/60"
+                />
+              )}
+
+              {/* The shaded area is the configured layout margin, rendered with the same gray hatched style as the spine guide. */}
               <div data-layout-margin-shading aria-label={lang === 'fa' ? 'حاشیه تنظیم‌شدهٔ چیدمان' : 'Configured layout margin'}
                 className="pointer-events-none absolute inset-0 z-10">
-                <div className="absolute inset-x-0 top-0 bg-slate-500/15" style={{height:marginTopMm*basePxPerMm}} />
-                <div className="absolute inset-x-0 bottom-0 bg-slate-500/15" style={{height:marginBottomMm*basePxPerMm}} />
-                <div className="absolute left-0 bg-slate-500/15" style={{top:marginTopMm*basePxPerMm,bottom:marginBottomMm*basePxPerMm,width:marginLeftMm*basePxPerMm}} />
-                <div className="absolute right-0 bg-slate-500/15" style={{top:marginTopMm*basePxPerMm,bottom:marginBottomMm*basePxPerMm,width:marginRightMm*basePxPerMm}} />
+                <div
+                  className="absolute inset-x-0 top-0"
+                  style={{
+                    height: marginTopMm * basePxPerMm,
+                    backgroundImage: 'repeating-linear-gradient(135deg, rgba(100,116,139,0.30) 0px, rgba(100,116,139,0.30) 2px, rgba(148,163,184,0.10) 2px, rgba(148,163,184,0.10) 6px)',
+                  }}
+                />
+                <div
+                  className="absolute inset-x-0 bottom-0"
+                  style={{
+                    height: marginBottomMm * basePxPerMm,
+                    backgroundImage: 'repeating-linear-gradient(135deg, rgba(100,116,139,0.30) 0px, rgba(100,116,139,0.30) 2px, rgba(148,163,184,0.10) 2px, rgba(148,163,184,0.10) 6px)',
+                  }}
+                />
+                <div
+                  className="absolute left-0"
+                  style={{
+                    top: marginTopMm * basePxPerMm,
+                    bottom: marginBottomMm * basePxPerMm,
+                    width: marginLeftMm * basePxPerMm,
+                    backgroundImage: 'repeating-linear-gradient(135deg, rgba(100,116,139,0.30) 0px, rgba(100,116,139,0.30) 2px, rgba(148,163,184,0.10) 2px, rgba(148,163,184,0.10) 6px)',
+                  }}
+                />
+                <div
+                  className="absolute right-0"
+                  style={{
+                    top: marginTopMm * basePxPerMm,
+                    bottom: marginBottomMm * basePxPerMm,
+                    width: marginRightMm * basePxPerMm,
+                    backgroundImage: 'repeating-linear-gradient(135deg, rgba(100,116,139,0.30) 0px, rgba(100,116,139,0.30) 2px, rgba(148,163,184,0.10) 2px, rgba(148,163,184,0.10) 6px)',
+                  }}
+                />
                 <div style={{left:marginLeftMm*basePxPerMm,top:marginTopMm*basePxPerMm,right:marginRightMm*basePxPerMm,bottom:marginBottomMm*basePxPerMm}}
                   className="absolute border border-dashed border-slate-500/70" />
               </div>
 
-              {/* Preview-only direct drag handles for independent booklet outer margins. */}
-              {layout.booklet?.enabled && !previewOnlyPage && (
+              {/* Preview-only direct margin drag bands styled & operated identically to the spine guide (gray hatched, col/row-resize cursor, no circles). */}
+              {!previewOnlyPage && (
                 <>
                   {(['left', 'right', 'top', 'bottom'] as const).map((side) => {
                     const isHorizontal = side === 'left' || side === 'right';
+                    const sideMarginMm =
+                      side === 'left' ? marginLeftMm : side === 'right' ? marginRightMm : side === 'top' ? marginTopMm : marginBottomMm;
+                    const bandPx = Math.max(8, sideMarginMm * basePxPerMm);
                     const style: React.CSSProperties =
                       side === 'left'
-                        ? { left: Math.max(0, marginLeftMm * basePxPerMm - 4), top: marginTopMm * basePxPerMm, bottom: marginBottomMm * basePxPerMm, width: 8 }
+                        ? { left: 0, top: marginTopMm * basePxPerMm, bottom: marginBottomMm * basePxPerMm, width: bandPx }
                         : side === 'right'
-                          ? { right: Math.max(0, marginRightMm * basePxPerMm - 4), top: marginTopMm * basePxPerMm, bottom: marginBottomMm * basePxPerMm, width: 8 }
+                          ? { right: 0, top: marginTopMm * basePxPerMm, bottom: marginBottomMm * basePxPerMm, width: bandPx }
                           : side === 'top'
-                            ? { top: Math.max(0, marginTopMm * basePxPerMm - 4), left: marginLeftMm * basePxPerMm, right: marginRightMm * basePxPerMm, height: 8 }
-                            : { bottom: Math.max(0, marginBottomMm * basePxPerMm - 4), left: marginLeftMm * basePxPerMm, right: marginRightMm * basePxPerMm, height: 8 };
+                            ? { top: 0, left: marginLeftMm * basePxPerMm, right: marginRightMm * basePxPerMm, height: bandPx }
+                            : { bottom: 0, left: marginLeftMm * basePxPerMm, right: marginRightMm * basePxPerMm, height: bandPx };
+                    const borderClass =
+                      sideMarginMm > 0
+                        ? side === 'left'
+                          ? 'border-r border-dashed border-slate-500/70'
+                          : side === 'right'
+                            ? 'border-l border-dashed border-slate-500/70'
+                            : side === 'top'
+                              ? 'border-b border-dashed border-slate-500/70'
+                              : 'border-t border-dashed border-slate-500/70'
+                        : '';
                     const computeNextSideMargin = (
                       clientX: number,
                       clientY: number,
@@ -556,37 +620,49 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                               : dragState.startY - clientY;
                       const deltaMm = deltaPx / Math.max(0.01, basePxPerMm);
                       const base = dragState.baseLayout;
+                      if (!base.booklet?.enabled) {
+                        const dxMm = side === 'left' || side === 'right' ? (clientX - dragState.startX) / Math.max(0.01, basePxPerMm) : 0;
+                        const dyMm = side === 'top' || side === 'bottom' ? (clientY - dragState.startY) / Math.max(0.01, basePxPerMm) : 0;
+                        const moved = moveLayoutGuide(base, sheetSide, { type: 'margin', side }, dxMm, dyMm, minMargins);
+                        return Math.round(moved.marginsMm[side] * 10) / 10;
+                      }
                       const startMargin = base.marginsMm[side];
                       const spine = Math.max(0, base.booklet?.spineWidthMm ?? 0);
+                      const minMargin = Math.max(0, minMargins?.[side] ?? 0);
                       const maxMargin =
                         side === 'left'
-                          ? Math.max(0, sheetSide.widthMm - base.marginsMm.right - 10 - spine)
+                          ? Math.max(minMargin, sheetSide.widthMm - base.marginsMm.right - 10 - spine)
                           : side === 'right'
-                            ? Math.max(0, sheetSide.widthMm - base.marginsMm.left - 10 - spine)
+                            ? Math.max(minMargin, sheetSide.widthMm - base.marginsMm.left - 10 - spine)
                             : side === 'top'
-                              ? Math.max(0, sheetSide.heightMm - base.marginsMm.bottom - 10)
-                              : Math.max(0, sheetSide.heightMm - base.marginsMm.top - 10);
-                      return Math.round(Math.max(0, Math.min(maxMargin, startMargin + deltaMm)) * 10) / 10;
+                              ? Math.max(minMargin, sheetSide.heightMm - base.marginsMm.bottom - 10)
+                              : Math.max(minMargin, sheetSide.heightMm - base.marginsMm.top - 10);
+                      return Math.round(Math.max(minMargin, Math.min(maxMargin, startMargin + deltaMm)) * 10) / 10;
                     };
+                    const isDraggingThisBand =
+                      activeBandDrag?.sheetIndex === sheetSide.sideIndex - 1 &&
+                      activeBandDrag.kind === 'margin' &&
+                      activeBandDrag.side === side;
                     return (
                       <div
                         key={side}
-                        data-booklet-margin-guide={side}
-                        aria-label={lang === 'fa' ? `کشیدن حاشیه ${ { left: 'چپ', right: 'راست', top: 'بالا', bottom: 'پایین' }[side] } بوکلت` : `Drag booklet ${side} margin`}
+                        {...(layout.booklet?.enabled ? { 'data-booklet-margin-guide': side } : { 'data-margin-guide': side })}
+                        aria-label={lang === 'fa' ? `کشیدن حاشیه ${ { left: 'چپ', right: 'راست', top: 'بالا', bottom: 'پایین' }[side] }` : `Drag ${side} margin`}
                         title={lang === 'fa' ? 'برای تغییر همین ضلع حاشیه بکشید' : `Drag to adjust ${side} margin`}
                         style={style}
-                        className={`absolute z-[14] touch-none ${isHorizontal ? 'cursor-ew-resize' : 'cursor-ns-resize'}`}
+                        className={`absolute z-[14] flex touch-none items-center justify-center transition-colors hover:bg-slate-500/10 ${borderClass} ${isHorizontal ? 'cursor-col-resize' : 'cursor-row-resize'}`}
                         onClick={e => e.stopPropagation()}
                         onPointerDown={event => {
-                          if (spaceDown || (event.pointerType === 'mouse' && event.button !== 0) || !layout.booklet?.enabled) return;
+                          if (spaceDown || (event.pointerType === 'mouse' && event.button !== 0)) return;
                           event.preventDefault();
                           event.stopPropagation();
                           bookletMarginDrag.current = { side, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, baseLayout: savedLayout };
+                          setActiveBandDrag({ sheetIndex: sheetSide.sideIndex - 1, kind: 'margin', side });
                           event.currentTarget.setPointerCapture(event.pointerId);
                         }}
                         onPointerMove={event => {
                           const dragState = bookletMarginDrag.current;
-                          if (!dragState || dragState.pointerId !== event.pointerId || dragState.side !== side || !dragState.baseLayout.booklet?.enabled) return;
+                          if (!dragState || dragState.pointerId !== event.pointerId || dragState.side !== side) return;
                           event.preventDefault();
                           event.stopPropagation();
                           const nextSideMargin = computeNextSideMargin(event.clientX, event.clientY, dragState);
@@ -601,9 +677,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                           event.preventDefault();
                           event.stopPropagation();
                           bookletMarginDrag.current = null;
+                          setActiveBandDrag(null);
                           if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture?.(event.pointerId);
                           setDraftLayout(null);
-                          if (!dragState.baseLayout.booklet?.enabled) return;
                           const nextSideMargin = computeNextSideMargin(event.clientX, event.clientY, dragState);
                           if (nextSideMargin !== dragState.baseLayout.marginsMm[side]) {
                             commitLayoutGuides({ marginsMm: { ...dragState.baseLayout.marginsMm, [side]: nextSideMargin } });
@@ -613,24 +689,38 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                           const dragState = bookletMarginDrag.current;
                           if (!dragState || dragState.pointerId !== event.pointerId) return;
                           bookletMarginDrag.current = null;
+                          setActiveBandDrag(null);
                           setDraftLayout(null);
                         }}
-                      />
+                      >
+                        {isDraggingThisBand && (
+                          <span
+                            data-band-size-label={`margin-${side}`}
+                            dir="ltr"
+                            className="pointer-events-none select-none whitespace-nowrap rounded bg-slate-900/90 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-sm"
+                          >
+                            {convertMmToUnit(sideMarginMm, settings.unit)} {settings.unit}
+                          </span>
+                        )}
+                      </div>
                     );
                   })}
                 </>
               )}
 
               {/* Preview-only booklet fold guide. This DOM layer is not part of PDF rendering or printing. */}
-              {layout.booklet?.enabled && bookletGapWidthMm > 0 && (
+              {layout.booklet?.enabled && (bookletGapWidthMm > 0 || (activeBandDrag?.sheetIndex === sheetSide.sideIndex - 1 && activeBandDrag.kind === 'spine')) && (
                 <div
                   data-booklet-spine-guide
                   aria-label={lang === 'fa' ? 'راهنمای غیرقابل چاپ فاصله شیرازه' : 'Non-printing booklet spine guide'}
                   title={lang === 'fa' ? 'فاصله شیرازه و عطف؛ برای تغییر بکشید یا از پنل بوکلت تنظیم کنید' : 'Spine and fold gap; drag or adjust in the booklet panel'}
-                  className="absolute z-[14] cursor-col-resize touch-none border-x border-dashed border-slate-500/70"
+                  className="absolute z-[14] flex cursor-col-resize touch-none items-center justify-center border-x border-dashed border-slate-500/70"
                   style={{
                     left: bookletGapLeftMm * basePxPerMm,
-                    width: Math.min(bookletSpineWidthMm, bookletGapWidthMm) * basePxPerMm,
+                    width: Math.max(
+                      activeBandDrag?.sheetIndex === sheetSide.sideIndex - 1 && activeBandDrag.kind === 'spine' ? 4 : 0,
+                      Math.min(bookletSpineWidthMm, bookletGapWidthMm) * basePxPerMm,
+                    ),
                     top: marginTopMm * basePxPerMm,
                     bottom: marginBottomMm * basePxPerMm,
                     backgroundImage: 'repeating-linear-gradient(135deg, rgba(100,116,139,0.30) 0px, rgba(100,116,139,0.30) 2px, rgba(148,163,184,0.10) 2px, rgba(148,163,184,0.10) 6px)',
@@ -641,6 +731,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                     event.preventDefault();
                     event.stopPropagation();
                     bookletSpineDrag.current = { pointerId: event.pointerId, startX: event.clientX, startWidthMm: savedLayout.booklet?.spineWidthMm ?? 0, baseLayout: savedLayout };
+                    setActiveBandDrag({ sheetIndex: sheetSide.sideIndex - 1, kind: 'spine' });
                     event.currentTarget.setPointerCapture(event.pointerId);
                   }}
                   onPointerMove={event => {
@@ -661,6 +752,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                     event.preventDefault();
                     event.stopPropagation();
                     bookletSpineDrag.current = null;
+                    setActiveBandDrag(null);
                     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture?.(event.pointerId);
                     setDraftLayout(null);
                     if (!dragState.baseLayout.booklet?.enabled) return;
@@ -674,9 +766,20 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                     const dragState = bookletSpineDrag.current;
                     if (!dragState || dragState.pointerId !== event.pointerId) return;
                     bookletSpineDrag.current = null;
+                    setActiveBandDrag(null);
                     setDraftLayout(null);
                   }}
-                />
+                >
+                  {activeBandDrag?.sheetIndex === sheetSide.sideIndex - 1 && activeBandDrag.kind === 'spine' && (
+                    <span
+                      data-band-size-label="spine"
+                      dir="ltr"
+                      className="pointer-events-none select-none whitespace-nowrap rounded bg-slate-900/90 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-sm"
+                    >
+                      {convertMmToUnit(bookletSpineWidthMm, settings.unit)} {settings.unit}
+                    </span>
+                  )}
+                </div>
               )}
 
               {/* Transparent Mode Back-Side Ghost Overlay (J2) */}
@@ -824,7 +927,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 </div>
               )}
 
-              {(canvasTool === 'layout' || canvasTool === 'move') && activeGuideSheet === sheetSide.sideIndex - 1 && !previewOnlyPage && <LayoutGuides sheet={sheetSide} layout={layout} pxPerMm={basePxPerMm} spaceDown={spaceDown} language={lang} unit={settings.unit}
+              {(canvasTool === 'layout' || canvasTool === 'move') && activeGuideSheet === sheetSide.sideIndex - 1 && !previewOnlyPage && <LayoutGuides sheet={sheetSide} layout={layout} pxPerMm={basePxPerMm} spaceDown={spaceDown} language={lang} unit={settings.unit} minMargins={minMargins}
                 onDraft={setDraftLayout} onCommit={next => commitLayoutGuides(next.booklet?.enabled ? { marginsMm: next.marginsMm, booklet: next.booklet } : { marginsMm:next.marginsMm, horizontalGutterMm:next.horizontalGutterMm, verticalGutterMm:next.verticalGutterMm })} />}
               {canvasTool === 'measure' && <MeasurementTool sheet={sheetSide} unit={settings.unit} language={lang} spaceDown={spaceDown} />}
               <UserGuideLines />
@@ -1478,20 +1581,17 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                         </select>
                         <select
                           aria-label={lang === 'fa' ? 'دورو درایور' : 'Driver Duplex'}
-                          value={caps.supportsDuplex ? prof.duplexMode : 'none'}
-                          disabled={!caps.supportsDuplex}
+                          value={prof.duplexMode}
                           onChange={(e) =>
                             void updatePrinterProfile(activePrinter.name, {
                               duplexMode: e.target.value as DuplexMode,
                             })
                           }
-                          className="w-1/2 rounded-lg border border-slate-700 bg-slate-800 px-1.5 py-1 text-[11px] text-white disabled:opacity-40"
+                          className="w-1/2 rounded-lg border border-slate-700 bg-slate-800 px-1.5 py-1 text-[11px] text-white"
                         >
-                          {(caps.supportsDuplex ? (['none', 'long-edge', 'short-edge'] as DuplexMode[]) : (['none'] as DuplexMode[])).map((d) => (
-                            <option key={d} value={d}>
-                              {d}
-                            </option>
-                          ))}
+                          <option value="none">{lang === 'fa' ? 'تک‌رو (Simplex)' : 'Simplex (none)'}</option>
+                          <option value="long-edge">{lang === 'fa' ? 'دورو لبه بلند (Long-Edge)' : 'Long-Edge'}</option>
+                          <option value="short-edge">{lang === 'fa' ? 'دورو لبه کوتاه (Short-Edge)' : 'Short-Edge'}</option>
                         </select>
                       </div>
                     </label>

@@ -52,6 +52,7 @@ export const ModalsAndToasts: React.FC = () => {
     toasts,
     setModalState,
     selectPrinter,
+    updateLayout,
     updatePrinterProfile,
     openPrinterPreferences,
     submitPrintJob,
@@ -125,7 +126,13 @@ export const ModalsAndToasts: React.FC = () => {
       );
 
   React.useEffect(() => {
-    if (!showPrintModal || !selectedPrinter) return;
+    if (!showPrintModal) return;
+    if (!selectedPrinter) {
+      setDuplexMode(layout.duplexMode);
+      setOrientation(layout.orientation);
+      setSelectedPaperName(layout.paperSize);
+      return;
+    }
     const prof = selectedPrinter.activeProfile;
     const c = selectedPrinter.capabilities;
     setTray(prof.tray || c.supportedTrays[0] || 'Auto Select');
@@ -133,7 +140,7 @@ export const ModalsAndToasts: React.FC = () => {
     setCollate(prof.collate ?? true);
     setMediaType(prof.mediaType || c.supportedMediaTypes[0] || 'Plain Paper');
     setQuality(prof.quality || 'normal');
-    setDuplexMode(c.supportsDuplex ? prof.duplexMode : 'none');
+    setDuplexMode(prof.duplexMode ?? layout.duplexMode);
     setColorMode(
       !c.supportsColor || prof.colorMode === 'monochrome' || effects.grayscale || effects.blackAndWhite
         ? 'bw'
@@ -156,6 +163,7 @@ export const ModalsAndToasts: React.FC = () => {
     activeProfile?.paperSize,
     activeProfile?.orientation,
     activeProfile?.duplexMode,
+    layout.duplexMode,
     activeProfile?.mediaType,
     activeProfile?.quality,
     activeProfile?.colorMode,
@@ -692,16 +700,18 @@ export const ModalsAndToasts: React.FC = () => {
                       {isFa ? 'چاپ دورو (Duplex):' : 'Duplex:'}
                     </label>
                     <select
-                      disabled={!caps?.supportsDuplex}
-                      value={caps?.supportsDuplex ? duplexMode : 'none'}
+                      aria-label={isFa ? 'چاپ دورو (Duplex)' : 'Duplex Mode'}
+                      value={duplexMode}
                       onChange={(e) => {
                         const d = e.target.value as DuplexMode;
                         setDuplexMode(d);
                         if (selectedPrinter) {
                           void updatePrinterProfile(selectedPrinter.name, { duplexMode: d });
+                        } else {
+                          updateLayout({ duplexMode: d });
                         }
                       }}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white disabled:opacity-40"
+                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white"
                     >
                       <option value="none">{isFa ? 'تک‌رو (Simplex)' : 'Simplex'}</option>
                       <option value="long-edge">{isFa ? 'لبه بلند (Long-Edge)' : 'Long-Edge'}</option>

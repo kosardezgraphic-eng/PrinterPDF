@@ -12,6 +12,7 @@ interface GuideProps {
 export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit, minMargins, onDraft, onCommit }: GuideProps) {
   const guideId = useId();
   const dragging = useRef<{ pointer: number; x: number; y: number; scaleX: number; scaleY: number; guide: Guide; base: LayoutSettings } | null>(null);
+  const [activeGuideLabel, setActiveGuideLabel] = useState<string | null>(null);
   const rectRef = useRef<HTMLDivElement>(null);
   const toEffectiveLayout = (source: LayoutSettings): LayoutSettings => {
     const clampedMargins = clampMarginsToMin(source.marginsMm, minMargins);
@@ -29,12 +30,13 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit
     };
   };
   const effectiveLayout = toEffectiveLayout(layout);
-  const begin = (e: PointerEvent<HTMLButtonElement>, guide: Guide) => {
+  const begin = (e: PointerEvent<HTMLButtonElement>, guide: Guide, label: string) => {
     if (spaceDown || (e.pointerType === 'mouse' && e.button !== 0) || dragging.current) return;
     const rect = rectRef.current!.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
     e.preventDefault(); e.stopPropagation();
     dragging.current = { pointer:e.pointerId, x:e.clientX, y:e.clientY, scaleX:sheet.widthMm/rect.width, scaleY:sheet.heightMm/rect.height, guide, base:layout };
+    setActiveGuideLabel(label);
     e.currentTarget.setPointerCapture(e.pointerId);
   };
   const movedLayout = (e: PointerEvent<HTMLButtonElement>) => {
@@ -63,7 +65,7 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit
     const d = dragging.current;
     if (!d || d.pointer !== e.pointerId) return;
     const next = cancel ? null : movedLayout(e);
-    dragging.current = null; onDraft(null); e.preventDefault(); e.stopPropagation();
+    dragging.current = null; setActiveGuideLabel(null); onDraft(null); e.preventDefault(); e.stopPropagation();
     if (next && (JSON.stringify(next.marginsMm) !== JSON.stringify(d.base.marginsMm) || next.horizontalGutterMm !== d.base.horizontalGutterMm || next.verticalGutterMm !== d.base.verticalGutterMm || JSON.stringify(next.booklet) !== JSON.stringify(d.base.booklet))) onCommit(next);
   };
   const fa = language === 'fa';
@@ -71,39 +73,59 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit
   const rows = Math.max(1,Math.min(10,Math.floor(effectiveLayout.rows))), cols = Math.max(1,Math.min(10,Math.floor(effectiveLayout.cols)));
   const cellW = Math.max(5, (Math.max(10,sheet.widthMm-margins.left-margins.right)-(cols-1)*Math.max(0,effectiveLayout.horizontalGutterMm))/cols);
   const cellH = Math.max(5, (Math.max(10,sheet.heightMm-margins.top-margins.bottom)-(rows-1)*Math.max(0,effectiveLayout.verticalGutterMm))/rows);
-  const guides: { guide:Guide; x:number; y:number; label:string; cursor:string }[] = [
-    {guide:{type:'margin',side:'left'},x:margins.left,y:sheet.heightMm/4,label:fa?'حاشیه چپ':'Left margin',cursor:'ew-resize'},
-    {guide:{type:'margin',side:'right'},x:sheet.widthMm-margins.right,y:sheet.heightMm/4,label:fa?'حاشیه راست':'Right margin',cursor:'ew-resize'},
-    {guide:{type:'margin',side:'top'},x:sheet.widthMm/4,y:margins.top,label:fa?'حاشیه بالا':'Top margin',cursor:'ns-resize'},
-    {guide:{type:'margin',side:'bottom'},x:sheet.widthMm/4,y:sheet.heightMm-margins.bottom,label:fa?'حاشیه پایین':'Bottom margin',cursor:'ns-resize'},
+  const guides: { guide:Guide; x:number; y:number; label:string; cursor:'col-resize'|'row-resize'; horizontal:boolean }[] = [
+    {guide:{type:'margin',side:'left'},x:margins.left,y:sheet.heightMm/4,label:fa?'حاشیه چپ':'Left margin',cursor:'col-resize',horizontal:false},
+    {guide:{type:'margin',side:'right'},x:sheet.widthMm-margins.right,y:sheet.heightMm/4,label:fa?'حاشیه راست':'Right margin',cursor:'col-resize',horizontal:false},
+    {guide:{type:'margin',side:'top'},x:sheet.widthMm/4,y:margins.top,label:fa?'حاشیه بالا':'Top margin',cursor:'row-resize',horizontal:true},
+    {guide:{type:'margin',side:'bottom'},x:sheet.widthMm/4,y:sheet.heightMm-margins.bottom,label:fa?'حاشیه پایین':'Bottom margin',cursor:'row-resize',horizontal:true},
     ...Array.from({length:cols-1},(_,index) => ({guide:{type:'gutter',axis:'horizontal',index} as Guide,
       x:margins.left+(index+1)*cellW+(index+1)*Math.max(0,effectiveLayout.horizontalGutterMm),y:margins.top+(sheet.heightMm-margins.top-margins.bottom)*.35,
-      label:fa?`فاصله ستون‌ها ${index+1} (همه ستون‌ها)`:`Column gutter ${index+1} (all columns)`,cursor:'ew-resize'})),
+      label:fa?`فاصله ستون‌ها ${index+1} (همه ستون‌ها)`:`Column gutter ${index+1} (all columns)`,cursor:'col-resize' as const,horizontal:false})),
     ...Array.from({length:rows-1},(_,index) => ({guide:{type:'gutter',axis:'vertical',index} as Guide,
       x:margins.left+(sheet.widthMm-margins.left-margins.right)*.35,y:margins.top+(index+1)*cellH+(index+1)*Math.max(0,effectiveLayout.verticalGutterMm),
-      label:fa?`فاصله ردیف‌ها ${index+1} (همه ردیف‌ها)`:`Row gutter ${index+1} (all rows)`,cursor:'ns-resize'})),
+      label:fa?`فاصله ردیف‌ها ${index+1} (همه ردیف‌ها)`:`Row gutter ${index+1} (all rows)`,cursor:'row-resize' as const,horizontal:true})),
   ];
+  const hatchPattern = 'repeating-linear-gradient(135deg, rgba(100,116,139,0.34) 0px, rgba(100,116,139,0.34) 2px, rgba(148,163,184,0.12) 2px, rgba(148,163,184,0.12) 6px)';
+  const innerWidthPx = Math.max(16, (sheet.widthMm - margins.left - margins.right) * pxPerMm);
+  const innerHeightPx = Math.max(16, (sheet.heightMm - margins.top - margins.bottom) * pxPerMm);
   return <div ref={rectRef} data-layout-guides className="pointer-events-none absolute inset-0 z-[15]">
-    <div className="absolute border border-dashed border-emerald-600" style={{ left:margins.left*pxPerMm, right:margins.right*pxPerMm, top:margins.top*pxPerMm, bottom:margins.bottom*pxPerMm }} />
-    {guides.filter(item => item.guide.type === 'gutter').map(item => <div key={`line-${item.label}`} className="absolute border-violet-600/80 border-dashed"
+    <div className="absolute border border-dashed border-slate-500/80" style={{ left:margins.left*pxPerMm, right:margins.right*pxPerMm, top:margins.top*pxPerMm, bottom:margins.bottom*pxPerMm }} />
+    {guides.filter(item => item.guide.type === 'gutter').map(item => <div key={`line-${item.label}`} className="absolute border-slate-500/80 border-dashed"
       style={item.guide.type === 'gutter' && item.guide.axis === 'horizontal'
         ? {left:item.x*pxPerMm, top:margins.top*pxPerMm, bottom:margins.bottom*pxPerMm, borderLeftWidth:1}
         : {top:item.y*pxPerMm, left:margins.left*pxPerMm, right:margins.right*pxPerMm, borderTopWidth:1}} />)}
     {guides.map(({guide,x,y,label}, index) => {
       const mm = guide.type === 'margin' ? margins[guide.side] : guide.axis === 'horizontal' ? (effectiveLayout.booklet?.enabled ? effectiveLayout.booklet.spineWidthMm : effectiveLayout.horizontalGutterMm) : effectiveLayout.verticalGutterMm;
       const value = `${convertMmToUnit(mm,unit)} ${unit}`;
+      const isActive = activeGuideLabel === label;
+      const bandCenterStyle = isActive
+        ? guide.type === 'margin'
+          ? guide.side === 'left'
+            ? { left: (margins.left * pxPerMm) / 2, top: (margins.top + (sheet.heightMm - margins.top - margins.bottom) / 2) * pxPerMm, transform: 'translate(-50%, -50%)' }
+            : guide.side === 'right'
+              ? { left: (sheet.widthMm - margins.right / 2) * pxPerMm, top: (margins.top + (sheet.heightMm - margins.top - margins.bottom) / 2) * pxPerMm, transform: 'translate(-50%, -50%)' }
+              : guide.side === 'top'
+                ? { left: (margins.left + (sheet.widthMm - margins.left - margins.right) / 2) * pxPerMm, top: (margins.top * pxPerMm) / 2, transform: 'translate(-50%, -50%)' }
+                : { left: (margins.left + (sheet.widthMm - margins.left - margins.right) / 2) * pxPerMm, top: (sheet.heightMm - margins.bottom / 2) * pxPerMm, transform: 'translate(-50%, -50%)' }
+          : guide.axis === 'horizontal'
+            ? { left: (x - Math.max(0, mm) / 2) * pxPerMm, top: (margins.top + (sheet.heightMm - margins.top - margins.bottom) / 2) * pxPerMm, transform: 'translate(-50%, -50%)' }
+            : { left: (margins.left + (sheet.widthMm - margins.left - margins.right) / 2) * pxPerMm, top: (y - Math.max(0, mm) / 2) * pxPerMm, transform: 'translate(-50%, -50%)' }
+        : { left: Math.max(2, Math.min(sheet.widthMm * pxPerMm - 56, x * pxPerMm + 14)), top: Math.max(2, Math.min(sheet.heightMm * pxPerMm - 20, y * pxPerMm - 10)) };
       return <span key={`value-${label}`} id={`${guideId}-${index}`} data-guide-value={label} dir="ltr"
-        style={{left:Math.max(2,Math.min(sheet.widthMm*pxPerMm-56,x*pxPerMm+18)),top:Math.max(2,Math.min(sheet.heightMm*pxPerMm-20,y*pxPerMm-10))}}
-        className="absolute whitespace-nowrap rounded bg-white/90 px-1 text-[10px] font-semibold text-slate-800 shadow-sm">{value}</span>;
+        style={bandCenterStyle}
+        className={`absolute z-[16] whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-semibold shadow-sm ${isActive ? 'bg-slate-900/90 text-white' : 'bg-white/90 text-slate-800'}`}>{value}</span>;
     })}
-    {guides.map(({guide,x,y,label,cursor}, index) => {
+    {guides.map(({guide,x,y,label,cursor,horizontal}, index) => {
       const mm = guide.type === 'margin' ? margins[guide.side] : guide.axis === 'horizontal' ? (effectiveLayout.booklet?.enabled ? effectiveLayout.booklet.spineWidthMm : effectiveLayout.horizontalGutterMm) : effectiveLayout.verticalGutterMm;
+      const stripStyle = horizontal
+        ? { left: margins.left * pxPerMm, top: y * pxPerMm, width: innerWidthPx, height: 10, cursor, touchAction: 'none' as const, transform: 'translateY(-50%)', backgroundImage: hatchPattern }
+        : { left: x * pxPerMm, top: margins.top * pxPerMm, width: 10, height: innerHeightPx, cursor, touchAction: 'none' as const, transform: 'translateX(-50%)', backgroundImage: hatchPattern };
       return <button key={label} type="button" aria-describedby={`${guideId}-${index}`} title={`${label}: ${convertMmToUnit(mm,unit)} ${unit}`} aria-label={label}
-      onClick={e => e.stopPropagation()} onPointerDown={e => begin(e,guide)} onPointerMove={move} onPointerUp={e => finish(e)} onPointerCancel={e => finish(e,true)}
+      onClick={e => e.stopPropagation()} onPointerDown={e => begin(e,guide,label)} onPointerMove={move} onPointerUp={e => finish(e)} onPointerCancel={e => finish(e,true)}
       onLostPointerCapture={e => finish(e,true)}
-      style={{ left:x*pxPerMm, top:y*pxPerMm, cursor, touchAction:'none', transform:'translate(-50%,-50%)' }}
-      className="pointer-events-auto absolute flex h-10 w-10 items-center justify-center rounded-full">
-      <span aria-hidden="true" className={`h-5 w-5 rounded-full border-2 border-white shadow-md ${guide.type === 'margin' ? 'bg-emerald-600' : 'bg-violet-600'}`} />
+      style={stripStyle}
+      className={`pointer-events-auto absolute flex items-center justify-center border-dashed border-slate-500/80 transition-colors hover:bg-slate-500/20 ${horizontal ? 'border-y' : 'border-x'}`}>
+      <span aria-hidden="true" className={horizontal ? 'h-0.5 w-8 rounded-sm bg-slate-600/85' : 'h-8 w-0.5 rounded-sm bg-slate-600/85'} />
     </button>;
     })}
   </div>;

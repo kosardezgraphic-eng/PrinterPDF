@@ -475,13 +475,11 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
                 </span>
                 <div className="flex items-center gap-1.5">
                   <select
+                    aria-label={lang === 'fa' ? 'حالت چاپ دورو شیت' : 'Sheet Duplex Mode'}
                     value={layout.duplexMode}
                     onChange={(e) => {
                       const nextDuplex = e.target.value as DuplexMode;
                       updateLayout({ duplexMode: nextDuplex });
-                      if (selectedPrinter && (nextDuplex === 'none' || selectedPrinter.capabilities.supportsDuplex)) {
-                        void updatePrinterProfile(selectedPrinter.name, { duplexMode: nextDuplex });
-                      }
                     }}
                     className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-100"
                   >

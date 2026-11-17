@@ -169,4 +169,30 @@ describe('sheet tool pointer interactions', () => {
     pointer(leftHandle, 'pointerup', 38, 300);
     expect(useAppStore.getState().layout.marginsMm.left).toBe(19);
   });
+  it('renders gray hatched margin shading and non-circular col/row-resize handles matching the spine guide', () => {
+    const shading = container.querySelector('[data-layout-margin-shading]')!;
+    const firstBand = shading.children[0] as HTMLElement;
+    expect(firstBand.style.backgroundImage).toContain('repeating-linear-gradient');
+
+    const directLeft = container.querySelector<HTMLElement>('[data-margin-guide="left"]')!;
+    expect(directLeft.className).toContain('cursor-col-resize');
+    const directTop = container.querySelector<HTMLElement>('[data-margin-guide="top"]')!;
+    expect(directTop.className).toContain('cursor-row-resize');
+
+    act(() => (container.querySelector('[data-sheet-canvas-index]') as HTMLElement).click());
+    const guides = container.querySelector('[data-layout-guides]')!;
+    expect(guides.querySelectorAll('.rounded-full')).toHaveLength(0);
+    const leftGuideHandle = guides.querySelector<HTMLElement>('[aria-label="Left margin"]')!;
+    expect(leftGuideHandle.style.cursor).toBe('col-resize');
+    expect(leftGuideHandle.style.backgroundImage).toContain('repeating-linear-gradient');
+
+    // Direct drag on hatched margin band shows live size centered inside the band
+    pointer(directLeft, 'pointerdown', 10, 300);
+    pointer(directLeft, 'pointermove', 30, 300);
+    const liveLabel = directLeft.querySelector('[data-band-size-label="margin-left"]');
+    expect(liveLabel).not.toBeNull();
+    expect(liveLabel!.textContent).toBe('20.3 mm');
+    pointer(directLeft, 'pointerup', 30, 300);
+    expect(container.querySelector('[data-band-size-label="margin-left"]')).toBeNull();
+  });
 });

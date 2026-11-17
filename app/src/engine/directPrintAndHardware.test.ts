@@ -11,6 +11,7 @@ import { computeImpositionSheets, getSheetDimensionsMm } from './layoutEngine';
 import { ipcBridge } from './ipcBridge';
 import { DEFAULT_LAYOUT, DEFAULT_SETTINGS, useAppStore } from '../store/useAppStore';
 import { QuickBar } from '../components/QuickBar';
+import { Ribbon } from '../components/Ribbon';
 import { StatusBar } from '../components/StatusBar';
 import { ModalsAndToasts } from '../components/Modals';
 
@@ -460,6 +461,121 @@ describe('direct print & printer hardware integration', () => {
     expect(container.textContent).toContain('تنظیمات درایور ویندوز');
     expect(container.textContent).toContain('سایز کاغذ درایور');
     expect(container.textContent).toContain('جنس کاغذ (Media)');
+
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  it('unifies duplex mode bidirectionally between sheet settings, booklet, and all printers regardless of supportsDuplex', async () => {
+    const printerA = makePrinter({
+      name: 'SHARP MX-M453U PCL6',
+      capabilities: { ...makePrinter().capabilities, supportsDuplex: true },
+      activeProfile: { ...makePrinter().activeProfile, printerName: 'SHARP MX-M453U PCL6', duplexMode: 'long-edge' },
+    });
+    const printerB = makePrinter({
+      name: 'HP LaserJet 527 (No Auto Duplex)',
+      isDefault: false,
+      capabilities: { ...makePrinter().capabilities, supportsDuplex: false },
+      activeProfile: { ...makePrinter().activeProfile, printerName: 'HP LaserJet 527 (No Auto Duplex)', duplexMode: 'none' },
+    });
+
+    useAppStore.setState({
+      printers: [printerA, printerB],
+      selectedPrinterName: printerA.name,
+      activeRibbonTab: 'layout',
+      showPrintModal: true,
+    });
+
+    (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+
+    act(() => {
+      root.render(
+        React.createElement(
+          React.Fragment,
+          null,
+          React.createElement(QuickBar),
+          React.createElement(Ribbon),
+          React.createElement(ModalsAndToasts)
+        )
+      );
+    });
+
+    // Open QuickBar Hardware popover
+    const hwToggle = container.querySelector<HTMLButtonElement>('button[aria-label="تنظیمات سخت‌افزاری پرینتر"]');
+    expect(hwToggle).toBeTruthy();
+    act(() => {
+      hwToggle!.click();
+    });
+
+    const sheetDuplexSelect = container.querySelector<HTMLSelectElement>('select[aria-label="حالت چاپ دورو شیت"]');
+    const hwDuplexSelect = container.querySelector<HTMLSelectElement>('select[aria-label="چاپ دورو سخت‌افزاری"]');
+    const modalDuplexSelect = container.querySelector<HTMLSelectElement>('select[aria-label="چاپ دورو (Duplex)"]');
+    expect(sheetDuplexSelect).toBeTruthy();
+    expect(hwDuplexSelect).toBeTruthy();
+    expect(modalDuplexSelect).toBeTruthy();
+
+    // 1. Change duplex in Sheet settings (Ribbon) -> updates hardware in ALL printers & modal & booklet
+    act(() => {
+      sheetDuplexSelect!.value = 'short-edge';
+      sheetDuplexSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    let state = useAppStore.getState();
+    expect(state.layout.duplexMode).toBe('short-edge');
+    expect(state.layout.booklet?.duplexMode).toBe('short-edge');
+    expect(state.printers.every((p) => p.activeProfile.duplexMode === 'short-edge')).toBe(true);
+    expect(hwDuplexSelect!.value).toBe('short-edge');
+    expect(modalDuplexSelect!.value).toBe('short-edge');
+
+    // 2. Switch to Printer B (where supportsDuplex === false) -> still enabled and unified!
+    act(() => {
+      useAppStore.getState().selectPrinter(printerB.name);
+    });
+    expect(hwDuplexSelect!.disabled).toBe(false);
+    expect(modalDuplexSelect!.disabled).toBe(false);
+    expect(hwDuplexSelect!.value).toBe('short-edge');
+    expect(modalDuplexSelect!.value).toBe('short-edge');
+    expect(sheetDuplexSelect!.value).toBe('short-edge');
+
+    // 3. Change duplex in Hardware settings while on Printer B -> updates sheet settings, booklet, and Printer A too
+    await act(async () => {
+      hwDuplexSelect!.value = 'long-edge';
+      hwDuplexSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    state = useAppStore.getState();
+    expect(state.layout.duplexMode).toBe('long-edge');
+    expect(state.layout.booklet?.duplexMode).toBe('long-edge');
+    expect(state.printers.every((p) => p.activeProfile.duplexMode === 'long-edge')).toBe(true);
+    expect(sheetDuplexSelect!.value).toBe('long-edge');
+    expect(modalDuplexSelect!.value).toBe('long-edge');
+
+    // 4. Change duplex to simplex ('none') in Print Dialog -> updates sheet settings and ALL printers
+    await act(async () => {
+      modalDuplexSelect!.value = 'none';
+      modalDuplexSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    state = useAppStore.getState();
+    expect(state.layout.duplexMode).toBe('none');
+    expect(state.printers.every((p) => p.activeProfile.duplexMode === 'none')).toBe(true);
+    expect(sheetDuplexSelect!.value).toBe('none');
+    expect(hwDuplexSelect!.value).toBe('none');
+
+    // 5. Booklet duplex update also propagates to sheet layout & all printers
+    act(() => {
+      useAppStore.getState().updateLayout({
+        booklet: { ...useAppStore.getState().layout.booklet!, enabled: true, duplexMode: 'short-edge' },
+      });
+    });
+    state = useAppStore.getState();
+    expect(state.layout.duplexMode).toBe('short-edge');
+    expect(state.printers.every((p) => p.activeProfile.duplexMode === 'short-edge')).toBe(true);
 
     act(() => root.unmount());
     container.remove();

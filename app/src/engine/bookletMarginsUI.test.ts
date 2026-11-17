@@ -265,5 +265,28 @@ describe('booklet margin behavior parity with spine gap', () => {
     expect(ribbonLeftInput.min).toBe('4.5');
     setInputValue(ribbonLeftInput, '2');
     expect(useAppStore.getState().layout.marginsMm.left).toBe(4.5);
+
+    // Hatched gray bands & spine-matching cursors
+    const shading = container.querySelector('[data-layout-margin-shading]')!;
+    expect((shading.children[0] as HTMLElement).style.backgroundImage).toContain('repeating-linear-gradient');
+    expect(topEdge.className).toContain('cursor-row-resize');
+    expect(container.querySelector<HTMLElement>('[data-booklet-margin-guide="left"]')!.className).toContain('cursor-col-resize');
+
+    // Dragging booklet margin shows live size centered inside the hatched margin band
+    dispatchPointer(topEdge, 'pointerdown', 100, 50);
+    dispatchPointer(topEdge, 'pointermove', 100, 50 + 8 * PREVIEW_PX_PER_MM);
+    const marginBadge = topEdge.querySelector('[data-band-size-label="margin-top"]');
+    expect(marginBadge?.textContent).toBe('26 mm');
+    dispatchPointer(topEdge, 'pointerup', 100, 50 + 8 * PREVIEW_PX_PER_MM);
+    expect(container.querySelector('[data-band-size-label="margin-top"]')).toBeNull();
+
+    // Dragging booklet spine shows live spine width centered inside the hatched spine band
+    const spineBand = container.querySelector<HTMLElement>('[data-booklet-spine-guide]')!;
+    dispatchPointer(spineBand, 'pointerdown', 150, 100);
+    dispatchPointer(spineBand, 'pointermove', 150 + 3 * PREVIEW_PX_PER_MM, 100);
+    const spineBadge = spineBand.querySelector('[data-band-size-label="spine"]');
+    expect(spineBadge?.textContent).toBe('10 mm');
+    dispatchPointer(spineBand, 'pointerup', 150 + 3 * PREVIEW_PX_PER_MM, 100);
+    expect(container.querySelector('[data-band-size-label="spine"]')).toBeNull();
   });
 });

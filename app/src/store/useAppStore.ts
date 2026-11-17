@@ -7,6 +7,7 @@ import type {
   AppSettings,
   BatchJobItem,
   BookmarkItem,
+  DuplexMode,
   EffectsSettings,
   LayoutSettings,
   PageItem,
@@ -117,6 +118,46 @@ let printRunSequence = 0;
 let activePrintRunId = 0;
 const canceledPrintRuns = new Set<number>();
 let activeSpoolerJob: { printerName: string; jobId: number } | null = null;
+
+function syncPrintersDuplex(printers: PrinterInfo[], duplexMode: DuplexMode): PrinterInfo[] {
+  let changed = false;
+  const next = printers.map((p) => {
+    if (p.activeProfile.duplexMode === duplexMode) return p;
+    changed = true;
+    return { ...p, activeProfile: { ...p.activeProfile, duplexMode } };
+  });
+  return changed ? next : printers;
+}
+
+function syncDuplexOnLayoutAndPrinters(
+  layout: LayoutSettings,
+  printers: PrinterInfo[],
+  duplexMode: DuplexMode
+): { layout: LayoutSettings; printers: PrinterInfo[] } {
+  const nextBooklet =
+    layout.booklet && (duplexMode === 'long-edge' || duplexMode === 'short-edge') && layout.booklet.duplexMode !== duplexMode
+      ? { ...layout.booklet, duplexMode }
+      : layout.booklet;
+  const nextLayout: LayoutSettings =
+    layout.duplexMode === duplexMode && nextBooklet === layout.booklet
+      ? layout
+      : { ...layout, duplexMode, ...(nextBooklet !== layout.booklet ? { booklet: nextBooklet } : {}) };
+  return {
+    layout: nextLayout,
+    printers: syncPrintersDuplex(printers, duplexMode),
+  };
+}
+
+function persistDuplexAcrossPrinters(
+  printers: PrinterInfo[],
+  duplexMode: DuplexMode,
+  excludePrinterName?: string
+): void {
+  for (const p of printers) {
+    if (excludePrinterName && p.name === excludePrinterName) continue;
+    void ipcBridge.updatePrinterProfile(p.name, { ...p.activeProfile, duplexMode }).catch(() => {});
+  }
+}
 
 export const DEFAULT_LAYOUT: LayoutSettings = {
   paperSize: 'A4',
@@ -774,6 +815,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const redoPeek = historyManager.peekRedo();
       set({
         ...snap.before,
+        printers: syncPrintersDuplex(get().printers, snap.before.layout.duplexMode),
         selectedOverlayId: snap.before.overlays.some(item => item.id === get().selectedOverlayId) ? get().selectedOverlayId : null,
         canUndo: historyManager.canUndo(),
         canRedo: historyManager.canRedo(),
@@ -798,6 +840,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const redoPeek = historyManager.peekRedo();
       set({
         ...snap.after,
+        printers: syncPrintersDuplex(get().printers, snap.after.layout.duplexMode),
         selectedOverlayId: snap.after.overlays.some(item => item.id === get().selectedOverlayId) ? get().selectedOverlayId : null,
         canUndo: historyManager.canUndo(),
         canRedo: historyManager.canRedo(),
@@ -1389,6 +1432,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     updateLayout: (patch, recordUndo = true) => {
       const before = captureSnapshot(get());
+      let duplexToPersist: DuplexMode | undefined;
       set((state) => {
         // While booklet imposition is active, editing its controls must not send the preview
         // back to the first sheet. Keep the operator on the current sheet; the preview clamps
@@ -1399,11 +1443,43 @@ export const useAppStore = create<AppState>((set, get) => {
         const nextPatch = patch.marginsMm
           ? { ...patch, marginsMm: clampMarginsToMin(patch.marginsMm, minMargins) }
           : patch;
+        const mergedLayout: LayoutSettings = {
+          ...state.layout,
+          ...nextPatch,
+          ...(nextPatch.marginsMm && !nextPatch.marginMode ? { marginMode: 'custom' as const } : {}),
+        };
+        const bookletDuplexChanged =
+          patch.booklet?.duplexMode !== undefined &&
+          patch.booklet.duplexMode !== state.layout.booklet?.duplexMode;
+        const bookletJustEnabledFromSimplex =
+          patch.booklet?.enabled === true &&
+          !state.layout.booklet?.enabled &&
+          state.layout.duplexMode === 'none';
+        const unifiedDuplex: DuplexMode | undefined =
+          patch.duplexMode !== undefined
+            ? patch.duplexMode
+            : bookletDuplexChanged
+              ? patch.booklet!.duplexMode
+              : bookletJustEnabledFromSimplex
+                ? (mergedLayout.booklet?.duplexMode ?? 'short-edge')
+                : undefined;
+
+        const synced = unifiedDuplex !== undefined
+          ? syncDuplexOnLayoutAndPrinters(mergedLayout, state.printers, unifiedDuplex)
+          : { layout: mergedLayout, printers: state.printers };
+
+        if (unifiedDuplex !== undefined && unifiedDuplex !== state.layout.duplexMode) {
+          duplexToPersist = unifiedDuplex;
+        }
         return {
-          layout: { ...state.layout, ...nextPatch, ...(nextPatch.marginsMm && !nextPatch.marginMode ? {marginMode: 'custom' as const} : {}) },
+          layout: synced.layout,
+          ...(synced.printers !== state.printers ? { printers: synced.printers } : {}),
           ...(preserveBookletPreview ? {} : { activeSheetIndex: 0 }),
         };
       });
+      if (duplexToPersist !== undefined) {
+        persistDuplexAcrossPrinters(get().printers, duplexToPersist);
+      }
       if (recordUndo) {
         pushUndo(
           'تغییر چیدمان صفحه (Layout)',
@@ -1895,12 +1971,16 @@ export const useAppStore = create<AppState>((set, get) => {
       const before = captureSnapshot(get());
       // Every section is merged over its own default, so a profile saved before the app grew a new
       // option leaves that option at the default instead of at `undefined`.
-      set(() => ({
-        layout: { ...DEFAULT_LAYOUT, ...preset.layout },
-        effects: { ...DEFAULT_EFFECTS, ...preset.effects },
-        watermark: { ...getDefaultWatermarkSettings(), ...preset.watermark },
-        pageNumbering: { ...getDefaultPageNumberSettings(), ...preset.pageNumbering },
-      }));
+      set((state) => {
+        const nextLayout = { ...DEFAULT_LAYOUT, ...preset.layout };
+        return {
+          layout: nextLayout,
+          printers: syncPrintersDuplex(state.printers, nextLayout.duplexMode),
+          effects: { ...DEFAULT_EFFECTS, ...preset.effects },
+          watermark: { ...getDefaultWatermarkSettings(), ...preset.watermark },
+          pageNumbering: { ...getDefaultPageNumberSettings(), ...preset.pageNumbering },
+        };
+      });
       pushUndo('اعمال پروفایل شیت', 'Apply sheet profile', before, captureSnapshot(get()));
       get().addToast({
         type: 'info',
@@ -1925,13 +2005,14 @@ export const useAppStore = create<AppState>((set, get) => {
     resetAllSettings: () => {
       const before = captureSnapshot(get());
       const lang = get().settings.language;
-      set({
+      set((state) => ({
         layout: { ...DEFAULT_LAYOUT },
+        printers: syncPrintersDuplex(state.printers, DEFAULT_LAYOUT.duplexMode),
         effects: { ...DEFAULT_EFFECTS },
         watermark: getDefaultWatermarkSettings(),
         pageNumbering: getDefaultPageNumberSettings(),
         settings: { ...DEFAULT_SETTINGS, language: lang },
-      });
+      }));
       pushUndo('بازگردانی تمام تنظیمات به پیش‌فرض', 'Reset all settings to defaults', before, captureSnapshot(get()));
       void ipcBridge.saveSettings(get().settings);
       syncCrispPreview();
@@ -2041,17 +2122,21 @@ export const useAppStore = create<AppState>((set, get) => {
           throw new Error('INVALID_PSP');
         }
         const previousMarginKey = marginKey(get());
-        set({
-          layout: { ...parsed.layout, marginMode: parsed.layout.marginMode ?? 'custom' },
-          effects: parsed.effects ?? DEFAULT_EFFECTS,
-          watermark: parsed.watermark ?? getDefaultWatermarkSettings(),
-          pageNumbering: parsed.pageNumbering ?? getDefaultPageNumberSettings(),
-          overlays: Array.isArray(parsed.overlays) ? parsed.overlays : [],
-          selectedOverlayId: null, textEdit: null, activePageId: null,
-          documents: parsed.documents as SourceDocument[],
-          pages: parsed.pages,
-          bookmarks: parsed.bookmarks ?? [],
-          activeSheetIndex: 0,
+        set((state) => {
+          const loadedLayout = { ...parsed.layout, marginMode: parsed.layout.marginMode ?? 'custom' };
+          return {
+            layout: loadedLayout,
+            printers: syncPrintersDuplex(state.printers, loadedLayout.duplexMode),
+            effects: parsed.effects ?? DEFAULT_EFFECTS,
+            watermark: parsed.watermark ?? getDefaultWatermarkSettings(),
+            pageNumbering: parsed.pageNumbering ?? getDefaultPageNumberSettings(),
+            overlays: Array.isArray(parsed.overlays) ? parsed.overlays : [],
+            selectedOverlayId: null, textEdit: null, activePageId: null,
+            documents: parsed.documents as SourceDocument[],
+            pages: parsed.pages,
+            bookmarks: parsed.bookmarks ?? [],
+            activeSheetIndex: 0,
+          };
         });
         if (get().layout.marginMode === 'printer' && marginKey(get()) === previousMarginKey) refreshPrinterMargins();
         get().addToast({
@@ -2092,13 +2177,12 @@ export const useAppStore = create<AppState>((set, get) => {
       const wMm = profile.paperWidthMm ?? opt?.widthMm ?? stdDims?.widthMm;
       const hMm = profile.paperHeightMm ?? opt?.heightMm ?? stdDims?.heightMm;
 
-      const nextLayout: LayoutSettings = {
+      const nextDuplex: DuplexMode = profile.duplexMode ?? get().layout.duplexMode;
+      const baseLayout: LayoutSettings = {
         ...get().layout,
         paperSize,
         orientation: profile.orientation ?? get().layout.orientation,
-        duplexMode: printer.capabilities.supportsDuplex
-          ? (profile.duplexMode ?? get().layout.duplexMode)
-          : 'none',
+        duplexMode: nextDuplex,
         ...(wMm && hMm
           ? {
               customWidthMm: Math.min(wMm, hMm),
@@ -2106,7 +2190,8 @@ export const useAppStore = create<AppState>((set, get) => {
             }
           : {}),
       };
-      set({ selectedPrinterName: printerName, layout: nextLayout });
+      const synced = syncDuplexOnLayoutAndPrinters(baseLayout, get().printers, nextDuplex);
+      set({ selectedPrinterName: printerName, layout: synced.layout, printers: synced.printers });
       if (get().layout.marginMode === 'printer' && marginKey(get()) === prevKey) {
         refreshPrinterMargins();
       }
@@ -2219,11 +2304,16 @@ export const useAppStore = create<AppState>((set, get) => {
       };
 
       // Optimistically apply to printers and workspace sheet dimensions
+      const hasDuplexPatch = profileOrPatch.duplexMode !== undefined;
       set((s) => {
-        const nextPrinters = s.printers.map((p) =>
-          p.name === printerName ? { ...p, activeProfile: nextProfile } : p
+        const updatedPrinters = s.printers.map((p) =>
+          p.name === printerName
+            ? { ...p, activeProfile: nextProfile }
+            : hasDuplexPatch
+              ? { ...p, activeProfile: { ...p.activeProfile, duplexMode: nextProfile.duplexMode } }
+              : p
         );
-        const nextActivePrinter = nextPrinters.find((p) => p.name === printerName);
+        const nextActivePrinter = updatedPrinters.find((p) => p.name === printerName);
         const minMargins =
           s.selectedPrinterName === printerName
             ? resolvePrinterMinMargins(s.printerMargins, nextActivePrinter)
@@ -2234,27 +2324,44 @@ export const useAppStore = create<AppState>((set, get) => {
               ? { ...minMargins }
               : clampMarginsToMin(s.layout.marginsMm, minMargins)
             : s.layout.marginsMm;
-        return {
-          printers: nextPrinters,
-          ...(s.selectedPrinterName === printerName
+        const nextBooklet =
+          hasDuplexPatch &&
+          s.layout.booklet &&
+          (nextProfile.duplexMode === 'long-edge' || nextProfile.duplexMode === 'short-edge')
+            ? { ...s.layout.booklet, duplexMode: nextProfile.duplexMode }
+            : s.layout.booklet;
+        const nextLayout: LayoutSettings =
+          s.selectedPrinterName === printerName
             ? {
-                layout: {
-                  ...s.layout,
-                  paperSize: nextProfile.paperSize,
-                  orientation: nextProfile.orientation,
-                  duplexMode: nextProfile.duplexMode,
-                  marginsMm: nextMarginsMm,
-                  ...(nextProfile.paperWidthMm && nextProfile.paperHeightMm
-                    ? {
-                        customWidthMm: Math.min(nextProfile.paperWidthMm, nextProfile.paperHeightMm),
-                        customHeightMm: Math.max(nextProfile.paperWidthMm, nextProfile.paperHeightMm),
-                      }
-                    : {}),
-                },
+                ...s.layout,
+                paperSize: nextProfile.paperSize,
+                orientation: nextProfile.orientation,
+                duplexMode: nextProfile.duplexMode,
+                ...(nextBooklet !== s.layout.booklet ? { booklet: nextBooklet } : {}),
+                marginsMm: nextMarginsMm,
+                ...(nextProfile.paperWidthMm && nextProfile.paperHeightMm
+                  ? {
+                      customWidthMm: Math.min(nextProfile.paperWidthMm, nextProfile.paperHeightMm),
+                      customHeightMm: Math.max(nextProfile.paperWidthMm, nextProfile.paperHeightMm),
+                    }
+                  : {}),
               }
-            : {}),
+            : hasDuplexPatch
+              ? {
+                  ...s.layout,
+                  duplexMode: nextProfile.duplexMode,
+                  ...(nextBooklet !== s.layout.booklet ? { booklet: nextBooklet } : {}),
+                }
+              : s.layout;
+        return {
+          printers: updatedPrinters,
+          ...(nextLayout !== s.layout ? { layout: nextLayout } : {}),
         };
       });
+
+      if (hasDuplexPatch) {
+        persistDuplexAcrossPrinters(get().printers, nextProfile.duplexMode, printerName);
+      }
 
       try {
         const updated = sanitizePrinterInfo(
@@ -2265,7 +2372,11 @@ export const useAppStore = create<AppState>((set, get) => {
             p.name === printerName
               ? sanitizePrinterInfo({
                   ...updated,
-                  activeProfile: { ...updated.activeProfile, ...nextProfile },
+                  activeProfile: {
+                    ...updated.activeProfile,
+                    ...nextProfile,
+                    duplexMode: s.layout.duplexMode,
+                  },
                 })
               : p
           ),
@@ -2606,7 +2717,9 @@ export const useAppStore = create<AppState>((set, get) => {
         state.printers[0];
       const printerName = targetPrinter?.name ?? '';
       const profile = targetPrinter?.activeProfile;
-      const effectiveDuplex = profile?.duplexMode ?? state.layout.duplexMode;
+      const effectiveDuplex = state.layout.booklet?.enabled
+        ? state.layout.booklet.duplexMode
+        : (profile?.duplexMode ?? state.layout.duplexMode);
 
       const request: PrintJobRequest = {
         printerName,
