@@ -57,6 +57,7 @@ import {
   renderPdfToSheetPngs,
   triggerBlobDownload,
 } from '../engine/pdfService';
+import { clampMarginsToMin, resolvePrinterMinMargins } from '../engine/sheetInteraction';
 import {
   SHEET_DEFAULT_PRESET_ID,
   SHEET_DEFAULT_PRESET_SHORTCUT,
@@ -1393,8 +1394,13 @@ export const useAppStore = create<AppState>((set, get) => {
         // back to the first sheet. Keep the operator on the current sheet; the preview clamps
         // the index if a changed signature size reduces the total sheet count.
         const preserveBookletPreview = !!(state.layout.booklet?.enabled || patch.booklet?.enabled);
+        const activePrinter = state.printers.find((p) => p.name === state.selectedPrinterName);
+        const minMargins = resolvePrinterMinMargins(state.printerMargins, activePrinter);
+        const nextPatch = patch.marginsMm
+          ? { ...patch, marginsMm: clampMarginsToMin(patch.marginsMm, minMargins) }
+          : patch;
         return {
-          layout: { ...state.layout, ...patch, ...(patch.marginsMm && !patch.marginMode ? {marginMode: 'custom' as const} : {}) },
+          layout: { ...state.layout, ...nextPatch, ...(nextPatch.marginsMm && !nextPatch.marginMode ? {marginMode: 'custom' as const} : {}) },
           ...(preserveBookletPreview ? {} : { activeSheetIndex: 0 }),
         };
       });
@@ -1456,23 +1462,40 @@ export const useAppStore = create<AppState>((set, get) => {
 
     commitLayoutGuides: (patch) => {
       const before = captureSnapshot(get());
-      set(state => ({ layout: { ...state.layout, ...patch,
-        ...(patch.marginsMm && Object.keys(patch.marginsMm).some(key => patch.marginsMm![key as keyof typeof patch.marginsMm] !== state.layout.marginsMm[key as keyof typeof state.layout.marginsMm]) ? {marginMode:'custom' as const} : {}) } }));
+      set(state => {
+        const activePrinter = state.printers.find((p) => p.name === state.selectedPrinterName);
+        const minMargins = resolvePrinterMinMargins(state.printerMargins, activePrinter);
+        const nextPatch = patch.marginsMm
+          ? { ...patch, marginsMm: clampMarginsToMin(patch.marginsMm, minMargins) }
+          : patch;
+        return {
+          layout: { ...state.layout, ...nextPatch,
+            ...(nextPatch.marginsMm && Object.keys(nextPatch.marginsMm).some(key => nextPatch.marginsMm![key as keyof typeof nextPatch.marginsMm] !== state.layout.marginsMm[key as keyof typeof state.layout.marginsMm]) ? {marginMode:'custom' as const} : {}) },
+        };
+      });
       pushUndo('تغییر حاشیه و فاصله‌ها', 'Adjust margins and gutters', before, captureSnapshot(get()));
     },
 
     updateMargins: (patch) => {
       const before = captureSnapshot(get());
-      set((state) => ({
-        layout: {
-          ...state.layout,
-          marginMode: 'custom',
-          marginsMm: {
+      set((state) => {
+        const activePrinter = state.printers.find((p) => p.name === state.selectedPrinterName);
+        const minMargins = resolvePrinterMinMargins(state.printerMargins, activePrinter);
+        const nextMargins = clampMarginsToMin(
+          {
             ...state.layout.marginsMm,
             ...patch,
           },
-        },
-      }));
+          minMargins
+        );
+        return {
+          layout: {
+            ...state.layout,
+            marginMode: 'custom',
+            marginsMm: nextMargins,
+          },
+        };
+      });
       pushUndo('تغییر حاشیه‌ها', 'Update margins', before, captureSnapshot(get()));
     },
 
@@ -1482,7 +1505,8 @@ export const useAppStore = create<AppState>((set, get) => {
       const state = get();
       if (state.printerMargins.status !== 'available') return;
       const before = captureSnapshot(state);
-      const pm = state.printerMargins.marginsMm;
+      const activePrinter = state.printers.find((p) => p.name === state.selectedPrinterName);
+      const pm = resolvePrinterMinMargins(state.printerMargins, activePrinter) ?? state.printerMargins.marginsMm;
       set({
         layout: {
           ...state.layout,
@@ -2195,27 +2219,42 @@ export const useAppStore = create<AppState>((set, get) => {
       };
 
       // Optimistically apply to printers and workspace sheet dimensions
-      set((s) => ({
-        printers: s.printers.map((p) =>
+      set((s) => {
+        const nextPrinters = s.printers.map((p) =>
           p.name === printerName ? { ...p, activeProfile: nextProfile } : p
-        ),
-        ...(s.selectedPrinterName === printerName
-          ? {
-              layout: {
-                ...s.layout,
-                paperSize: nextProfile.paperSize,
-                orientation: nextProfile.orientation,
-                duplexMode: nextProfile.duplexMode,
-                ...(nextProfile.paperWidthMm && nextProfile.paperHeightMm
-                  ? {
-                      customWidthMm: Math.min(nextProfile.paperWidthMm, nextProfile.paperHeightMm),
-                      customHeightMm: Math.max(nextProfile.paperWidthMm, nextProfile.paperHeightMm),
-                    }
-                  : {}),
-              },
-            }
-          : {}),
-      }));
+        );
+        const nextActivePrinter = nextPrinters.find((p) => p.name === printerName);
+        const minMargins =
+          s.selectedPrinterName === printerName
+            ? resolvePrinterMinMargins(s.printerMargins, nextActivePrinter)
+            : undefined;
+        const nextMarginsMm =
+          minMargins
+            ? s.layout.marginMode === 'printer'
+              ? { ...minMargins }
+              : clampMarginsToMin(s.layout.marginsMm, minMargins)
+            : s.layout.marginsMm;
+        return {
+          printers: nextPrinters,
+          ...(s.selectedPrinterName === printerName
+            ? {
+                layout: {
+                  ...s.layout,
+                  paperSize: nextProfile.paperSize,
+                  orientation: nextProfile.orientation,
+                  duplexMode: nextProfile.duplexMode,
+                  marginsMm: nextMarginsMm,
+                  ...(nextProfile.paperWidthMm && nextProfile.paperHeightMm
+                    ? {
+                        customWidthMm: Math.min(nextProfile.paperWidthMm, nextProfile.paperHeightMm),
+                        customHeightMm: Math.max(nextProfile.paperWidthMm, nextProfile.paperHeightMm),
+                      }
+                    : {}),
+                },
+              }
+            : {}),
+        };
+      });
 
       try {
         const updated = sanitizePrinterInfo(
@@ -2871,8 +2910,15 @@ function refreshPrinterMargins() {
       const current = useAppStore.getState();
       if (sequence !== printerMarginSequence || marginKey(current) !== key) return;
       const margins = result.status === 'available' ? result.marginsMm : null;
+      const maxHardwareMargin = margins ? Math.max(margins.top, margins.right, margins.bottom, margins.left) : 0;
+      const plausibleHardware =
+        result.status !== 'available' ||
+        result.source !== 'hardware' ||
+        maxHardwareMargin === 0 ||
+        maxHardwareMargin >= 0.5;
       const valid =
         margins &&
+        plausibleHardware &&
         [margins.top, margins.right, margins.bottom, margins.left].every(
           (v) => Number.isFinite(v) && v >= 0
         ) &&
@@ -2880,12 +2926,21 @@ function refreshPrinterMargins() {
         margins.top + margins.bottom < request.heightMm;
       const safe: PrinterMarginResult =
         result.status === 'available' && !valid
-          ? { status: 'unavailable', reason: 'Invalid printer margins' }
+          ? { status: 'unavailable', reason: plausibleHardware ? 'Invalid printer margins' : 'Driver reported implausibly small non-zero hardware margins' }
           : result;
+      const activePrinter = current.printers.find((p) => p.name === current.selectedPrinterName);
+      const minMargins = resolvePrinterMinMargins(safe, activePrinter);
       useAppStore.setState({
         printerMargins: safe,
-        ...(safe.status === 'available' && current.layout.marginMode === 'printer'
-          ? { layout: { ...current.layout, marginsMm: { ...safe.marginsMm } } }
+        ...(safe.status === 'available'
+          ? {
+              layout: {
+                ...current.layout,
+                marginsMm: current.layout.marginMode === 'printer'
+                  ? { ...safe.marginsMm }
+                  : clampMarginsToMin(current.layout.marginsMm, minMargins),
+              },
+            }
           : {}),
       });
     })

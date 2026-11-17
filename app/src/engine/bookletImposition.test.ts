@@ -71,21 +71,19 @@ describe('booklet imposition', () => {
   });
 
 
-  it('applies each booklet margin side independently and sets middle gap strictly from Spine and fold', () => {
-    const pageWithOversizedTransform = pages(4).map((page, index) => index === 0
-      ? { ...page, overrides: { transform: { x: 0.35, y: -0.2, scaleX: 2, scaleY: 2 } } }
-      : page);
-    const baseline = computeImpositionSheets(pageWithOversizedTransform, {
+  it('applies each booklet margin side independently, sets middle gap strictly from Spine and fold, and honors free cell transforms', () => {
+    const basePages = pages(4);
+    const baseline = computeImpositionSheets(basePages, {
       ...baseLayout,
       marginsMm: { top: 10, right: 10, bottom: 10, left: 10 },
       booklet: { ...baseLayout.booklet!, spineWidthMm: 4 },
     });
-    const tallTopMargin = computeImpositionSheets(pageWithOversizedTransform, {
+    const tallTopMargin = computeImpositionSheets(basePages, {
       ...baseLayout,
       marginsMm: { top: 30, right: 10, bottom: 10, left: 10 },
       booklet: { ...baseLayout.booklet!, spineWidthMm: 4 },
     });
-    const wideSpineOnly = computeImpositionSheets(pageWithOversizedTransform, {
+    const wideSpineOnly = computeImpositionSheets(basePages, {
       ...baseLayout,
       marginsMm: { top: 30, right: 10, bottom: 10, left: 10 },
       booklet: { ...baseLayout.booklet!, spineWidthMm: 16 },
@@ -115,13 +113,27 @@ describe('booklet imposition', () => {
     expect(topChangedGap).toBeCloseTo(4);
     expect(wideSpineGap).toBeCloseTo(16);
 
-    // Stored page overrides must not let content spill past the margin/spine bounds.
-    expect(topCell0.transform?.x).toBe(0);
-    expect(topCell0.transform?.y).toBe(0);
-    expect(topCell0.transform?.scaleX).toBe(1);
-    expect(topCell0.transform?.scaleY).toBe(1);
+    // Untransformed booklet pages stay bounded by margins and spine.
     expect(topCell0.allowOverflow).toBe(false);
     expect(spineCell0.contentWidthMm).toBeLessThanOrEqual(spineCell0.cellWidthMm);
+
+    // Custom transforms applied in booklet mode are honored so images can be freely moved and resized.
+    const movedKey = baseCell0.occurrenceKey!;
+    const transformed = computeImpositionSheets(basePages, {
+      ...baseLayout,
+      cellOverrides: {
+        [movedKey]: {
+          pageId: baseCell0.page!.id,
+          transform: { x: 0.35, y: -0.2, scaleX: 1.5, scaleY: 1.5 },
+          allowOverflow: true,
+        },
+      },
+    });
+    const movedCell = transformed[0].cells[0];
+    expect(movedCell.transform).toEqual({ x: 0.35, y: -0.2, scaleX: 1.5, scaleY: 1.5 });
+    expect(movedCell.allowOverflow).toBe(true);
+    expect(movedCell.contentWidthMm).toBeGreaterThan(baseCell0.contentWidthMm);
+    expect(movedCell.contentXMm).not.toBeCloseTo(baseCell0.contentXMm);
   });
 
   it('pads incomplete signatures with blank pages and splits fixed-size signatures', () => {

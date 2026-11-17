@@ -33,6 +33,7 @@ import { MatrixSizeFields } from './MatrixSizeFields';
 import { SettingsPresetMenu } from './SettingsPresets';
 import { ShapePicker } from './ShapeControlPanel';
 import { useAppStore, type RibbonTabId } from '../store/useAppStore';
+import { resolvePrinterMinMargins } from '../engine/sheetInteraction';
 import { getSheetDimensionsMm } from '../engine/layoutEngine';
 import { t } from '../i18n/translations';
 import {
@@ -414,15 +415,19 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
                   {lang === 'fa' ? 'حاشیه، فاصله (Gutter) و مقیاس (D3)' : 'Margins, Gutter & Scale'}
                 </span>
                 <div className="flex items-center gap-1.5">
-                  {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
-                    <label key={side} className="flex items-center gap-1 text-slate-300" title={lang === 'fa' ? `حاشیه ${ { top: 'بالا', right: 'راست', bottom: 'پایین', left: 'چپ' }[side] } (mm)` : `${side} margin (mm)`}>
-                      <span>{lang === 'fa' ? { top: 'بالا', right: 'راست', bottom: 'پایین', left: 'چپ' }[side] : side}</span>
-                      <input type="number" min={0} max={200} step={layout.booklet?.enabled ? 0.5 : 1}
-                        value={layout.marginsMm[side]}
-                        onChange={(e) => updateMargins({ [side]: Math.max(0, Math.min(200, Number(e.target.value) || 0)) })}
-                        className="w-12 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-center text-xs text-white" />
-                    </label>
-                  ))}
+                  {(['top', 'right', 'bottom', 'left'] as const).map((side) => {
+                    const activePrinterObj = printers.find((p) => p.name === selectedPrinterName);
+                    const minSide = Math.max(0, resolvePrinterMinMargins(printerMargins, activePrinterObj)?.[side] ?? 0);
+                    return (
+                      <label key={side} className="flex items-center gap-1 text-slate-300" title={lang === 'fa' ? `حاشیه ${ { top: 'بالا', right: 'راست', bottom: 'پایین', left: 'چپ' }[side] } (mm)${minSide > 0 ? ` — حداقل پرینتر: ${minSide} mm` : ''}` : `${side} margin (mm)${minSide > 0 ? ` (min ${minSide} mm)` : ''}`}>
+                        <span>{lang === 'fa' ? { top: 'بالا', right: 'راست', bottom: 'پایین', left: 'چپ' }[side] : side}</span>
+                        <input type="number" min={minSide} max={Math.max(minSide, 200)} step={layout.booklet?.enabled ? 0.5 : 1}
+                          value={Math.max(minSide, layout.marginsMm[side])}
+                          onChange={(e) => updateMargins({ [side]: Math.max(minSide, Math.min(200, Number(e.target.value) || 0)) })}
+                          className="w-12 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-center text-xs text-white" />
+                      </label>
+                    );
+                  })}
                   {(['horizontalGutterMm', 'verticalGutterMm'] as const).map((field) => (
                     <label key={field} className="flex items-center gap-1 text-slate-300">
                       <span>{field === 'horizontalGutterMm' ? (lang === 'fa' ? 'افقی' : 'Gap X') : (lang === 'fa' ? 'عمودی' : 'Gap Y')}</span>
@@ -767,22 +772,26 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
               </div>
               <div className="flex items-center gap-2 text-slate-300">
                 <span>{lang === 'fa' ? 'حاشیه‌های چهارگانه شیت (mm):' : 'Sheet Margins (mm):'}</span>
-                {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
-                  <label key={side} className="flex items-center gap-1">
-                    <span className="uppercase text-[10px] text-slate-400">{side}:</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={60}
-                      step={layout.booklet?.enabled ? 0.5 : 1}
-                      value={layout.marginsMm[side]}
-                      onChange={(e) =>
-                        updateMargins({ [side]: Math.max(0, Number(e.target.value) || 0) })
-                      }
-                      className="w-12 rounded border border-slate-700 bg-slate-800 px-1.5 py-1 text-center text-white"
-                    />
-                  </label>
-                ))}
+                {(['top', 'right', 'bottom', 'left'] as const).map((side) => {
+                  const activePrinterObj = printers.find((p) => p.name === selectedPrinterName);
+                  const minSide = Math.max(0, resolvePrinterMinMargins(printerMargins, activePrinterObj)?.[side] ?? 0);
+                  return (
+                    <label key={side} className="flex items-center gap-1" title={minSide > 0 ? (lang === 'fa' ? `حداقل پرینتر: ${minSide} mm` : `Printer min: ${minSide} mm`) : undefined}>
+                      <span className="uppercase text-[10px] text-slate-400">{side}:</span>
+                      <input
+                        type="number"
+                        min={minSide}
+                        max={Math.max(minSide, 60)}
+                        step={layout.booklet?.enabled ? 0.5 : 1}
+                        value={Math.max(minSide, layout.marginsMm[side])}
+                        onChange={(e) =>
+                          updateMargins({ [side]: Math.max(minSide, Number(e.target.value) || 0) })
+                        }
+                        className="w-12 rounded border border-slate-700 bg-slate-800 px-1.5 py-1 text-center text-white"
+                      />
+                    </label>
+                  );
+                })}
               </div>
             </div>
           )}

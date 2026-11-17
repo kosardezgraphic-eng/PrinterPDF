@@ -1,12 +1,44 @@
-import type { LayoutSettings } from '@shared/models';
+import type { LayoutSettings, MarginsMm, PrinterInfo, PrinterMarginResult } from '@shared/models';
 
 export type Guide = { type: 'margin'; side: 'left' | 'right' | 'top' | 'bottom' }
   | { type: 'gutter'; axis: 'horizontal' | 'vertical'; index: number };
 export interface Point { x: number; y: number }
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(Math.max(min, max), value));
 
+export function resolvePrinterMinMargins(
+  printerMargins: PrinterMarginResult | { status: 'loading' },
+  activePrinter?: Pick<PrinterInfo, 'activeProfile' | 'capabilities'> | null,
+): MarginsMm | undefined {
+  if (printerMargins.status !== 'available') return undefined;
+  if (activePrinter?.activeProfile?.borderless && activePrinter.capabilities?.supportsBorderless) {
+    return { top: 0, right: 0, bottom: 0, left: 0 };
+  }
+  return {
+    top: Math.max(0, printerMargins.marginsMm.top),
+    right: Math.max(0, printerMargins.marginsMm.right),
+    bottom: Math.max(0, printerMargins.marginsMm.bottom),
+    left: Math.max(0, printerMargins.marginsMm.left),
+  };
+}
+
+export function clampMarginsToMin(margins: MarginsMm, minMargins?: Partial<MarginsMm>): MarginsMm {
+  return {
+    top: Math.max(Math.max(0, minMargins?.top ?? 0), Math.max(0, margins.top)),
+    right: Math.max(Math.max(0, minMargins?.right ?? 0), Math.max(0, margins.right)),
+    bottom: Math.max(Math.max(0, minMargins?.bottom ?? 0), Math.max(0, margins.bottom)),
+    left: Math.max(Math.max(0, minMargins?.left ?? 0), Math.max(0, margins.left)),
+  };
+}
+
 /** Use sheet coordinates in mm; gutter handles follow the trailing edge of each gap. */
-export function moveLayoutGuide(layout: LayoutSettings, sheet: { widthMm: number; heightMm: number }, guide: Guide, dx: number, dy: number): LayoutSettings {
+export function moveLayoutGuide(
+  layout: LayoutSettings,
+  sheet: { widthMm: number; heightMm: number },
+  guide: Guide,
+  dx: number,
+  dy: number,
+  minMargins?: Partial<MarginsMm>,
+): LayoutSettings {
   const rows = Math.max(1, Math.min(10, Math.floor(layout.rows)));
   const cols = Math.max(1, Math.min(10, Math.floor(layout.cols)));
   const margins = layout.marginsMm;
@@ -18,8 +50,9 @@ export function moveLayoutGuide(layout: LayoutSettings, sheet: { widthMm: number
     const length = horizontal ? sheet.widthMm : sheet.heightMm;
     const delta = horizontal ? dx : dy;
     const sign = guide.side === 'right' || guide.side === 'bottom' ? -1 : 1;
+    const min = Math.max(0, minMargins?.[guide.side] ?? 0);
     const max = length - margins[opposite[guide.side]] - Math.max(10, 5 * count + Math.max(0, gutter) * (count - 1));
-    return { ...layout, marginsMm: { ...margins, [guide.side]: clamp(margins[guide.side] + sign * delta, 0, max) } };
+    return { ...layout, marginsMm: { ...margins, [guide.side]: clamp(margins[guide.side] + sign * delta, min, max) } };
   }
   const horizontal = guide.axis === 'horizontal';
   const count = horizontal ? cols : rows;

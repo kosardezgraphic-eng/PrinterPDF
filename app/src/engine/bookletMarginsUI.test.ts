@@ -189,4 +189,81 @@ describe('booklet margin behavior parity with spine gap', () => {
     expect(useAppStore.getState().layout.booklet?.spineWidthMm).toBe(14);
     expect(useAppStore.getState().layout.marginsMm).toEqual({ top: 10, right: 10, bottom: 10, left: 18 });
   });
+
+  it('allows freely moving and resizing a booklet sheet image with pointer drag and resize handles', () => {
+    const firstPageContent = () => container.querySelectorAll<HTMLElement>('[data-page-content]')[0];
+    const startLeft = parseFloat(firstPageContent().style.left);
+    const startTop = parseFloat(firstPageContent().style.top);
+    const startWidth = parseFloat(firstPageContent().style.width);
+    const startHeight = parseFloat(firstPageContent().style.height);
+
+    // Click the image to select it and reveal resize handles
+    act(() => {
+      firstPageContent().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    const seHandle = container.querySelector('[aria-label="move se"]')!;
+    expect(seHandle).toBeTruthy();
+
+    // Drag the image freely across the sheet
+    dispatchPointer(firstPageContent(), 'pointerdown', 100, 100);
+    dispatchPointer(firstPageContent(), 'pointermove', 145, 130);
+    dispatchPointer(firstPageContent(), 'pointerup', 145, 130);
+
+    const movedLeft = parseFloat(firstPageContent().style.left);
+    const movedTop = parseFloat(firstPageContent().style.top);
+    expect(movedLeft).toBeCloseTo(startLeft + 45);
+    expect(movedTop).toBeCloseTo(startTop + 30);
+
+    // Resize the image freely via its bottom-right handle
+    const handle = container.querySelector('[aria-label="move se"]')!;
+    dispatchPointer(handle, 'pointerdown', 200, 200);
+    dispatchPointer(handle, 'pointermove', 250, 240);
+    dispatchPointer(handle, 'pointerup', 250, 240);
+
+    expect(parseFloat(firstPageContent().style.width)).toBeGreaterThan(startWidth);
+    expect(parseFloat(firstPageContent().style.height)).toBeGreaterThan(startHeight);
+  });
+
+  it('prevents booklet margins from shrinking outward past hardware printer limits while allowing inward adjustment', () => {
+    act(() => {
+      useAppStore.setState({
+        printerMargins: {
+          status: 'available',
+          source: 'hardware',
+          marginsMm: { top: 6, right: 5, bottom: 7, left: 4.5 },
+        },
+      });
+    });
+
+    const boundary = container.querySelector<HTMLElement>('[data-printer-min-margins]')!;
+    expect(boundary).toBeTruthy();
+    expect(parseFloat(boundary.style.top)).toBeCloseTo(6 * PREVIEW_PX_PER_MM);
+    expect(parseFloat(boundary.style.left)).toBeCloseTo(4.5 * PREVIEW_PX_PER_MM);
+
+    // Dragging top border guide far upward stops at hardware min (6 mm), never 0 mm
+    const topEdge = container.querySelector<HTMLElement>('[data-booklet-margin-guide="top"]')!;
+    dispatchPointer(topEdge, 'pointerdown', 100, 100);
+    dispatchPointer(topEdge, 'pointermove', 100, 100 - 40 * PREVIEW_PX_PER_MM);
+    dispatchPointer(topEdge, 'pointerup', 100, 100 - 40 * PREVIEW_PX_PER_MM);
+    expect(useAppStore.getState().layout.marginsMm.top).toBe(6);
+
+    // BookletControlPanel enforces min={minSide} and clamps smaller manual entries up to minSide
+    const panel = container.querySelector('[data-booklet-control-panel]')!;
+    const topInput = panel.querySelector<HTMLInputElement>('[data-booklet-margin-input="top"]')!;
+    expect(topInput.min).toBe('6');
+    setInputValue(topInput, '1');
+    expect(useAppStore.getState().layout.marginsMm.top).toBe(6);
+
+    // Inward increase works freely
+    setInputValue(topInput, '18');
+    expect(useAppStore.getState().layout.marginsMm.top).toBe(18);
+
+    // Ribbon margin input also enforces hardware min
+    const ribbonLeftInput = Array.from(container.querySelectorAll('label'))
+      .find(el => el.getAttribute('title')?.startsWith('left margin (mm)'))!
+      .querySelector<HTMLInputElement>('input[type="number"]')!;
+    expect(ribbonLeftInput.min).toBe('4.5');
+    setInputValue(ribbonLeftInput, '2');
+    expect(useAppStore.getState().layout.marginsMm.left).toBe(4.5);
+  });
 });

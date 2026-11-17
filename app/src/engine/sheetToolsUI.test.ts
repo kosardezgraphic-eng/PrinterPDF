@@ -149,4 +149,24 @@ describe('sheet tool pointer interactions', () => {
     expect(overlay.querySelector('[role=status]')?.textContent).toContain('30 mm');
     expect(useAppStore.getState().layout).toBe(savedLayout);
   });
+  it('renders fixed hardware printable boundary and prevents dragging margins outward past it', () => {
+    act(() => useAppStore.setState({
+      printerMargins: { status: 'available', source: 'hardware', marginsMm: { top: 6, right: 5, bottom: 7, left: 4 } },
+    }));
+    const hardwareBoundary = container.querySelector<HTMLElement>('[data-printer-min-margins]');
+    expect(hardwareBoundary).not.toBeNull();
+    act(() => (container.querySelector('[data-sheet-canvas-index]') as HTMLElement).click());
+    const overlay = container.querySelector('[data-layout-guides]') as HTMLElement;
+    vi.spyOn(overlay, 'getBoundingClientRect').mockReturnValue(rect);
+    const leftHandle = container.querySelector('[aria-label="Left margin"]')!;
+    pointer(leftHandle, 'pointerdown', 20, 300);
+    pointer(leftHandle, 'pointermove', 0, 300);
+    pointer(leftHandle, 'pointerup', 0, 300);
+    expect(useAppStore.getState().layout.marginsMm.left).toBe(4);
+    // Inward drag still works freely
+    pointer(leftHandle, 'pointerdown', 8, 300);
+    pointer(leftHandle, 'pointermove', 38, 300);
+    pointer(leftHandle, 'pointerup', 38, 300);
+    expect(useAppStore.getState().layout.marginsMm.left).toBe(19);
+  });
 });

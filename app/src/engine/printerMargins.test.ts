@@ -59,4 +59,26 @@ describe('printer imageable margins',()=>{
     expect(await ipcBridge.getPrinterMargins(req)).toMatchObject({status:'unavailable'});
     expect(await ipcBridge.getPrinterMargins({...req,printerName:'HP LaserJet'})).toMatchObject({status:'unavailable'});
   });
+  it('never allows reducing margins outward past hardware printable limits, while allowing inward increases',async()=>{
+    vi.mocked(ipcBridge.getPrinterMargins).mockResolvedValue(hardware(5));
+    useAppStore.setState({layout:{...DEFAULT_LAYOUT,marginMode:'custom',marginsMm:{top:1,right:1,bottom:20,left:2}}});
+    useAppStore.getState().selectPrinter('physical');await tick();
+    expect(useAppStore.getState().layout.marginsMm).toEqual({top:5,right:3,bottom:20,left:6});
+
+    useAppStore.getState().updateMargins({top:1,left:0,bottom:25});
+    expect(useAppStore.getState().layout.marginsMm).toEqual({top:5,right:3,bottom:25,left:6});
+
+    useAppStore.getState().commitLayoutGuides({marginsMm:{top:2,right:1,bottom:3,left:15}});
+    expect(useAppStore.getState().layout.marginsMm).toEqual({top:5,right:3,bottom:5,left:15});
+  });
+  it('rejects implausibly tiny non-zero hardware margins like 0.042mm from buggy PrintSchema drivers',async()=>{
+    vi.mocked(ipcBridge.getPrinterMargins).mockResolvedValue({
+      status:'available',
+      source:'hardware',
+      marginsMm:{top:0.042,right:0.042,bottom:0.042,left:0.042},
+    });
+    useAppStore.getState().selectPrinter('HP LaserJet 527');await tick();
+    expect(useAppStore.getState().printerMargins.status).toBe('unavailable');
+    expect(useAppStore.getState().layout.marginsMm).toEqual({top:10,right:10,bottom:10,left:10});
+  });
 });

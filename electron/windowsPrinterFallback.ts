@@ -659,6 +659,13 @@ export async function queryWindowsPrinterMarginsViaPowerShell(
       Number.isFinite(parsed.bottom) &&
       Number.isFinite(parsed.left)
     ) {
+      const maxSide = Math.max(parsed.top, parsed.right, parsed.bottom, parsed.left);
+      if (maxSide > 0 && maxSide < 0.5) {
+        return {
+          status: 'unavailable',
+          reason: 'Driver reported implausibly small non-zero hardware margins',
+        };
+      }
       return {
         status: 'available',
         source: 'hardware',

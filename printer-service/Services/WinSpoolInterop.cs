@@ -32,6 +32,19 @@ public static class WinSpoolInterop
     public const int DM_DUPLEX = 0x00001000;
     public const int DM_COLLATE = 0x00008000;
 
+    public const int DM_OUT_BUFFER = 2;
+    public const int DM_IN_BUFFER = 8;
+    public const short DMPAPER_USER = 256;
+
+    public const int HORZRES = 8;
+    public const int VERTRES = 10;
+    public const int LOGPIXELSX = 88;
+    public const int LOGPIXELSY = 90;
+    public const int PHYSICALWIDTH = 110;
+    public const int PHYSICALHEIGHT = 111;
+    public const int PHYSICALOFFSETX = 112;
+    public const int PHYSICALOFFSETY = 113;
+
     public const int JOB_CONTROL_PAUSE = 1;
     public const int JOB_CONTROL_RESUME = 2;
     public const int JOB_CONTROL_CANCEL = 3;
@@ -137,6 +150,23 @@ public static class WinSpoolInterop
         ref PRINTER_DEFAULTS pDefault
     );
 
+    [DllImport("winspool.drv", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool OpenPrinter(
+        string pPrinterName,
+        out IntPtr phPrinter,
+        IntPtr pDefault
+    );
+
+    [DllImport("winspool.drv", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern int DocumentProperties(
+        IntPtr hwnd,
+        IntPtr hPrinter,
+        string pDeviceName,
+        IntPtr pDevModeOutput,
+        IntPtr pDevModeInput,
+        int fMode
+    );
+
     [DllImport("winspool.drv", SetLastError = true)]
     public static extern bool ClosePrinter(IntPtr hPrinter);
 
@@ -168,4 +198,18 @@ public static class WinSpoolInterop
         IntPtr pPrinter,
         int Command
     );
+
+    [DllImport("gdi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr CreateDC(
+        string? pwszDriver,
+        string pwszDevice,
+        string? pszPort,
+        IntPtr pdm
+    );
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    public static extern bool DeleteDC(IntPtr hdc);
+
+    [DllImport("gdi32.dll")]
+    public static extern int GetDeviceCaps(IntPtr hdc, int index);
 }

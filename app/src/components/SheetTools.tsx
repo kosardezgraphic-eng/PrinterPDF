@@ -1,31 +1,29 @@
 import { useId, useRef, useState, type PointerEvent } from 'react';
-import type { ComputedSheetSide, LayoutSettings, MeasurementUnit } from '@shared/models';
+import type { ComputedSheetSide, LayoutSettings, MarginsMm, MeasurementUnit } from '@shared/models';
 import { convertMmToUnit } from '../engine/layoutEngine';
-import { measurement, measureEndpoint, moveLayoutGuide, type Guide, type Point } from '../engine/sheetInteraction';
+import { clampMarginsToMin, measurement, measureEndpoint, moveLayoutGuide, type Guide, type Point } from '../engine/sheetInteraction';
 
 interface GuideProps {
   sheet: ComputedSheetSide; layout: LayoutSettings; pxPerMm: number; spaceDown: boolean;
-  language: string; unit: MeasurementUnit; onDraft: (layout: LayoutSettings | null) => void;
+  language: string; unit: MeasurementUnit; minMargins?: MarginsMm; onDraft: (layout: LayoutSettings | null) => void;
   onCommit: (layout: LayoutSettings) => void;
 }
 /** Global, uniform gutters are changed by dragging the trailing edge of a gap. */
-export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit, onDraft, onCommit }: GuideProps) {
+export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit, minMargins, onDraft, onCommit }: GuideProps) {
   const guideId = useId();
   const dragging = useRef<{ pointer: number; x: number; y: number; scaleX: number; scaleY: number; guide: Guide; base: LayoutSettings } | null>(null);
   const rectRef = useRef<HTMLDivElement>(null);
   const toEffectiveLayout = (source: LayoutSettings): LayoutSettings => {
-    if (!source.booklet?.enabled) return source;
+    const clampedMargins = clampMarginsToMin(source.marginsMm, minMargins);
+    if (!source.booklet?.enabled) {
+      return { ...source, marginsMm: clampedMargins };
+    }
     const spine = Math.max(0, source.booklet.spineWidthMm);
     return {
       ...source,
       rows: 1,
       cols: 2,
-      marginsMm: {
-        top: Math.max(0, source.marginsMm.top),
-        right: Math.max(0, source.marginsMm.right),
-        bottom: Math.max(0, source.marginsMm.bottom),
-        left: Math.max(0, source.marginsMm.left),
-      },
+      marginsMm: clampedMargins,
       horizontalGutterMm: spine,
       verticalGutterMm: 0,
     };
@@ -45,7 +43,7 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit
     const baseEffective = toEffectiveLayout(d.base);
     const dxMm = (e.clientX - d.x) * d.scaleX;
     const dyMm = (e.clientY - d.y) * d.scaleY;
-    const moved = moveLayoutGuide(baseEffective, sheet, d.guide, dxMm, dyMm);
+    const moved = moveLayoutGuide(baseEffective, sheet, d.guide, dxMm, dyMm, minMargins);
     if (!d.base.booklet?.enabled) return moved;
     if (d.guide.type === 'margin') {
       const nextSide = Math.max(0, Math.round(moved.marginsMm[d.guide.side] * 10) / 10);

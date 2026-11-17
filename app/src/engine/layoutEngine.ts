@@ -388,14 +388,7 @@ export function computeImpositionSheets(
         : 0;
       const occurrenceKey = cellOccurrenceKey(item.page.id, layout.placementMode, item.row, item.col);
       const override = layout.cellOverrides?.[occurrenceKey];
-      const storedTransform = override?.transform ?? item.page.overrides?.transform ?? IDENTITY_TRANSFORM;
-      // In booklet mode, each source page must be centred and refitted to the
-      // current margin-bounded half-page. Old free-position offsets and scale
-      // multipliers must not push content beyond the newly available area.
-      // Keep rotation, which is an intentional page-orientation choice.
-      const transform = layout.booklet?.enabled
-        ? { ...storedTransform, x: 0, y: 0, scaleX: 1, scaleY: 1 }
-        : storedTransform;
+      const transform = override?.transform ?? item.page.overrides?.transform ?? IDENTITY_TRANSFORM;
       const finalWidth = contentWidthMm * Math.max(0.05, Math.min(10, transform.scaleX));
       const finalHeight = contentHeightMm * Math.max(0.05, Math.min(10, transform.scaleY));
       return {
@@ -417,8 +410,7 @@ export function computeImpositionSheets(
         occurrenceKey,
         transform,
         zIndex: override?.zIndex,
-        // Booklet pages must stay inside their imposed half-page; the outer margin is a hard content boundary.
-        allowOverflow: layout.booklet?.enabled ? false : (override?.transform ? override.allowOverflow !== false : !!item.page.overrides?.transform),
+        allowOverflow: override?.transform ? override.allowOverflow !== false : !!item.page.overrides?.transform,
       };
     });
 

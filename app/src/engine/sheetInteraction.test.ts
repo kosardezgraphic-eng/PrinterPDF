@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { PageItem } from '@shared/models';
 import { DEFAULT_LAYOUT, useAppStore } from '../store/useAppStore';
 import { computeImpositionSheets } from './layoutEngine';
-import { measurement, measureEndpoint, moveLayoutGuide } from './sheetInteraction';
+import { clampMarginsToMin, measurement, measureEndpoint, moveLayoutGuide, resolvePrinterMinMargins } from './sheetInteraction';
 
 const layout = { ...DEFAULT_LAYOUT, paperSize:'Custom' as const, customWidthMm:200, customHeightMm:300,
   rows:3,cols:3,duplexMode:'none' as const, marginsMm:{left:10,right:10,top:10,bottom:10},horizontalGutterMm:6,verticalGutterMm:6 };
@@ -18,6 +18,30 @@ describe('sheet guides and ruler', () => {
     const top = moveLayoutGuide(layout,sheet,{type:'margin',side:'top'},0,999);
     expect(top.marginsMm.top).toBe(263);
     expect(top.marginsMm.bottom).toBe(10);
+  });
+  it('enforces printer hardware minimum margins outward while allowing inward resizing', () => {
+    const sheet = { widthMm: 200, heightMm: 300 };
+    const minMargins = { top: 4.5, right: 5, bottom: 6, left: 4 };
+    const outwardLeft = moveLayoutGuide(layout, sheet, { type: 'margin', side: 'left' }, -50, 0, minMargins);
+    expect(outwardLeft.marginsMm.left).toBe(4);
+    const outwardRight = moveLayoutGuide(layout, sheet, { type: 'margin', side: 'right' }, 50, 0, minMargins);
+    expect(outwardRight.marginsMm.right).toBe(5);
+    const inwardTop = moveLayoutGuide(layout, sheet, { type: 'margin', side: 'top' }, 0, 25, minMargins);
+    expect(inwardTop.marginsMm.top).toBe(35);
+
+    expect(resolvePrinterMinMargins({ status: 'unavailable', reason: 'none' })).toBeUndefined();
+    expect(
+      resolvePrinterMinMargins(
+        { status: 'available', source: 'hardware', marginsMm: minMargins },
+        { activeProfile: { borderless: true } as never, capabilities: { supportsBorderless: true } as never },
+      ),
+    ).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
+    expect(clampMarginsToMin({ top: 1, right: 12, bottom: 2, left: 0 }, minMargins)).toEqual({
+      top: 4.5,
+      right: 12,
+      bottom: 6,
+      left: 4,
+    });
   });
   it('moves the trailing edge of any gutter by the dragged amount, with a uniform gap', () => {
     const sheet = {widthMm:200,heightMm:300};

@@ -309,46 +309,214 @@ public sealed class PrinterSpoolerService
                 if (IsVirtualPrinter(queue.FullName))
                     return new PrinterMarginResultDto("available", "virtual", new PrinterMarginsDto(0, 0, 0, 0));
 
-                const double dipPerMm = 96.0 / 25.4;
-                PageMediaSizeName? name = request.PaperSize switch
+                var portName = SanitizeDriverText(queue.QueuePort?.Name);
+                var gdiMargins = TryGetGdiPrinterMargins(queue.FullName, portName, request);
+                var wpfMargins = TryGetWpfPrinterMargins(queue, request);
+
+                static double MaxSide(PrinterMarginsDto m) => Math.Max(Math.Max(m.Top, m.Right), Math.Max(m.Bottom, m.Left));
+                // Real hardware printers either report 0/0/0/0 (borderless) or physical unprintable borders (>= 0.5mm).
+                // Values like 0.042mm (42 microns or 1 dot @ 600 DPI) are driver PrintSchema unit-scaling bugs.
+                static bool IsPlausible(PrinterMarginsDto? m) => m != null && (MaxSide(m) == 0 || MaxSide(m) >= 0.5);
+
+                bool gdiOk = IsPlausible(gdiMargins);
+                bool wpfOk = IsPlausible(wpfMargins);
+
+                if (gdiMargins != null && gdiOk && (MaxSide(gdiMargins) > 0 || wpfMargins == null || !wpfOk || MaxSide(wpfMargins) == 0))
                 {
-                    "A0" => PageMediaSizeName.ISOA0, "A1" => PageMediaSizeName.ISOA1,
-                    "A2" => PageMediaSizeName.ISOA2, "A3" => PageMediaSizeName.ISOA3,
-                    "A4" => PageMediaSizeName.ISOA4, "A5" => PageMediaSizeName.ISOA5,
-                    "A6" => PageMediaSizeName.ISOA6, "B4" => PageMediaSizeName.JISB4,
-                    "B5" => PageMediaSizeName.JISB5, "Letter" => PageMediaSizeName.NorthAmericaLetter,
-                    "Legal" => PageMediaSizeName.NorthAmericaLegal, _ => null
-                };
-                if (name == null && request.PaperSize != "Custom") return Unavailable("Unsupported paper size");
-                var media = name.HasValue ? new PageMediaSize(name.Value) :
-                    new PageMediaSize(Math.Min(request.WidthMm, request.HeightMm) * dipPerMm, Math.Max(request.WidthMm, request.HeightMm) * dipPerMm);
-                var delta = new PrintTicket
+                    if (wpfMargins != null && !wpfOk)
+                        Program.Log($"GetPrinterMargins '{queue.FullName}': rejected implausible WPF margins ({wpfMargins.Top}/{wpfMargins.Right}/{wpfMargins.Bottom}/{wpfMargins.Left} mm), using GDI ({gdiMargins.Top}/{gdiMargins.Right}/{gdiMargins.Bottom}/{gdiMargins.Left} mm)");
+                    return new PrinterMarginResultDto("available", "hardware", gdiMargins);
+                }
+
+                if (wpfMargins != null && wpfOk)
+                    return new PrinterMarginResultDto("available", "hardware", wpfMargins);
+
+                if (gdiMargins != null || wpfMargins != null)
                 {
-                    PageMediaSize = media,
-                    PageOrientation = request.Orientation == "landscape" ? PageOrientation.Landscape : PageOrientation.Portrait
-                };
-                var baseTicket = queue.UserPrintTicket ?? queue.DefaultPrintTicket ?? new PrintTicket();
-                var validated = queue.MergeAndValidatePrintTicket(baseTicket, delta).ValidatedPrintTicket;
-                var caps = queue.GetPrintCapabilities(validated);
-                var area = caps.PageImageableArea;
-                var width = caps.OrientedPageMediaWidth;
-                var height = caps.OrientedPageMediaHeight;
-                if (area == null || !width.HasValue || !height.HasValue ||
-                    !double.IsFinite(width.Value) || !double.IsFinite(height.Value) ||
-                    Math.Abs(width.Value / dipPerMm - request.WidthMm) > 2 || Math.Abs(height.Value / dipPerMm - request.HeightMm) > 2)
-                    return Unavailable("Driver did not report the requested paper size and imageable area");
-                double left = area.OriginWidth, top = area.OriginHeight;
-                double right = width.Value - left - area.ExtentWidth, bottom = height.Value - top - area.ExtentHeight;
-                if (!double.IsFinite(left) || !double.IsFinite(top) || !double.IsFinite(right) || !double.IsFinite(bottom) ||
-                    area.ExtentWidth <= 0 || area.ExtentHeight <= 0 || Math.Min(Math.Min(left, right), Math.Min(top, bottom)) < -0.5)
-                    return Unavailable("Driver reported an invalid imageable area");
-                double Mm(double dip) => Math.Round(Math.Max(0, dip) / dipPerMm, 3);
-                return new PrinterMarginResultDto("available", "hardware", new PrinterMarginsDto(Mm(top), Mm(right), Mm(bottom), Mm(left)));
+                    Program.Log($"GetPrinterMargins '{queue.FullName}': rejected implausible non-zero margins gdi={gdiMargins?.Top}/{gdiMargins?.Right}/{gdiMargins?.Bottom}/{gdiMargins?.Left} wpf={wpfMargins?.Top}/{wpfMargins?.Right}/{wpfMargins?.Bottom}/{wpfMargins?.Left}");
+                    return Unavailable("Driver reported implausibly small non-zero hardware margins");
+                }
+
+                return Unavailable("Driver did not report the requested paper size and imageable area");
             }
         }
         catch (Exception ex)
         {
             return Unavailable($"Cannot query printer imageable area: {ex.Message}");
+        }
+    }
+
+    private static PrinterMarginsDto? TryGetWpfPrinterMargins(PrintQueue queue, PrinterMarginRequestDto request)
+    {
+        try
+        {
+            const double dipPerMm = 96.0 / 25.4;
+            PageMediaSizeName? name = request.PaperSize switch
+            {
+                "A0" => PageMediaSizeName.ISOA0, "A1" => PageMediaSizeName.ISOA1,
+                "A2" => PageMediaSizeName.ISOA2, "A3" => PageMediaSizeName.ISOA3,
+                "A4" => PageMediaSizeName.ISOA4, "A5" => PageMediaSizeName.ISOA5,
+                "A6" => PageMediaSizeName.ISOA6, "B4" => PageMediaSizeName.JISB4,
+                "B5" => PageMediaSizeName.JISB5, "Letter" => PageMediaSizeName.NorthAmericaLetter,
+                "Legal" => PageMediaSizeName.NorthAmericaLegal, _ => null
+            };
+            if (name == null && request.PaperSize != "Custom") return null;
+            var media = name.HasValue ? new PageMediaSize(name.Value) :
+                new PageMediaSize(Math.Min(request.WidthMm, request.HeightMm) * dipPerMm, Math.Max(request.WidthMm, request.HeightMm) * dipPerMm);
+            var delta = new PrintTicket
+            {
+                PageMediaSize = media,
+                PageOrientation = request.Orientation == "landscape" ? PageOrientation.Landscape : PageOrientation.Portrait
+            };
+            var baseTicket = queue.UserPrintTicket ?? queue.DefaultPrintTicket ?? new PrintTicket();
+            var validated = queue.MergeAndValidatePrintTicket(baseTicket, delta).ValidatedPrintTicket;
+            var caps = queue.GetPrintCapabilities(validated);
+            var area = caps.PageImageableArea;
+            var width = caps.OrientedPageMediaWidth;
+            var height = caps.OrientedPageMediaHeight;
+            if (area == null || !width.HasValue || !height.HasValue ||
+                !double.IsFinite(width.Value) || !double.IsFinite(height.Value) ||
+                Math.Abs(width.Value / dipPerMm - request.WidthMm) > 2 || Math.Abs(height.Value / dipPerMm - request.HeightMm) > 2)
+                return null;
+            double left = area.OriginWidth, top = area.OriginHeight;
+            double right = width.Value - left - area.ExtentWidth, bottom = height.Value - top - area.ExtentHeight;
+            if (!double.IsFinite(left) || !double.IsFinite(top) || !double.IsFinite(right) || !double.IsFinite(bottom) ||
+                area.ExtentWidth <= 0 || area.ExtentHeight <= 0 || Math.Min(Math.Min(left, right), Math.Min(top, bottom)) < -0.5)
+                return null;
+            static double Mm(double dip) => Math.Round(Math.Max(0, dip) / dipPerMm, 3);
+            return new PrinterMarginsDto(Mm(top), Mm(right), Mm(bottom), Mm(left));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static PrinterMarginsDto? TryGetGdiPrinterMargins(string printerName, string portName, PrinterMarginRequestDto request)
+    {
+        IntPtr hPrinter = IntPtr.Zero;
+        IntPtr pDevMode = IntPtr.Zero;
+        IntPtr hdc = IntPtr.Zero;
+        try
+        {
+            if (!WinSpoolInterop.OpenPrinter(printerName, out hPrinter, IntPtr.Zero) || hPrinter == IntPtr.Zero)
+                return null;
+
+            int dmSize = WinSpoolInterop.DocumentProperties(IntPtr.Zero, hPrinter, printerName, IntPtr.Zero, IntPtr.Zero, 0);
+            if (dmSize <= 0) return null;
+
+            pDevMode = Marshal.AllocHGlobal(dmSize);
+            if (WinSpoolInterop.DocumentProperties(IntPtr.Zero, hPrinter, printerName, pDevMode, IntPtr.Zero, WinSpoolInterop.DM_OUT_BUFFER) < 0)
+                return null;
+
+            double shortMm = Math.Min(request.WidthMm, request.HeightMm);
+            double longMm = Math.Max(request.WidthMm, request.HeightMm);
+            var paperOptions = ReadSupportedPaperOptions(printerName, portName);
+            short? matchedRawKind = null;
+            var exactIdMatch = paperOptions.FirstOrDefault(o =>
+                o.RawKind.HasValue &&
+                string.Equals(o.Id, request.PaperSize, StringComparison.OrdinalIgnoreCase) &&
+                Math.Abs(Math.Min(o.WidthMm, o.HeightMm) - shortMm) <= 2.2 &&
+                Math.Abs(Math.Max(o.WidthMm, o.HeightMm) - longMm) <= 2.2);
+            if (exactIdMatch?.RawKind is int exactRk)
+            {
+                matchedRawKind = (short)exactRk;
+            }
+            else
+            {
+                var dimMatch = paperOptions.FirstOrDefault(o =>
+                    o.RawKind.HasValue &&
+                    Math.Abs(Math.Min(o.WidthMm, o.HeightMm) - shortMm) <= 2.0 &&
+                    Math.Abs(Math.Max(o.WidthMm, o.HeightMm) - longMm) <= 2.0);
+                if (dimMatch?.RawKind is int dimRk)
+                    matchedRawKind = (short)dimRk;
+            }
+
+            matchedRawKind ??= request.PaperSize switch
+            {
+                "Letter" => (short)1,
+                "Legal" => (short)5,
+                "A3" => (short)8,
+                "A4" => (short)9,
+                "A5" => (short)11,
+                "B4" => (short)12,
+                "B5" => (short)13,
+                "A2" => (short)66,
+                "A1" => (short)67,
+                "A0" => (short)68,
+                "A6" => (short)70,
+                _ => (short?)null
+            };
+
+            if (matchedRawKind == null && request.PaperSize != "Custom")
+                return null;
+
+            int fieldsOffset = Marshal.OffsetOf<WinSpoolInterop.DEVMODEW>(nameof(WinSpoolInterop.DEVMODEW.dmFields)).ToInt32();
+            int orientOffset = Marshal.OffsetOf<WinSpoolInterop.DEVMODEW>(nameof(WinSpoolInterop.DEVMODEW.dmOrientation)).ToInt32();
+            int paperSizeOffset = Marshal.OffsetOf<WinSpoolInterop.DEVMODEW>(nameof(WinSpoolInterop.DEVMODEW.dmPaperSize)).ToInt32();
+            int paperLengthOffset = Marshal.OffsetOf<WinSpoolInterop.DEVMODEW>(nameof(WinSpoolInterop.DEVMODEW.dmPaperLength)).ToInt32();
+            int paperWidthOffset = Marshal.OffsetOf<WinSpoolInterop.DEVMODEW>(nameof(WinSpoolInterop.DEVMODEW.dmPaperWidth)).ToInt32();
+
+            int dmFields = Marshal.ReadInt32(pDevMode, fieldsOffset);
+            dmFields |= WinSpoolInterop.DM_ORIENTATION;
+            Marshal.WriteInt16(pDevMode, orientOffset, (short)(request.Orientation == "landscape" ? 2 : 1));
+
+            if (matchedRawKind.HasValue)
+            {
+                dmFields |= WinSpoolInterop.DM_PAPERSIZE;
+                dmFields &= ~(WinSpoolInterop.DM_PAPERWIDTH | WinSpoolInterop.DM_PAPERLENGTH);
+                Marshal.WriteInt16(pDevMode, paperSizeOffset, matchedRawKind.Value);
+            }
+            else
+            {
+                dmFields |= WinSpoolInterop.DM_PAPERSIZE | WinSpoolInterop.DM_PAPERWIDTH | WinSpoolInterop.DM_PAPERLENGTH;
+                Marshal.WriteInt16(pDevMode, paperSizeOffset, WinSpoolInterop.DMPAPER_USER);
+                Marshal.WriteInt16(pDevMode, paperWidthOffset, (short)Math.Clamp((int)Math.Round(shortMm * 10.0), 100, 20000));
+                Marshal.WriteInt16(pDevMode, paperLengthOffset, (short)Math.Clamp((int)Math.Round(longMm * 10.0), 100, 20000));
+            }
+            Marshal.WriteInt32(pDevMode, fieldsOffset, dmFields);
+
+            WinSpoolInterop.DocumentProperties(IntPtr.Zero, hPrinter, printerName, pDevMode, pDevMode, WinSpoolInterop.DM_IN_BUFFER | WinSpoolInterop.DM_OUT_BUFFER);
+
+            hdc = WinSpoolInterop.CreateDC("WINSPOOL", printerName, null, pDevMode);
+            if (hdc == IntPtr.Zero) return null;
+
+            int dpiX = WinSpoolInterop.GetDeviceCaps(hdc, WinSpoolInterop.LOGPIXELSX);
+            int dpiY = WinSpoolInterop.GetDeviceCaps(hdc, WinSpoolInterop.LOGPIXELSY);
+            int physW = WinSpoolInterop.GetDeviceCaps(hdc, WinSpoolInterop.PHYSICALWIDTH);
+            int physH = WinSpoolInterop.GetDeviceCaps(hdc, WinSpoolInterop.PHYSICALHEIGHT);
+            int offX = WinSpoolInterop.GetDeviceCaps(hdc, WinSpoolInterop.PHYSICALOFFSETX);
+            int offY = WinSpoolInterop.GetDeviceCaps(hdc, WinSpoolInterop.PHYSICALOFFSETY);
+            int horzRes = WinSpoolInterop.GetDeviceCaps(hdc, WinSpoolInterop.HORZRES);
+            int vertRes = WinSpoolInterop.GetDeviceCaps(hdc, WinSpoolInterop.VERTRES);
+
+            if (dpiX <= 0 || dpiY <= 0 || physW <= 0 || physH <= 0 || horzRes <= 0 || vertRes <= 0)
+                return null;
+
+            double gdiWidthMm = physW * 25.4 / dpiX;
+            double gdiHeightMm = physH * 25.4 / dpiY;
+            if (Math.Abs(gdiWidthMm - request.WidthMm) > 2.5 || Math.Abs(gdiHeightMm - request.HeightMm) > 2.5)
+                return null;
+
+            double leftMm = offX * 25.4 / dpiX;
+            double topMm = offY * 25.4 / dpiY;
+            double rightMm = (physW - offX - horzRes) * 25.4 / dpiX;
+            double bottomMm = (physH - offY - vertRes) * 25.4 / dpiY;
+            if (Math.Min(Math.Min(leftMm, rightMm), Math.Min(topMm, bottomMm)) < -0.5)
+                return null;
+
+            static double RoundMm(double v) => Math.Round(Math.Max(0, v), 2);
+            return new PrinterMarginsDto(RoundMm(topMm), RoundMm(rightMm), RoundMm(bottomMm), RoundMm(leftMm));
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            if (hdc != IntPtr.Zero) WinSpoolInterop.DeleteDC(hdc);
+            if (pDevMode != IntPtr.Zero) Marshal.FreeHGlobal(pDevMode);
+            if (hPrinter != IntPtr.Zero) WinSpoolInterop.ClosePrinter(hPrinter);
         }
     }
 

@@ -2,11 +2,17 @@ import React from 'react';
 import { BookOpen, X, Info } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { STANDARD_PAPER_SIZES, type BookletSettings, type PaperSizeId } from '@shared/models';
+import { resolvePrinterMinMargins } from '../engine/sheetInteraction';
 
 export function BookletControlPanel({ onClose }: { onClose: () => void }) {
   const layout = useAppStore(state => state.layout);
   const updateLayout = useAppStore(state => state.updateLayout);
   const updateMargins = useAppStore(state => state.updateMargins);
+  const printerMargins = useAppStore(state => state.printerMargins);
+  const printers = useAppStore(state => state.printers);
+  const selectedPrinterName = useAppStore(state => state.selectedPrinterName);
+  const activePrinter = printers.find(p => p.name === selectedPrinterName);
+  const minMargins = resolvePrinterMinMargins(printerMargins, activePrinter);
   const language = useAppStore(state => state.settings.language);
   const isFa = language === 'fa';
   const booklet: BookletSettings = layout.booklet ?? {
@@ -113,36 +119,46 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
           </select>
         </label>
         <div className="grid grid-cols-2 gap-2">
-          {marginSides.map(({ side, faLabel, enLabel }) => (
-            <label key={side} className={label}>
-              <span className="flex justify-between text-[11px] text-slate-400">
-                <span>{isFa ? faLabel : enLabel}</span>
-                <span>{layout.marginsMm[side]} mm</span>
-              </span>
-              <input
-                type="range"
-                min="0"
-                max="60"
-                step="0.5"
-                value={layout.marginsMm[side]}
-                aria-label={isFa ? `${faLabel} (اسلایدر)` : `${enLabel} slider`}
-                data-booklet-margin-slider={side}
-                onChange={e => updateMargins({ [side]: Number(e.target.value) })}
-                className="w-full accent-amber-500"
-              />
-              <input
-                type="number"
-                min="0"
-                max="60"
-                step="0.1"
-                value={layout.marginsMm[side]}
-                aria-label={isFa ? `${faLabel} به میلی‌متر` : `${enLabel} in millimeters`}
-                data-booklet-margin-input={side}
-                onChange={e => updateMargins({ [side]: Math.max(0, Math.min(60, Number(e.target.value) || 0)) })}
-                className={input}
-              />
-            </label>
-          ))}
+          {marginSides.map(({ side, faLabel, enLabel }) => {
+            const minSide = Math.max(0, minMargins?.[side] ?? 0);
+            const maxSide = Math.max(minSide, 60);
+            const valSide = Math.max(minSide, layout.marginsMm[side]);
+            return (
+              <label key={side} className={label} title={minSide > 0 ? (isFa ? `حداقل حاشیه سخت‌افزار پرینتر: ${minSide} mm` : `Printer hardware min: ${minSide} mm`) : undefined}>
+                <span className="flex justify-between text-[11px] text-slate-400">
+                  <span>{isFa ? faLabel : enLabel}</span>
+                  <span>{valSide} mm</span>
+                </span>
+                <input
+                  type="range"
+                  min={minSide}
+                  max={maxSide}
+                  step="0.5"
+                  value={valSide}
+                  aria-label={isFa ? `${faLabel} (اسلایدر)` : `${enLabel} slider`}
+                  data-booklet-margin-slider={side}
+                  onChange={e => updateMargins({ [side]: Number(e.target.value) })}
+                  className="w-full accent-amber-500"
+                />
+                <input
+                  type="number"
+                  min={minSide}
+                  max={maxSide}
+                  step="0.1"
+                  value={valSide}
+                  aria-label={isFa ? `${faLabel} به میلی‌متر` : `${enLabel} in millimeters`}
+                  data-booklet-margin-input={side}
+                  onChange={e => updateMargins({ [side]: Math.max(minSide, Math.min(maxSide, Number(e.target.value) || 0)) })}
+                  className={input}
+                />
+                {minSide > 0 && (
+                  <span className="block text-[10px] text-rose-300/80">
+                    {isFa ? `حداقل پرینتر: ${minSide} mm` : `Min: ${minSide} mm`}
+                  </span>
+                )}
+              </label>
+            );
+          })}
         </div>
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={layout.showCropMarks}
