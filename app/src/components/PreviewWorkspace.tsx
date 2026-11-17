@@ -36,7 +36,6 @@ import {
   convertMmToUnit,
 } from '../engine/layoutEngine';
 import { checkPreflight } from '../engine/preflight';
-import { resolvePrinterMinMargins } from '../engine/sheetInteraction';
 import { fitPageZoom, isAtWheelEdge, PREVIEW_PX_PER_MM, wheelSheetStep } from '../engine/viewNavigation';
 import {
   formatPageNumberLabel,
@@ -378,12 +377,10 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
       ? Math.max(0, bookletCells[1].cellXMm - bookletGapLeftMm)
       : 0;
     const bookletSpineWidthMm = layout.booklet?.enabled ? Math.max(0, layout.booklet.spineWidthMm) : 0;
-    const activePrinterObj = printers.find((p) => p.name === selectedPrinterName);
-    const minMargins = resolvePrinterMinMargins(printerMargins, activePrinterObj);
-    const marginTopMm = Math.max(minMargins?.top ?? 0, layout.marginsMm.top);
-    const marginRightMm = Math.max(minMargins?.right ?? 0, layout.marginsMm.right);
-    const marginBottomMm = Math.max(minMargins?.bottom ?? 0, layout.marginsMm.bottom);
-    const marginLeftMm = Math.max(minMargins?.left ?? 0, layout.marginsMm.left);
+    const marginTopMm = Math.max(0, layout.marginsMm.top);
+    const marginRightMm = Math.max(0, layout.marginsMm.right);
+    const marginBottomMm = Math.max(0, layout.marginsMm.bottom);
+    const marginLeftMm = Math.max(0, layout.marginsMm.left);
 
     // Optional back-side sheet for Light Table Transparent Mode (J2)
     const pairedBackSide =
@@ -520,21 +517,6 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
               }}
               className="relative overflow-hidden rounded-sm bg-white shadow-[0_20px_50px_rgba(0,0,0,0.65)] ring-1 ring-slate-300 transition-all duration-150"
             >
-              {/* Fixed hardware printable boundary from the selected printer driver (cannot shrink outward past this). */}
-              {minMargins && (minMargins.top > 0 || minMargins.right > 0 || minMargins.bottom > 0 || minMargins.left > 0) && (
-                <div
-                  data-printer-min-margins
-                  aria-hidden="true"
-                  style={{
-                    left: minMargins.left * basePxPerMm,
-                    top: minMargins.top * basePxPerMm,
-                    right: minMargins.right * basePxPerMm,
-                    bottom: minMargins.bottom * basePxPerMm,
-                  }}
-                  className="pointer-events-none absolute z-[9] border border-dashed border-rose-400/60"
-                />
-              )}
-
               {/* The shaded area is the configured layout margin, not a measured printer hard margin. */}
               <div data-layout-margin-shading aria-label={lang === 'fa' ? 'حاشیه تنظیم‌شدهٔ چیدمان' : 'Configured layout margin'}
                 className="pointer-events-none absolute inset-0 z-10">
@@ -553,12 +535,12 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                     const isHorizontal = side === 'left' || side === 'right';
                     const style: React.CSSProperties =
                       side === 'left'
-                        ? { left: Math.max(0, marginLeftMm * basePxPerMm - 5), top: marginTopMm * basePxPerMm, bottom: marginBottomMm * basePxPerMm, width: 10, backgroundImage: 'repeating-linear-gradient(135deg, rgba(100,116,139,0.42) 0px, rgba(100,116,139,0.42) 2px, rgba(148,163,184,0.14) 2px, rgba(148,163,184,0.14) 6px)' }
+                        ? { left: Math.max(0, marginLeftMm * basePxPerMm - 4), top: marginTopMm * basePxPerMm, bottom: marginBottomMm * basePxPerMm, width: 8 }
                         : side === 'right'
-                          ? { right: Math.max(0, marginRightMm * basePxPerMm - 5), top: marginTopMm * basePxPerMm, bottom: marginBottomMm * basePxPerMm, width: 10, backgroundImage: 'repeating-linear-gradient(135deg, rgba(100,116,139,0.42) 0px, rgba(100,116,139,0.42) 2px, rgba(148,163,184,0.14) 2px, rgba(148,163,184,0.14) 6px)' }
+                          ? { right: Math.max(0, marginRightMm * basePxPerMm - 4), top: marginTopMm * basePxPerMm, bottom: marginBottomMm * basePxPerMm, width: 8 }
                           : side === 'top'
-                            ? { top: Math.max(0, marginTopMm * basePxPerMm - 5), left: marginLeftMm * basePxPerMm, right: marginRightMm * basePxPerMm, height: 10, backgroundImage: 'repeating-linear-gradient(135deg, rgba(100,116,139,0.42) 0px, rgba(100,116,139,0.42) 2px, rgba(148,163,184,0.14) 2px, rgba(148,163,184,0.14) 6px)' }
-                            : { bottom: Math.max(0, marginBottomMm * basePxPerMm - 5), left: marginLeftMm * basePxPerMm, right: marginRightMm * basePxPerMm, height: 10, backgroundImage: 'repeating-linear-gradient(135deg, rgba(100,116,139,0.42) 0px, rgba(100,116,139,0.42) 2px, rgba(148,163,184,0.14) 2px, rgba(148,163,184,0.14) 6px)' };
+                            ? { top: Math.max(0, marginTopMm * basePxPerMm - 4), left: marginLeftMm * basePxPerMm, right: marginRightMm * basePxPerMm, height: 8 }
+                            : { bottom: Math.max(0, marginBottomMm * basePxPerMm - 4), left: marginLeftMm * basePxPerMm, right: marginRightMm * basePxPerMm, height: 8 };
                     const computeNextSideMargin = (
                       clientX: number,
                       clientY: number,
@@ -576,16 +558,15 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                       const base = dragState.baseLayout;
                       const startMargin = base.marginsMm[side];
                       const spine = Math.max(0, base.booklet?.spineWidthMm ?? 0);
-                      const minMargin = Math.max(0, minMargins?.[side] ?? 0);
                       const maxMargin =
                         side === 'left'
-                          ? Math.max(minMargin, sheetSide.widthMm - base.marginsMm.right - 10 - spine)
+                          ? Math.max(0, sheetSide.widthMm - base.marginsMm.right - 10 - spine)
                           : side === 'right'
-                            ? Math.max(minMargin, sheetSide.widthMm - base.marginsMm.left - 10 - spine)
+                            ? Math.max(0, sheetSide.widthMm - base.marginsMm.left - 10 - spine)
                             : side === 'top'
-                              ? Math.max(minMargin, sheetSide.heightMm - base.marginsMm.bottom - 10)
-                              : Math.max(minMargin, sheetSide.heightMm - base.marginsMm.top - 10);
-                      return Math.round(Math.max(minMargin, Math.min(maxMargin, startMargin + deltaMm)) * 10) / 10;
+                              ? Math.max(0, sheetSide.heightMm - base.marginsMm.bottom - 10)
+                              : Math.max(0, sheetSide.heightMm - base.marginsMm.top - 10);
+                      return Math.round(Math.max(0, Math.min(maxMargin, startMargin + deltaMm)) * 10) / 10;
                     };
                     return (
                       <div
@@ -594,7 +575,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                         aria-label={lang === 'fa' ? `کشیدن حاشیه ${ { left: 'چپ', right: 'راست', top: 'بالا', bottom: 'پایین' }[side] } بوکلت` : `Drag booklet ${side} margin`}
                         title={lang === 'fa' ? 'برای تغییر همین ضلع حاشیه بکشید' : `Drag to adjust ${side} margin`}
                         style={style}
-                        className={`absolute z-[14] touch-none border border-dashed border-slate-500/70 ${isHorizontal ? 'cursor-col-resize' : 'cursor-row-resize'}`}
+                        className={`absolute z-[14] touch-none ${isHorizontal ? 'cursor-ew-resize' : 'cursor-ns-resize'}`}
                         onClick={e => e.stopPropagation()}
                         onPointerDown={event => {
                           if (spaceDown || (event.pointerType === 'mouse' && event.button !== 0) || !layout.booklet?.enabled) return;
@@ -843,7 +824,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 </div>
               )}
 
-              {(canvasTool === 'layout' || canvasTool === 'move') && activeGuideSheet === sheetSide.sideIndex - 1 && !previewOnlyPage && <LayoutGuides sheet={sheetSide} layout={layout} pxPerMm={basePxPerMm} spaceDown={spaceDown} language={lang} unit={settings.unit} minMargins={minMargins}
+              {(canvasTool === 'layout' || canvasTool === 'move') && activeGuideSheet === sheetSide.sideIndex - 1 && !previewOnlyPage && <LayoutGuides sheet={sheetSide} layout={layout} pxPerMm={basePxPerMm} spaceDown={spaceDown} language={lang} unit={settings.unit}
                 onDraft={setDraftLayout} onCommit={next => commitLayoutGuides(next.booklet?.enabled ? { marginsMm: next.marginsMm, booklet: next.booklet } : { marginsMm:next.marginsMm, horizontalGutterMm:next.horizontalGutterMm, verticalGutterMm:next.verticalGutterMm })} />}
               {canvasTool === 'measure' && <MeasurementTool sheet={sheetSide} unit={settings.unit} language={lang} spaceDown={spaceDown} />}
               <UserGuideLines />
