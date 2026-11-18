@@ -21,6 +21,8 @@ import {
   Maximize2,
   SlidersHorizontal,
   Zap,
+  Magnet,
+  Sparkles,
 } from 'lucide-react';
 import { useAppStore, type PageEditScope } from '../store/useAppStore';
 import { PageCanvasCell, type CanvasTool } from './PageCanvasCell';
@@ -28,6 +30,7 @@ import { PrinterRetryButton, PrinterServiceStatus } from './PrinterStatus';
 import { LayoutGuides, MeasurementTool } from './SheetTools';
 import { MarginPresetsMenu } from './MarginPresetsMenu';
 import { RulerGuideProvider, SheetRuler, GuidePaperRef, UserGuideLines } from './RulerGuides';
+import { SmartGuideProvider } from './SmartGuidesOverlay';
 import { TextOverlayLayer } from './TextOverlayLayer';
 import { hasImageTransfer, routeDroppedFiles } from '../engine/imageImport';
 import { AspectCropControls } from './AspectCropControls';
@@ -55,7 +58,10 @@ import {
   type PageOrientation,
   type PaperSizeId,
   type PrinterInfo,
+  type RulerGuide,
 } from '@shared/models';
+
+const EMPTY_RULER_GUIDES: RulerGuide[] = [];
 
 interface PreviewWorkspaceProps {
   onCursorMoveMm: (pos: { x: number; y: number } | null) => void;
@@ -80,6 +86,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     zoomPercent,
     viewMode,
     showRulers,
+    snapEnabled,
+    smartGuidesEnabled,
     loupeEnabled,
     transparentMode,
     activeRibbonTab,
@@ -91,6 +99,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     batchQueue,
     setActiveSheetIndex,
     setShowRulers,
+    setSnapEnabled,
+    setSmartGuidesEnabled,
     focusPageFromPreview,
     setZoomPercent,
     importFiles,
@@ -117,8 +127,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const lastWheelStep = useRef(-Infinity);
   const pendingWheelEntry = useRef<{index:number; edge:'top'|'bottom'} | null>(null);
   const drag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
-  const bookletSpineDrag = useRef<{ pointerId: number; startX: number; startWidthMm: number; baseLayout: LayoutSettings } | null>(null);
+  const bookletSpineDrag = useRef<{ pointerId: number; startX: number; startWidthMm: number; sign: 1 | -1; baseLayout: LayoutSettings } | null>(null);
   const bookletMarginDrag = useRef<{ side: 'left' | 'right' | 'top' | 'bottom'; pointerId: number; startX: number; startY: number; baseLayout: LayoutSettings } | null>(null);
+  const matrixGutterDrag = useRef<{ axis: 'horizontal' | 'vertical'; index: number; edge: 'leading' | 'trailing' | 'center'; pointerId: number; startX: number; startY: number; baseLayout: LayoutSettings } | null>(null);
   const suppressClick = useRef(false);
   const handledPreviewRequest = useRef<typeof previewPageRequest>(null);
   const suppressNavigationScroll = useRef(false);
@@ -130,6 +141,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const [activeBandDrag, setActiveBandDrag] = useState<
     | { sheetIndex: number; kind: 'margin'; side: 'left' | 'right' | 'top' | 'bottom' }
     | { sheetIndex: number; kind: 'spine' }
+    | { sheetIndex: number; kind: 'gutter'; axis: 'horizontal' | 'vertical'; index: number }
     | null
   >(null);
   const [editScope, setEditScope] = useState<PageEditScope>('current');
@@ -565,6 +577,20 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
               }}
               className="relative overflow-hidden rounded-sm bg-white shadow-[0_20px_50px_rgba(0,0,0,0.65)] ring-1 ring-slate-300 transition-all duration-150"
             >
+              <SmartGuideProvider
+                sheet={sheetSide}
+                totalSheets={outputSheets.length}
+                pages={pages}
+                pageIndices={pageNumbers}
+                overlays={overlays}
+                marginsMm={{ top: marginTopMm, right: marginRightMm, bottom: marginBottomMm, left: marginLeftMm }}
+                rulerGuides={layout.rulerGuides ?? EMPTY_RULER_GUIDES}
+                spineGap={layout.booklet?.enabled ? { leftMm: bookletGapLeftMm, rightMm: bookletGapLeftMm + bookletGapWidthMm } : undefined}
+                pxPerMm={basePxPerMm}
+                unit={settings.unit}
+                snapEnabled={snapEnabled}
+                smartGuidesEnabled={smartGuidesEnabled}
+              >
               {/* Fixed hardware printable boundary from the selected printer driver (cannot shrink outward past this). */}
               {minMargins && (minMargins.top > 0 || minMargins.right > 0 || minMargins.bottom > 0 || minMargins.left > 0) && (
                 <div
@@ -786,7 +812,10 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                     if (spaceDown || (event.pointerType === 'mouse' && event.button !== 0) || !layout.booklet?.enabled) return;
                     event.preventDefault();
                     event.stopPropagation();
-                    bookletSpineDrag.current = { pointerId: event.pointerId, startX: event.clientX, startWidthMm: savedLayout.booklet?.spineWidthMm ?? 0, baseLayout: savedLayout };
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const sign: 1 | -1 =
+                      rect.width >= 16 && (event.clientX - rect.left) / rect.width <= 0.35 ? -1 : 1;
+                    bookletSpineDrag.current = { pointerId: event.pointerId, startX: event.clientX, startWidthMm: savedLayout.booklet?.spineWidthMm ?? 0, sign, baseLayout: savedLayout };
                     setActiveBandDrag({ sheetIndex: sheetSide.sideIndex - 1, kind: 'spine' });
                     event.currentTarget.setPointerCapture(event.pointerId);
                   }}
@@ -795,7 +824,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                     if (!dragState || dragState.pointerId !== event.pointerId || !dragState.baseLayout.booklet?.enabled) return;
                     event.preventDefault();
                     event.stopPropagation();
-                    const deltaMm = (event.clientX - dragState.startX) / Math.max(0.01, basePxPerMm);
+                    const deltaMm = ((event.clientX - dragState.startX) / Math.max(0.01, basePxPerMm)) * dragState.sign;
                     const nextWidth = Math.round(Math.max(0, Math.min(30, dragState.startWidthMm + deltaMm * 2)) * 10) / 10;
                     setDraftLayout({
                       ...dragState.baseLayout,
@@ -812,7 +841,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture?.(event.pointerId);
                     setDraftLayout(null);
                     if (!dragState.baseLayout.booklet?.enabled) return;
-                    const deltaMm = (event.clientX - dragState.startX) / Math.max(0.01, basePxPerMm);
+                    const deltaMm = ((event.clientX - dragState.startX) / Math.max(0.01, basePxPerMm)) * dragState.sign;
                     const nextWidth = Math.round(Math.max(0, Math.min(30, dragState.startWidthMm + deltaMm * 2)) * 10) / 10;
                     if (nextWidth !== dragState.baseLayout.booklet.spineWidthMm) {
                       commitLayoutGuides({ booklet: { ...dragState.baseLayout.booklet, spineWidthMm: nextWidth } });
@@ -837,6 +866,169 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                   )}
                 </div>
               )}
+
+              {/* Preview-only direct matrix gutter drag bands matching the booklet spine style (centered full-gap hatched bands). */}
+              {!previewOnlyPage && !layout.booklet?.enabled && activeGuideSheet !== sheetSide.sideIndex - 1 && (() => {
+                const matrixCols = Math.max(1, Math.min(10, Math.floor(layout.cols)));
+                const matrixRows = Math.max(1, Math.min(10, Math.floor(layout.rows)));
+                const hGutterMm = Math.max(0, layout.horizontalGutterMm);
+                const vGutterMm = Math.max(0, layout.verticalGutterMm);
+                const printableW = Math.max(10, sheetSide.widthMm - marginLeftMm - marginRightMm);
+                const printableH = Math.max(10, sheetSide.heightMm - marginTopMm - marginBottomMm);
+                const cellW = Math.max(5, (printableW - (matrixCols - 1) * hGutterMm) / matrixCols);
+                const cellH = Math.max(5, (printableH - (matrixRows - 1) * vGutterMm) / matrixRows);
+                const hatchBg = 'repeating-linear-gradient(135deg, rgba(100,116,139,0.30) 0px, rgba(100,116,139,0.30) 2px, rgba(148,163,184,0.10) 2px, rgba(148,163,184,0.10) 6px)';
+
+                const computeNextGutter = (
+                  clientX: number,
+                  clientY: number,
+                  dragState: NonNullable<typeof matrixGutterDrag.current>,
+                ) => {
+                  const dxMm = dragState.axis === 'horizontal' ? (clientX - dragState.startX) / Math.max(0.01, basePxPerMm) : 0;
+                  const dyMm = dragState.axis === 'vertical' ? (clientY - dragState.startY) / Math.max(0.01, basePxPerMm) : 0;
+                  const effectiveBase: LayoutSettings = {
+                    ...dragState.baseLayout,
+                    marginsMm: getEffectiveSideMarginsMm(dragState.baseLayout, sheetSide.side),
+                  };
+                  const moved = moveLayoutGuide(
+                    effectiveBase,
+                    sheetSide,
+                    { type: 'gutter', axis: dragState.axis, index: dragState.index, edge: dragState.edge },
+                    dxMm,
+                    dyMm,
+                  );
+                  const key = dragState.axis === 'horizontal' ? 'horizontalGutterMm' : 'verticalGutterMm';
+                  return Math.round(moved[key] * 10) / 10;
+                };
+
+                const hGutters = Array.from({ length: Math.max(0, matrixCols - 1) }, (_, index) => ({
+                  axis: 'horizontal' as const,
+                  index,
+                  mm: hGutterMm,
+                  centerMm: marginLeftMm + (index + 1) * cellW + (index + 0.5) * hGutterMm,
+                }));
+                const vGutters = Array.from({ length: Math.max(0, matrixRows - 1) }, (_, index) => ({
+                  axis: 'vertical' as const,
+                  index,
+                  mm: vGutterMm,
+                  centerMm: marginTopMm + (index + 1) * cellH + (index + 0.5) * vGutterMm,
+                }));
+
+                return [...hGutters, ...vGutters].map(({ axis, index, mm, centerMm }) => {
+                  const isDraggingThisGutter =
+                    activeBandDrag?.sheetIndex === sheetSide.sideIndex - 1 &&
+                    activeBandDrag.kind === 'gutter' &&
+                    activeBandDrag.axis === axis &&
+                    activeBandDrag.index === index;
+                  if (mm <= 0 && !isDraggingThisGutter) return null;
+                  const bandThicknessPx = Math.max(isDraggingThisGutter ? 4 : 0, mm * basePxPerMm);
+                  const bandStyle: React.CSSProperties =
+                    axis === 'horizontal'
+                      ? {
+                          left: centerMm * basePxPerMm,
+                          width: bandThicknessPx,
+                          top: marginTopMm * basePxPerMm,
+                          bottom: marginBottomMm * basePxPerMm,
+                          transform: 'translateX(-50%)',
+                          backgroundImage: hatchBg,
+                        }
+                      : {
+                          top: centerMm * basePxPerMm,
+                          height: bandThicknessPx,
+                          left: marginLeftMm * basePxPerMm,
+                          right: marginRightMm * basePxPerMm,
+                          transform: 'translateY(-50%)',
+                          backgroundImage: hatchBg,
+                        };
+                  return (
+                    <div
+                      key={`${axis}-${index}`}
+                      data-matrix-gutter-guide={`${axis}-${index}`}
+                      aria-label={
+                        axis === 'horizontal'
+                          ? (lang === 'fa' ? `فاصله ستون‌ها ${index + 1}` : `Column gutter ${index + 1}`)
+                          : (lang === 'fa' ? `فاصله ردیف‌ها ${index + 1}` : `Row gutter ${index + 1}`)
+                      }
+                      title={
+                        lang === 'fa'
+                          ? 'فاصله بین سلول‌ها؛ برای تغییر اندازه از مرکز به دو سمت بکشید'
+                          : 'Cell divider gutter; drag to resize symmetrically'
+                      }
+                      style={bandStyle}
+                      className={`absolute z-[14] flex touch-none items-center justify-center border-dashed border-slate-500/70 transition-colors hover:bg-slate-500/10 ${
+                        axis === 'horizontal' ? 'cursor-col-resize border-x' : 'cursor-row-resize border-y'
+                      }`}
+                      onClick={e => e.stopPropagation()}
+                      onPointerDown={event => {
+                        if (spaceDown || (event.pointerType === 'mouse' && event.button !== 0)) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        let edge: 'leading' | 'trailing' | 'center' = 'center';
+                        if (axis === 'horizontal' && rect.width >= 16) {
+                          const relX = (event.clientX - rect.left) / rect.width;
+                          edge = relX <= 0.35 ? 'leading' : relX >= 0.65 ? 'trailing' : 'center';
+                        } else if (axis === 'vertical' && rect.height >= 16) {
+                          const relY = (event.clientY - rect.top) / rect.height;
+                          edge = relY <= 0.35 ? 'leading' : relY >= 0.65 ? 'trailing' : 'center';
+                        }
+                        matrixGutterDrag.current = {
+                          axis,
+                          index,
+                          edge,
+                          pointerId: event.pointerId,
+                          startX: event.clientX,
+                          startY: event.clientY,
+                          baseLayout: savedLayout,
+                        };
+                        setActiveBandDrag({ sheetIndex: sheetSide.sideIndex - 1, kind: 'gutter', axis, index });
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                      }}
+                      onPointerMove={event => {
+                        const dragState = matrixGutterDrag.current;
+                        if (!dragState || dragState.pointerId !== event.pointerId || dragState.axis !== axis || dragState.index !== index) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const nextGutter = computeNextGutter(event.clientX, event.clientY, dragState);
+                        const key = axis === 'horizontal' ? 'horizontalGutterMm' : 'verticalGutterMm';
+                        setDraftLayout({ ...dragState.baseLayout, [key]: nextGutter });
+                      }}
+                      onPointerUp={event => {
+                        const dragState = matrixGutterDrag.current;
+                        if (!dragState || dragState.pointerId !== event.pointerId || dragState.axis !== axis || dragState.index !== index) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        matrixGutterDrag.current = null;
+                        setActiveBandDrag(null);
+                        if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture?.(event.pointerId);
+                        setDraftLayout(null);
+                        const nextGutter = computeNextGutter(event.clientX, event.clientY, dragState);
+                        const key = axis === 'horizontal' ? 'horizontalGutterMm' : 'verticalGutterMm';
+                        if (nextGutter !== dragState.baseLayout[key]) {
+                          commitLayoutGuides({ [key]: nextGutter });
+                        }
+                      }}
+                      onPointerCancel={event => {
+                        const dragState = matrixGutterDrag.current;
+                        if (!dragState || dragState.pointerId !== event.pointerId) return;
+                        matrixGutterDrag.current = null;
+                        setActiveBandDrag(null);
+                        setDraftLayout(null);
+                      }}
+                    >
+                      {isDraggingThisGutter && (
+                        <span
+                          data-band-size-label={`gutter-${axis}-${index}`}
+                          dir="ltr"
+                          className="pointer-events-none select-none whitespace-nowrap rounded bg-slate-900/90 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-sm"
+                        >
+                          {convertMmToUnit(mm, settings.unit)} {settings.unit}
+                        </span>
+                      )}
+                    </div>
+                  );
+                });
+              })()}
 
               {/* Transparent Mode Back-Side Ghost Overlay (J2) */}
               {pairedBackSide &&
@@ -1001,6 +1193,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                   {loupeCoords.yPercent.toFixed(0)}%
                 </div>
               )}
+              </SmartGuideProvider>
             </div>
             </GuidePaperRef>
           </div>
@@ -1162,6 +1355,30 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
           title={lang === 'fa' ? 'نمایش یا پنهان کردن خط‌کش‌ها' : 'Show or hide rulers'} onClick={()=>setShowRulers(!showRulers)}
           className={`rounded border px-2 py-1 ${showRulers?'border-sky-500 text-sky-300':'border-slate-700 text-slate-300'}`}>
           {lang === 'fa' ? 'خط‌کش' : 'Rulers'}
+        </button>
+        <button
+          type="button"
+          data-snap-toggle
+          aria-pressed={snapEnabled}
+          aria-label={lang === 'fa' ? 'چسبندگی آهن‌ربایی به راهنما و لبه‌ها' : 'Magnetic snap to guides and edges'}
+          title={lang === 'fa' ? 'فعال یا غیرفعال کردن حالت آهن‌ربایی (Snap) به خطوط راهنما و لبه‌ها' : 'Toggle magnetic snapping to guides and edges'}
+          onClick={() => setSnapEnabled(!snapEnabled)}
+          className={`flex items-center gap-1 rounded border px-2 py-1 ${snapEnabled ? 'border-purple-500 bg-purple-600/20 text-purple-200' : 'border-slate-700 text-slate-300'}`}
+        >
+          <Magnet className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>{lang === 'fa' ? 'آهن‌ربا' : 'Snap'}</span>
+        </button>
+        <button
+          type="button"
+          data-smart-guides-toggle
+          aria-pressed={smartGuidesEnabled}
+          aria-label={lang === 'fa' ? 'خطوط راهنمای بنفش (وسط، یک‌سوم و تقسیم فاصله)' : 'Purple smart guides (center, thirds, equal spacing)'}
+          title={lang === 'fa' ? 'نمایش خطوط راهنمای بنفش موقت هنگام جابه‌جایی (وسط، یک‌سوم و تقسیم فاصله)' : 'Toggle temporary purple guides while dragging'}
+          onClick={() => setSmartGuidesEnabled(!smartGuidesEnabled)}
+          className={`flex items-center gap-1 rounded border px-2 py-1 ${smartGuidesEnabled ? 'border-purple-500 bg-purple-600/20 text-purple-200' : 'border-slate-700 text-slate-300'}`}
+        >
+          <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>{lang === 'fa' ? 'راهنمای بنفش' : 'Smart Guides'}</span>
         </button>
         <label title={lang === 'fa' ? 'واحد اندازه‌گیری کل برنامه را تغییر می‌دهد' : 'Changes the measurement unit throughout the app'} className="flex items-center gap-1">{lang === 'fa' ? 'واحد خط‌کش:' : 'Ruler unit:'}
           <select aria-label={lang === 'fa' ? 'واحد خط‌کش' : 'Ruler unit'} value={settings.unit} onChange={e=>updateSettings({unit:e.target.value as typeof settings.unit})} className="rounded bg-slate-800 px-1 py-1 text-slate-100">

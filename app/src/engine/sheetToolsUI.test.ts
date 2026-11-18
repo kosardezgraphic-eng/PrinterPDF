@@ -195,4 +195,52 @@ describe('sheet tool pointer interactions', () => {
     pointer(directLeft, 'pointerup', 30, 300);
     expect(container.querySelector('[data-band-size-label="margin-left"]')).toBeNull();
   });
+  it('centers matrix gutter hatched bands on the gap midpoint and grows symmetrically when dragging either edge', () => {
+    act(() => useAppStore.setState({
+      layout: {
+        ...useAppStore.getState().layout,
+        rows: 2,
+        cols: 3,
+        horizontalGutterMm: 20,
+        verticalGutterMm: 10,
+      },
+    }));
+    // Direct centered matrix gutter band spans the full gap around its midpoint
+    const directHGutter = container.querySelector<HTMLElement>('[data-matrix-gutter-guide="horizontal-0"]')!;
+    expect(directHGutter).not.toBeNull();
+    expect(directHGutter.style.transform).toBe('translateX(-50%)');
+    expect(parseFloat(directHGutter.style.width)).toBeCloseTo(20 * 1.95, 1);
+
+    // Activate sheet layout guides and verify the active gutter handle spans the full gap centered at gap midpoint
+    act(() => (container.querySelector('[data-sheet-canvas-index]') as HTMLElement).click());
+    const overlay = container.querySelector('[data-layout-guides]') as HTMLElement;
+    vi.spyOn(overlay, 'getBoundingClientRect').mockReturnValue(rect);
+    const colHandle = container.querySelector<HTMLButtonElement>('[aria-label="Column gutter 1 (all columns)"]')!;
+    const rowHandle = container.querySelector<HTMLButtonElement>('[aria-label="Row gutter 1 (all rows)"]')!;
+    expect(colHandle.style.transform).toBe('translateX(-50%)');
+    expect(parseFloat(colHandle.style.width)).toBeCloseTo(20 * 1.95, 1);
+    expect(rowHandle.style.transform).toBe('translateY(-50%)');
+    expect(parseFloat(rowHandle.style.height)).toBeCloseTo(10 * 1.95, 1);
+
+    // Dragging the left edge of a wide column gutter leftward widens the gutter symmetrically from center
+    vi.spyOn(colHandle, 'getBoundingClientRect').mockReturnValue({ x: 100, y: 20, left: 100, top: 20, right: 140, bottom: 580, width: 40, height: 560, toJSON: () => ({}) });
+    pointer(colHandle, 'pointerdown', 102, 200);
+    pointer(colHandle, 'pointermove', 94, 200);
+    pointer(colHandle, 'pointerup', 94, 200);
+    // -4 mm on left edge of col-0 gutter (3 cols) => +6 mm total gutter (20 -> 26 mm)
+    expect(useAppStore.getState().layout.horizontalGutterMm).toBeCloseTo(26, 1);
+
+    // Dragging the right edge rightward also widens symmetrically
+    pointer(colHandle, 'pointerdown', 138, 200);
+    pointer(colHandle, 'pointermove', 142, 200);
+    pointer(colHandle, 'pointerup', 142, 200);
+    expect(useAppStore.getState().layout.horizontalGutterMm).toBeCloseTo(32, 1);
+
+    // Dragging top edge of row gutter upward widens vertical gutter
+    vi.spyOn(rowHandle, 'getBoundingClientRect').mockReturnValue({ x: 20, y: 280, left: 20, top: 280, right: 380, bottom: 300, width: 360, height: 20, toJSON: () => ({}) });
+    pointer(rowHandle, 'pointerdown', 200, 282);
+    pointer(rowHandle, 'pointermove', 200, 276);
+    pointer(rowHandle, 'pointerup', 200, 276);
+    expect(useAppStore.getState().layout.verticalGutterMm).toBeCloseTo(16, 1);
+  });
 });

@@ -5,6 +5,7 @@ import {imageDrawRect,overlayPlacements,type OverlayPlacement} from '../engine/o
 import {centreWithinLimits,moveOverlay,overlayLimitsForBox,resizeOverlay,resizeOverlayKeepingAspect,rotationFromPointer,pointerAngle,type OverlayHandle,type OverlayLimits} from '../engine/overlayGeometry';
 import {rotateVector} from '../engine/pageGeometry';
 import {MM_PER_PT, SHAPE_NAMES, shapeCommands, shapeDashPattern, shapeHasFill, shapeIsStrokedOnly, shapeSvgPath} from '../engine/shapes';
+import {useSmartGuides} from './SmartGuidesOverlay';
 import {useAppStore} from '../store/useAppStore';
 const MM_TO_PT=72/25.4;
 const newId=()=>globalThis.crypto?.randomUUID?.()??`overlay-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -59,6 +60,9 @@ type Gesture={pointer:number;x:number;y:number;node:HTMLDivElement;visual:HTMLEl
  startRotation:number;startAngle:number;centerX:number;centerY:number;lock?:boolean};
 function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacement;pxPerMm:number;selected:boolean;enabled:boolean;sheetMm:{width:number;height:number}}){
  const item=targetOf(p);
+ const smartGuides=useSmartGuides();
+ const smartGuidesRef=useRef(smartGuides);
+ smartGuidesRef.current=smartGuides;
  const select=useAppStore(s=>s.selectOverlay),update=useAppStore(s=>s.updateOverlay),add=useAppStore(s=>s.addOverlay),beginEdit=useAppStore(s=>s.beginTextEdit);
  const edit=useAppStore(s=>s.textEdit?.occurrenceKey===p.key?s.textEdit:null);
  const textarea=useRef<HTMLTextAreaElement>(null);
@@ -79,7 +83,7 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
  const cleanup=(g:Gesture)=>{if(g.frame!==null)cancelAnimationFrame(g.frame);g.node.style.cursor='move';
   if(g.visual!==g.node)g.visual.remove();
   else{g.node.style.left=`${item.xPercent}%`;g.node.style.top=`${item.yPercent}%`;g.node.style.width=`${item.widthPercent}%`;g.node.style.height=`${item.heightPercent}%`;g.node.style.transform=`rotate(${item.rotation}deg)`;}
-  gesture.current=null;};
+  gesture.current=null;smartGuidesRef.current?.clearGuides();};
  useEffect(()=>{const cancel=()=>{if(gesture.current)cleanup(gesture.current);};const key=(e:KeyboardEvent)=>{if(e.key==='Escape')cancel();};window.addEventListener('blur',cancel);window.addEventListener('keydown',key);return()=>{window.removeEventListener('blur',cancel);window.removeEventListener('keydown',key);cancel();};},[item.id,p.parentWidth,p.parentHeight,p.parentRotation,pxPerMm,enabled]);
  useLayoutEffect(()=>{if(edit&&textarea.current){textarea.current.focus();textarea.current.setSelectionRange(edit.selectionStart,edit.selectionEnd);}},[!!edit]);
  useEffect(()=>{mounted.current=true;return ()=>{mounted.current=false;const pending=useAppStore.getState().textEdit;
@@ -100,9 +104,35 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
    xPercent:item.xPercent+item.widthPercent/2+shifted.x/pw*100-next.widthPercent/2,
    yPercent:item.yPercent+item.heightPercent/2+shifted.y/ph*100-next.heightPercent/2},limits);
  };
+ const snapGeometry=(g:Gesture,commit:boolean)=>{
+  const next=geometry(g);
+  const sg=smartGuidesRef.current;
+  if(!sg||g.handle==='rotate'||Math.abs(p.parentRotation)>0.5||Math.abs(item.rotation)>0.5||p.parentWidth<=0||p.parentHeight<=0)return next;
+  const rectMm={
+   x:p.parentX+(p.parentWidth*next.xPercent)/100,
+   y:p.parentY+(p.parentHeight*next.yPercent)/100,
+   width:(p.parentWidth*next.widthPercent)/100,
+   height:(p.parentHeight*next.heightPercent)/100,
+  };
+  const snapped=sg.applySnap({
+   rectMm,
+   mode:g.handle==='move'?'move':'resize',
+   resizeHandle:g.handle==='move'?undefined:(g.handle as OverlayHandle),
+   keepAspect:!!(g.lock??lockedDefault),
+   excludeId:`overlay:${item.id}`,
+   commit,
+  });
+  const adjusted={
+   xPercent:((snapped.rectMm.x-p.parentX)/p.parentWidth)*100,
+   yPercent:((snapped.rectMm.y-p.parentY)/p.parentHeight)*100,
+   widthPercent:Math.max(1,(snapped.rectMm.width/p.parentWidth)*100),
+   heightPercent:Math.max(1,(snapped.rectMm.height/p.parentHeight)*100),
+  };
+  return centreWithinLimits(adjusted,limits);
+ };
  const paint=(g:Gesture)=>{
-  if(g.handle==='rotate'){g.node.style.transform=`rotate(${rotationFromPointer(g.centerX,g.centerY,g.x+g.dx,g.y+g.dy,g.startRotation,g.startAngle,g.lock?15:undefined)}deg)`;return;}
-  const next=geometry(g);g.visual.style.left=`${next.xPercent}%`;g.visual.style.top=`${next.yPercent}%`;g.visual.style.width=`${next.widthPercent}%`;g.visual.style.height=`${next.heightPercent}%`;
+  if(g.handle==='rotate'){smartGuidesRef.current?.clearGuides();g.node.style.transform=`rotate(${rotationFromPointer(g.centerX,g.centerY,g.x+g.dx,g.y+g.dy,g.startRotation,g.startAngle,g.lock?15:undefined)}deg)`;return;}
+  const next=snapGeometry(g,false);g.visual.style.left=`${next.xPercent}%`;g.visual.style.top=`${next.yPercent}%`;g.visual.style.width=`${next.widthPercent}%`;g.visual.style.height=`${next.heightPercent}%`;
  };
  const ensureCopy=(g:Gesture)=>{if(!g.copy||g.visual!==g.node||Math.hypot(g.dx,g.dy)<3)return;
   const clone=g.node.cloneNode(true) as HTMLElement;const src=g.node.querySelector('canvas,img'),dest=clone.querySelector('canvas,img');
@@ -130,7 +160,7 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
   const moved=Math.hypot(g.dx,g.dy)>=3;
   const patch:Partial<PageOverlay>=g.handle==='rotate'
     ? {rotation:rotationFromPointer(g.centerX,g.centerY,g.x+g.dx,g.y+g.dy,g.startRotation,g.startAngle,g.lock?15:undefined)}
-    : geometry(g);
+    : snapGeometry(g,true);
   cleanup(g);if(cancel||!moved)return;
   const live=useAppStore.getState().overlays.find(o=>o.id===item.id);if(!live || live!==item)return;
   if(g.copy)add({...item,...patch,id:newId()} as PageOverlay);else update(item.id,patch);

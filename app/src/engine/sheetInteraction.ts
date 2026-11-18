@@ -1,7 +1,8 @@
 import type { LayoutSettings, MarginsMm, PrinterInfo, PrinterMarginResult } from '@shared/models';
 
-export type Guide = { type: 'margin'; side: 'left' | 'right' | 'top' | 'bottom' }
-  | { type: 'gutter'; axis: 'horizontal' | 'vertical'; index: number };
+export type Guide =
+  | { type: 'margin'; side: 'left' | 'right' | 'top' | 'bottom' }
+  | { type: 'gutter'; axis: 'horizontal' | 'vertical'; index: number; edge?: 'leading' | 'trailing' | 'center' };
 export interface Point { x: number; y: number }
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(Math.max(min, max), value));
 
@@ -30,7 +31,7 @@ export function clampMarginsToMin(margins: MarginsMm, minMargins?: Partial<Margi
   };
 }
 
-/** Use sheet coordinates in mm; gutter handles follow the trailing edge of each gap. */
+/** Use sheet coordinates in mm; gutters expand/shrink symmetrically from their center or track the dragged edge. */
 export function moveLayoutGuide(
   layout: LayoutSettings,
   sheet: { widthMm: number; heightMm: number },
@@ -61,7 +62,14 @@ export function moveLayoutGuide(
   const max = (available - count * 5) / (count - 1);
   const delta = horizontal ? dx : dy;
   const key = horizontal ? 'horizontalGutterMm' : 'verticalGutterMm';
-  return { ...layout, [key]: clamp(layout[key] + delta * count / (guide.index + 1), 0, max) };
+  const edge = guide.edge ?? 'trailing';
+  const gutterDelta =
+    edge === 'center'
+      ? delta * 2
+      : edge === 'leading'
+        ? (-delta * count) / (count - guide.index - 1)
+        : (delta * count) / (guide.index + 1);
+  return { ...layout, [key]: clamp(layout[key] + gutterDelta, 0, max) };
 }
 
 export function measureEndpoint(start: Point, end: Point, shift: boolean): Point {

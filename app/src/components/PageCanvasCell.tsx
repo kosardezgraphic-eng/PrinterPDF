@@ -6,6 +6,7 @@ import type { PageEditScope } from '../store/useAppStore';
 import { dragCrop, IDENTITY_TRANSFORM, normalizeAngle, pageCropFractions, resizeRect, resizeProportionally, rotateVector, rotationFromPointer, type Handle, type Rect } from '../engine/pageGeometry';
 import { PageContentImage, pageImageStyle } from './PageContentImage';
 import { CrispPageCanvas, useCrispPageFrame } from './CrispPageCanvas';
+import { useSmartGuides } from './SmartGuidesOverlay';
 import { useAppStore } from '../store/useAppStore';
 
 export type CanvasTool = 'move' | 'crop' | 'layout' | 'measure';
@@ -51,10 +52,14 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
   const reorderCellLayer = useAppStore(state => state.reorderCellLayer);
   const openPageSetup = useAppStore(state => state.openPageSetup);
   const crispEnabled = useAppStore(state => state.settings.previewFidelity === 'crisp');
+  const smartGuides = useSmartGuides();
+  const smartGuidesRef = useRef(smartGuides);
+  smartGuidesRef.current = smartGuides;
   const page = cell.page!, occurrenceKey = cell.occurrenceKey!;
   const interaction = useRef<Gesture | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [delta, setDelta] = useState({ x:0, y:0, shift:false });
+  const [snappedDisplay, setSnappedDisplay] = useState<Rect | null>(null);
   const [active, setActive] = useState(false);
   const [menu, setMenu] = useState<{x:number;y:number} | null>(null);
   const longPress = useRef<{ pointerId:number; x:number; y:number; timer:ReturnType<typeof setTimeout> | null; fired:boolean } | null>(null);
@@ -68,7 +73,7 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
     // Changing tools during a touch/drag cancels the pending gesture.
     if (longPress.current?.timer) clearTimeout(longPress.current.timer);
     longPress.current = null;
-    if (interaction.current) { interaction.current = null; setActive(false); setDelta({x:0,y:0,shift:false}); }
+    if (interaction.current) { interaction.current = null; setActive(false); setDelta({x:0,y:0,shift:false}); setSnappedDisplay(null); smartGuidesRef.current?.clearGuides(); }
   }, [tool]);
   useEffect(() => {
     if (!menu) return;
@@ -84,16 +89,41 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
   const angle = active && gesture?.handle === 'rotate'
     ? rotationFromPointer(gesture.transform.rotationDeg ?? 0,gesture.centerX,gesture.centerY,gesture.x,gesture.y,gesture.x+delta.x,gesture.y+delta.y,delta.shift)
     : baseAngle;
-  const display = active && gesture && tool === 'move'
+  const rawDisplay = active && gesture && tool === 'move'
     ? gesture.handle === 'move' ? { ...base, x:base.x+delta.x, y:base.y+delta.y }
       : gesture.handle === 'rotate' ? base
       : rotatedResize(base,gesture.handle,delta.x,delta.y,baseAngle,(r,h,x,y) => resizeForMove(r,h,x,y,gesture.transform))
     : base;
+  const display = active && snappedDisplay ? snappedDisplay : rawDisplay;
   const cropFrame = active && gesture && tool === 'crop' && gesture.handle !== 'move' && gesture.handle !== 'rotate'
     ? rotatedResize(base,gesture.handle,delta.x,delta.y,baseAngle,resizeRect) : base;
   // Unedited fill-mode content keeps its historical cell clip. Moved/resized content is clipped only by the sheet.
   const clipToCell = !cell.allowOverflow && !(active && tool === 'move');
   const inset = clipToCell ? `inset(${Math.max(0,cell.cellYMm*pxPerMm-display.y)}px ${Math.max(0,display.x+display.width-(cell.cellXMm+cell.cellWidthMm)*pxPerMm)}px ${Math.max(0,display.y+display.height-(cell.cellYMm+cell.cellHeightMm)*pxPerMm)}px ${Math.max(0,cell.cellXMm*pxPerMm-display.x)}px)` : undefined;
+  const computeSnappedRect = (start: Gesture, dx: number, dy: number, commit: boolean): Rect | null => {
+    if (!smartGuides || tool !== 'move' || start.handle === 'rotate') return null;
+    const gAngle = normalizeAngle(start.transform.rotationDeg ?? 0);
+    if (start.handle !== 'move' && Math.abs(gAngle) > 0.5) return null;
+    const raw =
+      start.handle === 'move'
+        ? { ...start.rect, x: start.rect.x + dx, y: start.rect.y + dy }
+        : rotatedResize(start.rect, start.handle, dx, dy, gAngle, (r, h, x, y) => resizeForMove(r, h, x, y, start.transform));
+    const scale = Math.max(0.01, pxPerMm);
+    const res = smartGuides.applySnap({
+      rectMm: { x: raw.x / scale, y: raw.y / scale, width: raw.width / scale, height: raw.height / scale },
+      mode: start.handle === 'move' ? 'move' : 'resize',
+      resizeHandle: start.handle === 'move' ? undefined : start.handle,
+      keepAspect: start.handle !== 'move' && start.handle.length === 2,
+      excludeId: `cell:${occurrenceKey}`,
+      commit,
+    });
+    return {
+      x: res.rectMm.x * scale,
+      y: res.rectMm.y * scale,
+      width: res.rectMm.width * scale,
+      height: res.rectMm.height * scale,
+    };
+  };
   const begin = (event: React.PointerEvent<HTMLElement>, handle: Handle | 'move' | 'rotate') => {
     if (!canEdit || spaceDown || interaction.current || (event.pointerType === 'mouse' && event.button !== 0)) return;
     event.preventDefault(); event.stopPropagation();
@@ -102,7 +132,7 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
     interaction.current = { x:event.clientX, y:event.clientY, pointerId:event.pointerId, handle, rect:base, transform:cell.transform ?? IDENTITY_TRANSFORM,
       centerX:bounds ? bounds.left + bounds.width/2 : event.clientX, centerY:bounds ? bounds.top + bounds.height/2 : event.clientY };
     event.currentTarget.setPointerCapture(event.pointerId);
-    setDelta({ x:0, y:0, shift:false }); setActive(true);
+    setDelta({ x:0, y:0, shift:false }); setSnappedDisplay(null); setActive(true);
   };
   const move = (event: React.PointerEvent<HTMLElement>) => {
     const press = longPress.current;
@@ -114,14 +144,19 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
     }
     const start = interaction.current;
     if (!start || start.pointerId !== event.pointerId) return;
-    event.preventDefault(); event.stopPropagation(); setDelta({ x:event.clientX-start.x, y:event.clientY-start.y, shift:event.shiftKey });
+    event.preventDefault(); event.stopPropagation();
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    setDelta({ x:dx, y:dy, shift:event.shiftKey });
+    setSnappedDisplay(computeSnappedRect(start, dx, dy, false));
   };
   const end = (event: React.PointerEvent<HTMLElement>, canceled = false) => {
     const start = interaction.current;
     if (!start || start.pointerId !== event.pointerId) return;
     event.preventDefault(); event.stopPropagation();
     const dx = event.clientX-start.x, dy = event.clientY-start.y;
-    interaction.current = null; setActive(false); setDelta({ x:0, y:0, shift:false });
+    interaction.current = null; setActive(false); setDelta({ x:0, y:0, shift:false }); setSnappedDisplay(null);
+    smartGuides?.clearGuides();
     if (canceled || Math.hypot(dx, dy) < (event.pointerType === 'touch' ? 8 : 0.5)) return;
     if (tool === 'move' && start.handle === 'rotate') {
       const rotationDeg = rotationFromPointer(start.transform.rotationDeg ?? 0,start.centerX,start.centerY,start.x,start.y,event.clientX,event.clientY,event.shiftKey);
@@ -132,7 +167,8 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
       const local = rotateVector(dx,dy,-(start.transform.rotationDeg ?? 0));
       applyPageGeometry(page.id, scope, { kind:'crop', crop:dragCrop(pageCropFractions(page), cell.effectiveRotation, start.handle, local.x, local.y, start.rect.width, start.rect.height) });
     } else if (tool === 'move' && start.handle !== 'rotate') {
-      const rect = start.handle === 'move' ? { ...start.rect, x:start.rect.x+dx, y:start.rect.y+dy } : rotatedResize(start.rect,start.handle,dx,dy,start.transform.rotationDeg ?? 0,(r,h,x,y) => resizeForMove(r,h,x,y,start.transform));
+      const rawRect = start.handle === 'move' ? { ...start.rect, x:start.rect.x+dx, y:start.rect.y+dy } : rotatedResize(start.rect,start.handle,dx,dy,start.transform.rotationDeg ?? 0,(r,h,x,y) => resizeForMove(r,h,x,y,start.transform));
+      const rect = computeSnappedRect(start, dx, dy, true) ?? rawRect;
       const prev = start.transform;
       const transform: PageTransform = {
         ...prev,

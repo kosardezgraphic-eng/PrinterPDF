@@ -43,7 +43,7 @@ describe('sheet guides and ruler', () => {
       left: 4,
     });
   });
-  it('moves the trailing edge of any gutter by the dragged amount, with a uniform gap', () => {
+  it('moves leading, trailing, or center edges of any gutter symmetrically with a uniform gap', () => {
     const sheet = {widthMm:200,heightMm:300};
     const before = computeImpositionSheets([page],layout)[0];
     for (const index of [0,1]) {
@@ -53,6 +53,16 @@ describe('sheet guides and ruler', () => {
       const newTrailing = after.cells.find(c => c.row === 0 && c.col === index+1)!.cellXMm;
       expect(newTrailing-oldTrailing).toBeCloseTo(4);
       expect(updated.horizontalGutterMm).toBeGreaterThan(layout.horizontalGutterMm);
+
+      const updatedLeading = moveLayoutGuide(layout,sheet,{type:'gutter',axis:'horizontal',index,edge:'leading'},-4,0);
+      const afterLeading = computeImpositionSheets([page],updatedLeading)[0];
+      const oldLeadingCell = before.cells.find(c => c.row === 0 && c.col === index)!;
+      const newLeadingCell = afterLeading.cells.find(c => c.row === 0 && c.col === index)!;
+      expect((newLeadingCell.cellXMm + newLeadingCell.cellWidthMm) - (oldLeadingCell.cellXMm + oldLeadingCell.cellWidthMm)).toBeCloseTo(-4);
+      expect(updatedLeading.horizontalGutterMm).toBeGreaterThan(layout.horizontalGutterMm);
+
+      const updatedCenter = moveLayoutGuide(layout,sheet,{type:'gutter',axis:'horizontal',index,edge:'center'},4,0);
+      expect(updatedCenter.horizontalGutterMm).toBeCloseTo(layout.horizontalGutterMm + 8);
     }
     const updated = moveLayoutGuide(layout,sheet,{type:'gutter',axis:'vertical',index:0},0,10000);
     const result = computeImpositionSheets([page],updated)[0];

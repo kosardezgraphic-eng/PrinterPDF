@@ -297,6 +297,8 @@ interface AppState {
   zoomPercent: number;
   viewMode: PreviewViewMode;
   showRulers: boolean;
+  snapEnabled: boolean;
+  smartGuidesEnabled: boolean;
   loupeEnabled: boolean;
   transparentMode: boolean;
   isExportingPdf: boolean;
@@ -454,6 +456,8 @@ interface AppState {
   setZoomPercent: (zoom: number) => void;
   setViewMode: (mode: PreviewViewMode) => void;
   setShowRulers: (show: boolean) => void;
+  setSnapEnabled: (enabled: boolean) => void;
+  setSmartGuidesEnabled: (enabled: boolean) => void;
   setLoupeEnabled: (enabled: boolean) => void;
   setTransparentMode: (enabled: boolean) => void;
   setModalState: (
@@ -676,6 +680,8 @@ export const useAppStore = create<AppState>((set, get) => {
     zoomPercent: 100,
     viewMode: 'single',
     showRulers: true,
+    snapEnabled: true,
+    smartGuidesEnabled: true,
     loupeEnabled: false,
     transparentMode: false,
     isExportingPdf: false,
@@ -3101,6 +3107,8 @@ export const useAppStore = create<AppState>((set, get) => {
       set({ zoomPercent: Math.max(5, Math.min(400, Math.round(zoom))) }),
     setViewMode: (mode) => set({ viewMode: mode }),
     setShowRulers: (show) => set({ showRulers: show }),
+    setSnapEnabled: (enabled) => set({ snapEnabled: enabled }),
+    setSmartGuidesEnabled: (enabled) => set({ smartGuidesEnabled: enabled }),
     setLoupeEnabled: (enabled) => set({ loupeEnabled: enabled }),
     setTransparentMode: (enabled) => set({ transparentMode: enabled }),
 

@@ -8,7 +8,7 @@ interface GuideProps {
   language: string; unit: MeasurementUnit; minMargins?: MarginsMm; onDraft: (layout: LayoutSettings | null) => void;
   onCommit: (layout: LayoutSettings) => void;
 }
-/** Global, uniform gutters are changed by dragging the trailing edge of a gap. */
+/** Global, uniform gutters are centered in each gap and expand or shrink symmetrically toward both sides. */
 export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit, minMargins, onDraft, onCommit }: GuideProps) {
   const guideId = useId();
   const dragging = useRef<{ pointer: number; x: number; y: number; scaleX: number; scaleY: number; guide: Guide; base: LayoutSettings } | null>(null);
@@ -47,7 +47,20 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit
     const rect = rectRef.current!.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
     e.preventDefault(); e.stopPropagation();
-    dragging.current = { pointer:e.pointerId, x:e.clientX, y:e.clientY, scaleX:sheet.widthMm/rect.width, scaleY:sheet.heightMm/rect.height, guide, base:layout };
+    let resolvedGuide: Guide = guide;
+    if (guide.type === 'gutter') {
+      const btnRect = e.currentTarget.getBoundingClientRect();
+      if (guide.axis === 'horizontal' && btnRect.width >= 16) {
+        const relX = (e.clientX - btnRect.left) / btnRect.width;
+        resolvedGuide = { ...guide, edge: relX <= 0.35 ? 'leading' : relX >= 0.65 ? 'trailing' : 'center' };
+      } else if (guide.axis === 'vertical' && btnRect.height >= 16) {
+        const relY = (e.clientY - btnRect.top) / btnRect.height;
+        resolvedGuide = { ...guide, edge: relY <= 0.35 ? 'leading' : relY >= 0.65 ? 'trailing' : 'center' };
+      } else {
+        resolvedGuide = { ...guide, edge: 'center' };
+      }
+    }
+    dragging.current = { pointer:e.pointerId, x:e.clientX, y:e.clientY, scaleX:sheet.widthMm/rect.width, scaleY:sheet.heightMm/rect.height, guide:resolvedGuide, base:layout };
     setActiveGuideLabel(label);
     e.currentTarget.setPointerCapture(e.pointerId);
   };
@@ -106,29 +119,66 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit
   const fa = language === 'fa';
   const margins = effectiveLayout.marginsMm;
   const rows = Math.max(1,Math.min(10,Math.floor(effectiveLayout.rows))), cols = Math.max(1,Math.min(10,Math.floor(effectiveLayout.cols)));
-  const cellW = Math.max(5, (Math.max(10,sheet.widthMm-margins.left-margins.right)-(cols-1)*Math.max(0,effectiveLayout.horizontalGutterMm))/cols);
-  const cellH = Math.max(5, (Math.max(10,sheet.heightMm-margins.top-margins.bottom)-(rows-1)*Math.max(0,effectiveLayout.verticalGutterMm))/rows);
-  const guides: { guide:Guide; x:number; y:number; label:string; cursor:'col-resize'|'row-resize'; horizontal:boolean }[] = [
+  const hGutterMm = Math.max(0, effectiveLayout.horizontalGutterMm);
+  const vGutterMm = Math.max(0, effectiveLayout.verticalGutterMm);
+  const cellW = Math.max(5, (Math.max(10,sheet.widthMm-margins.left-margins.right)-(cols-1)*hGutterMm)/cols);
+  const cellH = Math.max(5, (Math.max(10,sheet.heightMm-margins.top-margins.bottom)-(rows-1)*vGutterMm)/rows);
+  const guides: { guide:Guide; x:number; y:number; startMm?:number; endMm?:number; label:string; cursor:'col-resize'|'row-resize'; horizontal:boolean }[] = [
     {guide:{type:'margin',side:'left'},x:margins.left,y:sheet.heightMm/4,label:fa?'حاشیه چپ':'Left margin',cursor:'col-resize',horizontal:false},
     {guide:{type:'margin',side:'right'},x:sheet.widthMm-margins.right,y:sheet.heightMm/4,label:fa?'حاشیه راست':'Right margin',cursor:'col-resize',horizontal:false},
     {guide:{type:'margin',side:'top'},x:sheet.widthMm/4,y:margins.top,label:fa?'حاشیه بالا':'Top margin',cursor:'row-resize',horizontal:true},
     {guide:{type:'margin',side:'bottom'},x:sheet.widthMm/4,y:sheet.heightMm-margins.bottom,label:fa?'حاشیه پایین':'Bottom margin',cursor:'row-resize',horizontal:true},
-    ...Array.from({length:cols-1},(_,index) => ({guide:{type:'gutter',axis:'horizontal',index} as Guide,
-      x:margins.left+(index+1)*cellW+(index+1)*Math.max(0,effectiveLayout.horizontalGutterMm),y:margins.top+(sheet.heightMm-margins.top-margins.bottom)*.35,
-      label:fa?`فاصله ستون‌ها ${index+1} (همه ستون‌ها)`:`Column gutter ${index+1} (all columns)`,cursor:'col-resize' as const,horizontal:false})),
-    ...Array.from({length:rows-1},(_,index) => ({guide:{type:'gutter',axis:'vertical',index} as Guide,
-      x:margins.left+(sheet.widthMm-margins.left-margins.right)*.35,y:margins.top+(index+1)*cellH+(index+1)*Math.max(0,effectiveLayout.verticalGutterMm),
-      label:fa?`فاصله ردیف‌ها ${index+1} (همه ردیف‌ها)`:`Row gutter ${index+1} (all rows)`,cursor:'row-resize' as const,horizontal:true})),
+    ...Array.from({length:cols-1},(_,index) => {
+      const startMm = margins.left + (index + 1) * cellW + index * hGutterMm;
+      const endMm = startMm + hGutterMm;
+      const centerMm = startMm + hGutterMm / 2;
+      return {
+        guide:{type:'gutter',axis:'horizontal',index} as Guide,
+        x:centerMm,
+        y:margins.top+(sheet.heightMm-margins.top-margins.bottom)*.35,
+        startMm,
+        endMm,
+        label:fa?`فاصله ستون‌ها ${index+1} (همه ستون‌ها)`:`Column gutter ${index+1} (all columns)`,
+        cursor:'col-resize' as const,
+        horizontal:false,
+      };
+    }),
+    ...Array.from({length:rows-1},(_,index) => {
+      const startMm = margins.top + (index + 1) * cellH + index * vGutterMm;
+      const endMm = startMm + vGutterMm;
+      const centerMm = startMm + vGutterMm / 2;
+      return {
+        guide:{type:'gutter',axis:'vertical',index} as Guide,
+        x:margins.left+(sheet.widthMm-margins.left-margins.right)*.35,
+        y:centerMm,
+        startMm,
+        endMm,
+        label:fa?`فاصله ردیف‌ها ${index+1} (همه ردیف‌ها)`:`Row gutter ${index+1} (all rows)`,
+        cursor:'row-resize' as const,
+        horizontal:true,
+      };
+    }),
   ];
   const hatchPattern = 'repeating-linear-gradient(135deg, rgba(100,116,139,0.34) 0px, rgba(100,116,139,0.34) 2px, rgba(148,163,184,0.12) 2px, rgba(148,163,184,0.12) 6px)';
   const innerWidthPx = Math.max(16, (sheet.widthMm - margins.left - margins.right) * pxPerMm);
   const innerHeightPx = Math.max(16, (sheet.heightMm - margins.top - margins.bottom) * pxPerMm);
   return <div ref={rectRef} data-layout-guides className="pointer-events-none absolute inset-0 z-[15]">
     <div className="absolute border border-dashed border-slate-500/80" style={{ left:margins.left*pxPerMm, right:margins.right*pxPerMm, top:margins.top*pxPerMm, bottom:margins.bottom*pxPerMm }} />
-    {guides.filter(item => item.guide.type === 'gutter').map(item => <div key={`line-${item.label}`} className="absolute border-slate-500/80 border-dashed"
-      style={item.guide.type === 'gutter' && item.guide.axis === 'horizontal'
-        ? {left:item.x*pxPerMm, top:margins.top*pxPerMm, bottom:margins.bottom*pxPerMm, borderLeftWidth:1}
-        : {top:item.y*pxPerMm, left:margins.left*pxPerMm, right:margins.right*pxPerMm, borderTopWidth:1}} />)}
+    {guides.filter(item => item.guide.type === 'gutter').flatMap(item => {
+      const isColGutter = item.guide.type === 'gutter' && item.guide.axis === 'horizontal';
+      const startMm = item.startMm ?? (isColGutter ? item.x : item.y);
+      const endMm = item.endMm ?? startMm;
+      const positions = endMm - startMm > 0.05 ? [startMm, endMm] : [isColGutter ? item.x : item.y];
+      return positions.map((posMm, edgeIdx) => (
+        <div
+          key={`line-${item.label}-${edgeIdx}`}
+          className="absolute border-slate-500/80 border-dashed"
+          style={isColGutter
+            ? { left: posMm * pxPerMm, top: margins.top * pxPerMm, bottom: margins.bottom * pxPerMm, borderLeftWidth: 1 }
+            : { top: posMm * pxPerMm, left: margins.left * pxPerMm, right: margins.right * pxPerMm, borderTopWidth: 1 }}
+        />
+      ));
+    })}
     {guides.map(({guide,x,y,label}, index) => {
       const mm = guide.type === 'margin' ? margins[guide.side] : guide.axis === 'horizontal' ? (effectiveLayout.booklet?.enabled ? effectiveLayout.booklet.spineWidthMm : effectiveLayout.horizontalGutterMm) : effectiveLayout.verticalGutterMm;
       const value = `${convertMmToUnit(mm,unit)} ${unit}`;
@@ -143,18 +193,21 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit
                 ? { left: (margins.left + (sheet.widthMm - margins.left - margins.right) / 2) * pxPerMm, top: (margins.top * pxPerMm) / 2, transform: 'translate(-50%, -50%)' }
                 : { left: (margins.left + (sheet.widthMm - margins.left - margins.right) / 2) * pxPerMm, top: (sheet.heightMm - margins.bottom / 2) * pxPerMm, transform: 'translate(-50%, -50%)' }
           : guide.axis === 'horizontal'
-            ? { left: (x - Math.max(0, mm) / 2) * pxPerMm, top: (margins.top + (sheet.heightMm - margins.top - margins.bottom) / 2) * pxPerMm, transform: 'translate(-50%, -50%)' }
-            : { left: (margins.left + (sheet.widthMm - margins.left - margins.right) / 2) * pxPerMm, top: (y - Math.max(0, mm) / 2) * pxPerMm, transform: 'translate(-50%, -50%)' }
-        : { left: Math.max(2, Math.min(sheet.widthMm * pxPerMm - 56, x * pxPerMm + 14)), top: Math.max(2, Math.min(sheet.heightMm * pxPerMm - 20, y * pxPerMm - 10)) };
+            ? { left: x * pxPerMm, top: (margins.top + (sheet.heightMm - margins.top - margins.bottom) / 2) * pxPerMm, transform: 'translate(-50%, -50%)' }
+            : { left: (margins.left + (sheet.widthMm - margins.left - margins.right) / 2) * pxPerMm, top: y * pxPerMm, transform: 'translate(-50%, -50%)' }
+        : guide.type === 'gutter'
+          ? { left: Math.max(24, Math.min(sheet.widthMm * pxPerMm - 24, x * pxPerMm)), top: Math.max(12, Math.min(sheet.heightMm * pxPerMm - 12, y * pxPerMm)), transform: 'translate(-50%, -50%)' }
+          : { left: Math.max(2, Math.min(sheet.widthMm * pxPerMm - 56, x * pxPerMm + 14)), top: Math.max(2, Math.min(sheet.heightMm * pxPerMm - 20, y * pxPerMm - 10)) };
       return <span key={`value-${label}`} id={`${guideId}-${index}`} data-guide-value={label} dir="ltr"
         style={bandCenterStyle}
         className={`absolute z-[16] whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-semibold shadow-sm ${isActive ? 'bg-slate-900/90 text-white' : 'bg-white/90 text-slate-800'}`}>{value}</span>;
     })}
     {guides.map(({guide,x,y,label,cursor,horizontal}, index) => {
       const mm = guide.type === 'margin' ? margins[guide.side] : guide.axis === 'horizontal' ? (effectiveLayout.booklet?.enabled ? effectiveLayout.booklet.spineWidthMm : effectiveLayout.horizontalGutterMm) : effectiveLayout.verticalGutterMm;
+      const bandThicknessPx = guide.type === 'gutter' ? Math.max(10, Math.max(0, mm) * pxPerMm) : 10;
       const stripStyle = horizontal
-        ? { left: margins.left * pxPerMm, top: y * pxPerMm, width: innerWidthPx, height: 10, cursor, touchAction: 'none' as const, transform: 'translateY(-50%)', backgroundImage: hatchPattern }
-        : { left: x * pxPerMm, top: margins.top * pxPerMm, width: 10, height: innerHeightPx, cursor, touchAction: 'none' as const, transform: 'translateX(-50%)', backgroundImage: hatchPattern };
+        ? { left: margins.left * pxPerMm, top: y * pxPerMm, width: innerWidthPx, height: bandThicknessPx, cursor, touchAction: 'none' as const, transform: 'translateY(-50%)', backgroundImage: hatchPattern }
+        : { left: x * pxPerMm, top: margins.top * pxPerMm, width: bandThicknessPx, height: innerHeightPx, cursor, touchAction: 'none' as const, transform: 'translateX(-50%)', backgroundImage: hatchPattern };
       return <button key={label} type="button" aria-describedby={`${guideId}-${index}`} title={`${label}: ${convertMmToUnit(mm,unit)} ${unit}`} aria-label={label}
       onClick={e => e.stopPropagation()} onPointerDown={e => begin(e,guide,label)} onPointerMove={move} onPointerUp={e => finish(e)} onPointerCancel={e => finish(e,true)}
       onLostPointerCapture={e => finish(e,true)}

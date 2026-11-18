@@ -28,6 +28,7 @@ import {
   FlipHorizontal2,
   Trash2,
   FileDown,
+  Magnet,
 } from 'lucide-react';
 import { MatrixSizeFields } from './MatrixSizeFields';
 import { SettingsPresetMenu } from './SettingsPresets';
@@ -63,6 +64,8 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
     isBatchRunning,
     viewMode,
     showRulers,
+    snapEnabled,
+    smartGuidesEnabled,
     loupeEnabled,
     transparentMode,
     zoomPercent,
@@ -96,6 +99,8 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
     retryFailedBatchJobs,
     setViewMode,
     setShowRulers,
+    setSnapEnabled,
+    setSmartGuidesEnabled,
     setLoupeEnabled,
     setTransparentMode,
     setZoomPercent,
@@ -978,6 +983,28 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
                 />
                 <Ruler className="h-3.5 w-3.5 text-sky-400" />
                 <span>{lang === 'fa' ? 'نمایش خط‌کش دقیق' : 'Rulers'}</span>
+              </label>
+
+              <label className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-slate-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={snapEnabled}
+                  onChange={(e) => setSnapEnabled(e.target.checked)}
+                  className="accent-purple-500"
+                />
+                <Magnet className="h-3.5 w-3.5 text-purple-400" />
+                <span>{lang === 'fa' ? 'چسبندگی آهن‌ربایی' : 'Magnetic Snap'}</span>
+              </label>
+
+              <label className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-slate-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={smartGuidesEnabled}
+                  onChange={(e) => setSmartGuidesEnabled(e.target.checked)}
+                  className="accent-purple-500"
+                />
+                <Sparkles className="h-3.5 w-3.5 text-purple-400" />
+                <span>{lang === 'fa' ? 'خطوط راهنمای بنفش' : 'Purple Smart Guides'}</span>
               </label>
 
               <label
