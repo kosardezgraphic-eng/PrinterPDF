@@ -663,6 +663,24 @@ export interface PageOverlayNumbering extends OverlayBase {
   format: NumberingNumberFormat; template: string; startOffset: number; padZeros: number; customScript: string;
   align?: 'left' | 'center' | 'right';
 }
+/**
+ * One erase gesture on a picture, in **percent of the piece of the box the picture actually paints** (its
+ * fit rectangle) — the same space the preview masks and the exporter cuts, so a hole stays on the artwork
+ * when the box is moved, resized or letterboxed.
+ *
+ * It is stored as geometry, not as a rasterised copy of the file: the original bytes stay intact, an erased
+ * picture can be erased further or restored completely, and the project file stays small. A brush is a list
+ * of points with a physical radius (millimetres, so the brush feels the same size whatever the zoom); a
+ * region is the marquee rectangle itself.
+ */
+export interface EraseBrushStroke { mode: 'brush'; radiusMm: number; points: { x: number; y: number }[] }
+export interface EraseRegion { mode: 'region'; x: number; y: number; width: number; height: number }
+export type EraseShape = EraseBrushStroke | EraseRegion;
+
+/** The most erase gestures one picture may carry, and the most points one brush stroke may carry. */
+export const ERASE_SHAPE_LIMIT = 240;
+export const ERASE_POINT_LIMIT = 900;
+
 export interface PageOverlayImage extends OverlayBase {
   kind: 'image';
   /** data: URL of the picture; kept inside the project file so the overlay survives reloading. */
@@ -675,7 +693,56 @@ export interface PageOverlayImage extends OverlayBase {
   fit?: 'fill' | 'contain';
   /** Mirrors the picture without touching the box geometry. */
   flipHorizontal?: boolean; flipVertical?: boolean;
+  /**
+   * Negates the picture's colours. A flag, never a rewrite of the pixels, so pressing the button again
+   * is the way back — an "invert" that baked the file would leave the operator holding a double inversion
+   * they cannot undo without reloading the artwork.
+   */
+  invert?: boolean;
+  /** Holes punched into the picture by the eraser. Empty or absent means nothing was erased. */
+  erase?: EraseShape[];
 }
+/**
+ * Erase gestures a renderer can be handed. Percentages are kept inside a generous band (a hole may start
+ * outside the box and cross it, but `-9000` is a corrupted file, not a stroke), the brush radius is a real
+ * millimetre size, and a stroke without points or a region without size is dropped rather than drawn.
+ */
+export function sanitizeEraseShapes(raw: unknown): EraseShape[] {
+  if (!Array.isArray(raw)) return [];
+  const within = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? Math.max(-200, Math.min(300, value)) : 0);
+  const out: EraseShape[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const source = entry as Record<string, unknown>;
+    if (source.mode === 'region') {
+      const rawWidth = typeof source.width === 'number' && Number.isFinite(source.width) ? source.width : 0;
+      const rawHeight = typeof source.height === 'number' && Number.isFinite(source.height) ? source.height : 0;
+      const width = Math.max(0, Math.min(500, rawWidth)), height = Math.max(0, Math.min(500, rawHeight));
+      if (width < 0.01 || height < 0.01) continue;
+      out.push({ mode: 'region', x: within(source.x), y: within(source.y), width, height });
+      continue;
+    }
+    if (source.mode === 'brush') {
+      const rawPoints = Array.isArray(source.points) ? source.points : [];
+      const radiusMm = typeof source.radiusMm === 'number' && Number.isFinite(source.radiusMm)
+        ? Math.max(0.05, Math.min(500, Math.abs(source.radiusMm))) : 2;
+      const points: { x: number; y: number }[] = [];
+      for (const point of rawPoints) {
+        if (!point || typeof point !== 'object') continue;
+        const p = point as Record<string, unknown>;
+        if (typeof p.x !== 'number' || typeof p.y !== 'number') continue;
+        if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+        points.push({ x: within(p.x), y: within(p.y) });
+        if (points.length >= ERASE_POINT_LIMIT) break;
+      }
+      if (!points.length) continue;
+      out.push({ mode: 'brush', radiusMm, points });
+    }
+    if (out.length >= ERASE_SHAPE_LIMIT) break;
+  }
+  return out;
+}
+
 export type PageOverlay = PageOverlayText | PageOverlayShape | PageOverlayNumbering | PageOverlayImage;
 
 /**

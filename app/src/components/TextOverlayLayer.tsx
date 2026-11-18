@@ -1,9 +1,11 @@
-import React,{useEffect,useLayoutEffect,useRef} from 'react';
+import React,{useEffect,useLayoutEffect,useRef,useState} from 'react';
 import type {ComputedSheetSide,PageItem,PageOverlay,PageOverlayImage,PageOverlayShape,PageOverlayText} from '@shared/models';
 import {drawOverlayText} from '../engine/textOverlays';
 import {imageDrawRect,overlayPlacements,type OverlayPlacement} from '../engine/overlayPlacements';
 import {centreWithinLimits,moveOverlay,overlayLimitsForBox,resizeOverlay,resizeOverlayKeepingAspect,rotationFromPointer,pointerAngle,type OverlayHandle,type OverlayLimits} from '../engine/overlayGeometry';
 import {rotateVector} from '../engine/pageGeometry';
+import type {EraseShape} from '@shared/models';
+import {beginEraseShape,commitEraseShape,eraseMaskCss,eraseShapeIsMeaningful,eraseShapeParts,growEraseShape} from '../engine/imageErase';
 import {MM_PER_PT, SHAPE_NAMES, shapeCommands, shapeDashPattern, shapeHasFill, shapeIsStrokedOnly, shapeSvgPath} from '../engine/shapes';
 import {useSmartGuides} from './SmartGuidesOverlay';
 import {useAppStore} from '../store/useAppStore';
@@ -25,12 +27,49 @@ function TextCanvas({item,width,height,pxPerMm}:{item:PageOverlayText;width:numb
  },[item,width,height,pxPerMm]);
  return <canvas ref={ref} style={{width:'100%',height:'100%',display:'block',opacity:item.opacity}} aria-hidden="true"/>;
 }
-/** Pictures are shown unscaled-by-JavaScript: the browser scales the same mm box the exporter rasterizes. */
-function ImagePicture({item,width,height}:{item:PageOverlayImage;width:number;height:number}) {
- const rect=imageDrawRect(item,width,height);
+/** The box a picture paints in, in millimetres: what the eraser's percentages and the mask's viewBox share. */
+function eraseSpaceOf(item:PageOverlayImage,widthMm:number,heightMm:number) {
+ const rect=imageDrawRect(item,widthMm,heightMm);
+ return {rect,box:{width:Math.max(0.0001,rect.width),height:Math.max(0.0001,rect.height),widthMm:Math.max(0.0001,rect.width),heightMm:Math.max(0.0001,rect.height)}};
+}
+/**
+ * Pictures are shown unscaled-by-JavaScript: the browser scales the same mm box the exporter rasterizes.
+ *
+ * The eraser and the colour inversion are applied here as a mask and a filter, in the same millimetre space
+ * `rasterizeOverlayImage` cuts the export bitmap in — the screen and the sheet therefore remove exactly the
+ * same part of the same picture, which is the whole reason an erase is stored as geometry instead of pixels.
+ */
+function ImagePicture({item,width,height,erasing,live}:{item:PageOverlayImage;width:number;height:number;erasing?:boolean;live?:EraseShape|null}) {
+ const {rect,box}=eraseSpaceOf(item,width,height);
  const fit=rect.width>0&&rect.height>0?{left:`${rect.x/width*100}%`,top:`${rect.y/height*100}%`,width:`${rect.width/width*100}%`,height:`${rect.height/height*100}%`}:{left:'0%',top:'0%',width:'100%',height:'100%'};
- return <img src={item.src} alt={item.name} draggable={false} style={{position:'absolute',...fit,maxWidth:'100%',maxHeight:'100%',
-   transform:`scaleX(${item.flipHorizontal?-1:1}) scaleY(${item.flipVertical?-1:1})`,opacity:item.opacity,pointerEvents:'none',userSelect:'none'}}/>;
+ const mask=eraseMaskCss(item.erase,box);
+ const mirror=`scaleX(${item.flipHorizontal?-1:1}) scaleY(${item.flipVertical?-1:1})`;
+ return <>
+   <img src={item.src} alt={item.name} draggable={false} style={{position:'absolute',...fit,maxWidth:'100%',maxHeight:'100%',
+     transform:mirror,opacity:item.opacity,pointerEvents:'none',userSelect:'none',
+     ...(item.invert?{filter:'invert(1)'}:{}),
+     ...(mask?{maskImage:mask,WebkitMaskImage:mask,maskSize:'100% 100%',WebkitMaskSize:'100% 100%',maskRepeat:'no-repeat',WebkitMaskRepeat:'no-repeat'}:{}),
+     ...(erasing?{outline:'1px dashed #f87171'}:{})}}/>
+   {/* The stroke in progress, on the same rectangle and with the same mirror as the picture it will cut, so
+       the red band sits under the cursor and lands exactly where the mask will. */}
+   {live && <div aria-hidden="true" style={{position:'absolute',...fit,transform:mirror,pointerEvents:'none'}}><EraseLiveMark shape={live} widthMm={rect.width} heightMm={rect.height}/></div>}
+ </>;
+}
+
+/**
+ * What the eraser is eating while the pointer is still down: the pending gesture drawn in the same
+ * millimetre space as the mask, in the red of "this will not be on the paper". No second renderer —
+ * `eraseShapeParts` is the only geometry, so the band cannot drift away from what the release commits.
+ */
+function EraseLiveMark({shape,widthMm,heightMm}:{shape:EraseShape;widthMm:number;heightMm:number}) {
+ const {holes,rects}=eraseShapeParts(shape,{width:widthMm,height:heightMm,widthMm,heightMm});
+ return <svg data-erase-live aria-hidden="true" width="100%" height="100%" style={{position:'absolute',inset:0,pointerEvents:'none',overflow:'visible'}}
+   viewBox={`0 0 ${widthMm} ${heightMm}`} preserveAspectRatio="none">
+   <g fill="#ef4444" fillOpacity="0.4" stroke="#ef4444" strokeOpacity="0.9" strokeWidth="0.2">
+     {rects.map((r,i)=><rect key={`r${i}`} x={r.x} y={r.y} width={r.width} height={r.height}/>)}
+     {holes.map((h,i)=><ellipse key={`h${i}`} cx={h.cx} cy={h.cy} rx={h.rx} ry={h.ry}/>)}
+   </g>
+ </svg>;
 }
 /**
  * A drawn shape in the preview. The path comes from the same `shapeCommands` the exported PDF turns into
@@ -70,6 +109,27 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
  const gesture=useRef<Gesture|null>(null);
  const isImage='image' in p;
  const isShape='shape' in p;
+ const eraseTool=useAppStore(s=>s.eraseTool);
+ const eraseBrushMm=useAppStore(s=>s.eraseBrushMm);
+ /** The stroke under the pointer, kept out of the store until the button is released. */
+ const [liveErase,setLiveErase]=useState<EraseShape|null>(null);
+ const erase=useRef<{pointer:number;anchor:{x:number;y:number};shape:EraseShape}|null>(null);
+ // A locked layer or an open text edit keeps the pointer: the eraser paints on the picture, and nowhere else.
+ const eraseActive=!!isImage && !!enabled && !edit && eraseTool!=='off';
+ /**
+  * A client point → percent of the picture **as it is painted**, not of the box around it, so a `contain`
+  * letterbox cannot make the hole land somewhere other than under the cursor. A mirrored picture is flipped
+  * back here because the mask is applied before the CSS transform — the hole must follow the artwork, and
+  * the artwork is on the other side of the mirror.
+  */
+ const erasePoint=(node:HTMLElement,clientX:number,clientY:number)=>{
+   const img=node.querySelector('img')?.getBoundingClientRect()??node.getBoundingClientRect();
+   const image=(p as {image:PageOverlayImage}).image;
+   let x=(clientX-img.left)/Math.max(1,img.width)*100, y=(clientY-img.top)/Math.max(1,img.height)*100;
+   if(image.flipHorizontal)x=100-x;
+   if(image.flipVertical)y=100-y;
+   return {x,y};
+ };
  /** Images and text are free by default; page numbers keep their ratio unless Shift is held. */
  const lockedDefault=item.lockAspect ?? item.kind==='numbering';
  /**
@@ -84,7 +144,9 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
   if(g.visual!==g.node)g.visual.remove();
   else{g.node.style.left=`${item.xPercent}%`;g.node.style.top=`${item.yPercent}%`;g.node.style.width=`${item.widthPercent}%`;g.node.style.height=`${item.heightPercent}%`;g.node.style.transform=`rotate(${item.rotation}deg)`;}
   gesture.current=null;smartGuidesRef.current?.clearGuides();};
- useEffect(()=>{const cancel=()=>{if(gesture.current)cleanup(gesture.current);};const key=(e:KeyboardEvent)=>{if(e.key==='Escape')cancel();};window.addEventListener('blur',cancel);window.addEventListener('keydown',key);return()=>{window.removeEventListener('blur',cancel);window.removeEventListener('keydown',key);cancel();};},[item.id,p.parentWidth,p.parentHeight,p.parentRotation,pxPerMm,enabled]);
+ useEffect(()=>{const cancel=()=>{if(gesture.current)cleanup(gesture.current);
+  // An erase that was never released must not be left hanging on the screen, and must not be committed either.
+  if(erase.current){erase.current=null;setLiveErase(null);}};const key=(e:KeyboardEvent)=>{if(e.key==='Escape')cancel();};window.addEventListener('blur',cancel);window.addEventListener('keydown',key);return()=>{window.removeEventListener('blur',cancel);window.removeEventListener('keydown',key);cancel();};},[item.id,p.parentWidth,p.parentHeight,p.parentRotation,pxPerMm,enabled]);
  useLayoutEffect(()=>{if(edit&&textarea.current){textarea.current.focus();textarea.current.setSelectionRange(edit.selectionStart,edit.selectionEnd);}},[!!edit]);
  useEffect(()=>{mounted.current=true;return ()=>{mounted.current=false;const pending=useAppStore.getState().textEdit;
   if(pending?.occurrenceKey===p.key)queueMicrotask(()=>{if(!mounted.current && useAppStore.getState().textEdit===pending)useAppStore.getState().finishTextEdit();});};},[p.key]);
@@ -151,7 +213,34 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
     lock:handle==='rotate'?e.shiftKey:e.shiftKey?!lockedDefault:lockedDefault};
   e.currentTarget.setPointerCapture(e.pointerId);
  };
- const move=(e:React.PointerEvent<HTMLElement>)=>{const g=gesture.current;if(!g){if(enabled&&e.currentTarget instanceof HTMLDivElement)e.currentTarget.style.cursor=e.ctrlKey||e.metaKey?'copy':'move';return;}
+ const eraseStart=(e:React.PointerEvent<HTMLElement>)=>{
+  if(!eraseActive||e.pointerType==='mouse'&&e.button!==0)return;
+  e.preventDefault();e.stopPropagation();activate();select(item.id);
+  const at=erasePoint(e.currentTarget,e.clientX,e.clientY);
+  const shape=beginEraseShape(eraseTool==='region'?'region':'brush',at,eraseBrushMm/2);
+  erase.current={pointer:e.pointerId,anchor:at,shape};setLiveErase(shape);
+  e.currentTarget.setPointerCapture(e.pointerId);
+ };
+ const eraseMove=(e:React.PointerEvent<HTMLElement>)=>{
+  const g=erase.current;if(!g||g.pointer!==e.pointerId)return;
+  e.preventDefault();e.stopPropagation();
+  const next=growEraseShape(g.shape,g.anchor,erasePoint(e.currentTarget,e.clientX,e.clientY));
+  if(next!==g.shape){g.shape=next;setLiveErase(next);}
+ };
+ const eraseFinish=(e:React.PointerEvent<HTMLElement>,cancel=false)=>{
+  const g=erase.current;if(!g||g.pointer!==e.pointerId)return;
+  e.preventDefault();e.stopPropagation();erase.current=null;setLiveErase(null);
+  if(cancel)return;
+  // A press without travel is a click on the layer, not a hole in the artwork; and the whole stroke lands in
+  // the store in one go, so `Ctrl+Z` gives back a gesture rather than a third of one.
+  if(!eraseShapeIsMeaningful(g.shape))return;
+  // The list is read from the store, not from the placement this render was built with: two pointers on the
+  // same picture (or a panel button pressed mid-drag) must not silently drop the stroke that landed first.
+  const live=useAppStore.getState().overlays.find(o=>o.id===item.id) as PageOverlayImage|undefined;
+  if(!live)return;
+  useAppStore.getState().setOverlayErase(item.id,commitEraseShape(live.erase,g.shape));
+ };
+ const move=(e:React.PointerEvent<HTMLElement>)=>{const g=gesture.current;if(!g){if(enabled&&e.currentTarget instanceof HTMLDivElement)e.currentTarget.style.cursor=eraseActive?'crosshair':e.ctrlKey||e.metaKey?'copy':'move';return;}
   if(g.pointer!==e.pointerId)return;e.preventDefault();e.stopPropagation();g.dx=e.clientX-g.x;g.dy=e.clientY-g.y;
   if(g.handle!=='rotate')g.lock=e.shiftKey?!lockedDefault:lockedDefault;else g.lock=e.shiftKey;
   ensureCopy(g);if(g.frame===null)g.frame=requestAnimationFrame(()=>{g.frame=null;if(gesture.current===g)paint(g);});};
@@ -178,10 +267,10 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
      const mm=(e.shiftKey?5:1),delta=rotateVector(step[0]*mm*pxPerMm,step[1]*mm*pxPerMm,-(p.parentRotation+item.rotation));
      update(item.id,moveOverlay(item,delta.x/(p.parentWidth*pxPerMm)*100,delta.y/(p.parentHeight*pxPerMm)*100,limits));return;}
    if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();activate();if(editable)beginEdit(item.id,p.key);else select(item.id);}}}
-   onPointerDown={e=>{if(!edit)start(e,'move');}} onPointerMove={move} onPointerUp={e=>finish(e)} onPointerCancel={e=>finish(e,true)} onLostPointerCapture={e=>finish(e,true)} onClick={e=>e.stopPropagation()}
-   style={{position:'absolute',left:`${item.xPercent}%`,top:`${item.yPercent}%`,width:`${item.widthPercent}%`,height:`${item.heightPercent}%`,transform:`rotate(${item.rotation}deg)`,outline:selected?'2px solid #0ea5e9':'none',cursor:enabled?'move':'default',touchAction:'none',pointerEvents:enabled?'auto':'none'}}>
+   onPointerDown={e=>{if(erase.current)return;if(eraseActive){eraseStart(e);return;}if(!edit)start(e,'move');}} onPointerMove={e=>{if(erase.current){eraseMove(e);return;}move(e);}} onPointerUp={e=>{if(erase.current){eraseFinish(e);return;}finish(e);}} onPointerCancel={e=>{if(erase.current){eraseFinish(e,true);return;}finish(e,true);}} onLostPointerCapture={e=>{if(erase.current){eraseFinish(e,true);return;}finish(e,true);}} onClick={e=>e.stopPropagation()}
+   style={{position:'absolute',left:`${item.xPercent}%`,top:`${item.yPercent}%`,width:`${item.widthPercent}%`,height:`${item.heightPercent}%`,transform:`rotate(${item.rotation}deg)`,outline:selected?'2px solid #0ea5e9':'none',cursor:eraseActive?`crosshair, `:enabled?'move':'default',touchAction:'none',pointerEvents:enabled?'auto':'none'}}>
    {!edit && (isImage
-     ? <ImagePicture item={(p as {image:PageOverlayImage}).image} width={p.width} height={p.height}/>
+     ? <ImagePicture item={(p as {image:PageOverlayImage}).image} width={p.width} height={p.height} erasing={eraseActive} live={liveErase}/>
      : isShape
        ? <ShapeGlyph item={(p as {shape:PageOverlayShape}).shape} widthMm={p.width} heightMm={p.height}/>
        : <TextCanvas item={(p as {renderText:PageOverlayText}).renderText} width={p.width} height={p.height} pxPerMm={pxPerMm}/>)}

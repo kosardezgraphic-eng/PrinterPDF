@@ -5,13 +5,15 @@ import {parseCoverageSelection,formatCoverageSelection} from '../engine/coverage
 import {isImageFile,measureImage,readFileAsDataUrl} from '../engine/imageImport';
 import {newOverlayId} from '../engine/imageOverlays';
 import {alignOverlay, overlayPanelFrame} from '../engine/overlayGeometry';
+import {popEraseShape} from '../engine/imageErase';
+import {sanitizeEraseShapes} from '@shared/models';
 import {useAppStore} from '../store/useAppStore';
 import { describePictureFormat, planPictureEmbedding } from '../engine/imageFormat';
 
 const input='w-full rounded border border-slate-600 bg-slate-800 p-1 text-xs text-white';
 const MM_TO_PT=72/25.4;
 export function ImageControlPanel(){
- const {settings,pages,layout,activePageId,activeSheetIndex,overlays,selectedOverlayId,updateOverlay,removeOverlay,addOverlay}=useAppStore();
+ const {settings,pages,layout,activePageId,activeSheetIndex,overlays,selectedOverlayId,updateOverlay,removeOverlay,addOverlay,eraseTool,eraseBrushMm,setEraseTool,setEraseBrushMm,setOverlayErase,toggleOverlayInvert}=useAppStore();
  const fa=settings.language==='fa';
  const item=overlays.find((o):o is PageOverlayImage=>o.id===selectedOverlayId&&o.kind==='image');
  const numbers=overlays.filter((o):o is PageOverlayImage=>o.kind==='image');
@@ -31,6 +33,7 @@ export function ImageControlPanel(){
  // uses: a field that disagrees with the mouse is what makes an operator think the picture is stuck.
  const frame=overlayPanelFrame(sheet,item);
  const box={width:frame.boxWidthMm,height:frame.boxHeightMm};
+ const eraseCount=sanitizeEraseShapes(item.erase??[]).length;
  const widthMm=item.widthPercent*box.width/100, heightMm=item.heightPercent*box.height/100;
  const ratio=heightMm>0?widthMm/heightMm:1;
  const setMm=(key:'width'|'height',value:number)=>{
@@ -105,6 +108,27 @@ export function ImageControlPanel(){
    </div>
    <label className="block">{fa?'چرخش':'Rotation'} {item.rotation}°<input aria-label={fa?'چرخش تصویر':'Image rotation'} type="range" min="0" max="360" step="0.1" value={item.rotation} onChange={e=>patch({rotation:+e.target.value})} className="w-full"/></label>
    <label className="block">{fa?'شفافیت':'Opacity'} {Math.round(item.opacity*100)}%<input aria-label={fa?'شفافیت تصویر':'Image opacity'} type="range" min="10" max="100" value={item.opacity*100} onChange={e=>patch({opacity:+e.target.value/100})} className="w-full"/></label>
+   <div className="space-y-1 border-t border-slate-700 pt-2" data-erase-panel>
+     <div className="flex items-center justify-between"><strong>{fa?'پاک‌کن':'Eraser'}</strong>
+       <span className="text-slate-400" data-erase-count>{fa?`${eraseCount} حرکت`:`${eraseCount} stroke(s)`}</span></div>
+     <p className="text-[10px] leading-4 text-slate-500">{fa
+       ? 'روی تصویر بکشید تا هر قسمتی که می‌خواهید حذف شود؛ دو بار کلیک روی دکمهٔ روشن، پاک‌کن را خاموش می‌کند.'
+       : 'Drag on the picture to remove whatever you want; pressing the lit button again turns the eraser off.'}</p>
+     <div className="flex gap-1">
+       <button type="button" data-erase-tool="brush" aria-pressed={eraseTool==='brush'} onClick={()=>setEraseTool(eraseTool==='brush'?'off':'brush')} title={fa?'با کشیدن قلم‌مو، بخشی از تصویر پاک می‌شود':'Drag a brush over the picture to erase it'} className={`flex-1 rounded px-2 py-1 ${eraseTool==='brush'?'bg-rose-700 text-white':'bg-slate-700'}`}>{fa?'قلم‌مو':'Brush'}</button>
+       <button type="button" data-erase-tool="region" aria-pressed={eraseTool==='region'} onClick={()=>setEraseTool(eraseTool==='region'?'off':'region')} title={fa?'یک کادر بکشید؛ داخلش پاک می‌شود':'Drag a rectangle; everything inside it is erased'} className={`flex-1 rounded px-2 py-1 ${eraseTool==='region'?'bg-rose-700 text-white':'bg-slate-700'}`}>{fa?'ناحیه':'Region'}</button>
+     </div>
+     {eraseTool!=='off' && <label className="block">{fa?`قطر قلم (میلی‌متر) = ${eraseBrushMm}`:`Brush diameter (mm) = ${eraseBrushMm}`}
+       <input data-erase-size aria-label={fa?'قطر پاک‌کن':'Eraser size'} type="number" min="0.2" max="500" step="0.1" className={input} value={Number(eraseBrushMm.toFixed(2))} onChange={e=>setEraseBrushMm(Number(e.target.value))}/></label>}
+     <div className="flex gap-1">
+       <button type="button" data-erase-undo disabled={!eraseCount} onClick={()=>setOverlayErase(item.id,popEraseShape(item.erase))} className={`flex-1 rounded px-2 py-1 ${eraseCount?'bg-slate-700 hover:bg-slate-600 cursor-pointer':'bg-slate-800 text-slate-500'}`}>{fa?'یک حرکت برگرد':'Undo one stroke'}</button>
+       <button type="button" data-erase-restore disabled={!eraseCount} onClick={()=>setOverlayErase(item.id,[])} className={`flex-1 rounded px-2 py-1 ${eraseCount?'bg-slate-700 hover:bg-slate-600 cursor-pointer':'bg-slate-800 text-slate-500'}`}>{fa?'بازگرداندن تصویر':'Restore picture'}</button>
+     </div>
+     {eraseCount>0 && <p className="text-[10px] leading-4 text-amber-300">{fa
+       ? 'فایل اصلی دست‌نخورده است: پاک‌کن فقط شکلِ پاک‌شده را کنار می‌گذارد، پس هر حرکت با Ctrl+Z هم برگشت‌پذیر است.'
+       : 'The file itself is untouched — an erase is stored beside it, so every stroke is also reversible with Ctrl+Z.'}</p>}
+   </div>
+   <button type="button" data-image-invert aria-pressed={!!item.invert} onClick={()=>toggleOverlayInvert([item.id])} title={fa?'بار دوم همان قبلی را برمی‌گرداند، نه یک معکوس دیگر':'Pressing it again returns the previous look, it does not invert twice'} className={`w-full rounded px-2 py-1 ${item.invert?'bg-fuchsia-700 text-white':'bg-slate-700 hover:bg-slate-600'}`}>{item.invert?(fa?'لغو معکوس رنگ تصویر':'Undo picture inversion'):(fa?'معکوس رنگ تصویر':'Invert picture colours')}</button>
    {(() => {
      // One line that says what the file is and what the exporter will do with it.
      const plan = planPictureEmbedding(item.src);

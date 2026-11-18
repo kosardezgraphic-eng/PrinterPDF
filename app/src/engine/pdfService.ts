@@ -35,6 +35,7 @@ import { drawOverlayText, textPlacements } from './textOverlays';
 import { imagePlacements, imageDrawRect, shapePlacements } from './overlayPlacements';
 import { MM_PER_PT, shapeColorComponents, shapeCommands, shapeDashPattern, shapeHasFill, shapeSvgPath } from './shapes';
 import { rasterizeOverlayImage } from './imageImport';
+import { eraseSignature } from './imageErase';
 import { planPictureEmbedding } from './imageFormat';
 import { computeImpositionSheets, sortCellsByLayer, stripTrailingEmptyDuplexSides } from './layoutEngine';
 import { normalizeAngle, pageCropFractions, rotateInsets } from './pageGeometry';
@@ -1167,16 +1168,24 @@ export async function exportImposedPdf(params: {
       // data:image/png would otherwise be handed to the PNG decoder. Mirroring cannot be expressed
       // with a plain rectangle either, so those go through the same Canvas the preview composites on.
       const plan=planPictureEmbedding(item.src);
-      const needsRaster=plan.route==='raster'||!!item.flipHorizontal||!!item.flipVertical;
+      // The file's own bytes decide the route, and so do the two flags that only exist inside the model: a
+      // mirrored, inverted or eroded picture cannot be a raw embed any more, because the page has to show
+      // something other than what the file contains. The overlay itself is untouched either way.
+      const erase=eraseSignature(item.erase);
+      const needsRaster=plan.route==='raster'||!!item.flipHorizontal||!!item.flipVertical||!!item.invert||erase.length>0;
       // Raw embeds depend on the bytes alone, so the same picture at two sizes is stored once.
-      const key=needsRaster?JSON.stringify([item.src,item.fit,item.flipHorizontal,item.flipVertical,Math.round(w*10),Math.round(h*10)]):item.src;
+      const key=needsRaster?JSON.stringify([item.src,item.fit,item.flipHorizontal,item.flipVertical,!!item.invert,erase,Math.round(w*10),Math.round(h*10)]):item.src;
       let image=pictureImages.get(key);
       if(!image){
         if(needsRaster){
           if (typeof document === 'undefined') throw new Error('Exporting a flipped or unsupported picture needs a Canvas 2D renderer');
           const scale=Math.min(300/72,4096/w,4096/h);
           const png=await rasterizeOverlayImage(item.src,w*scale,h*scale,{fit:item.fit,naturalWidth:item.naturalWidth,naturalHeight:item.naturalHeight,
-            flipHorizontal:item.flipHorizontal,flipVertical:item.flipVertical,drawRect:{x:rect.x*scale,y:rect.y*scale,width:Math.max(1,rect.width*scale),height:Math.max(1,rect.height*scale)}});
+            flipHorizontal:item.flipHorizontal,flipVertical:item.flipVertical,drawRect:{x:rect.x*scale,y:rect.y*scale,width:Math.max(1,rect.width*scale),height:Math.max(1,rect.height*scale)},
+            invert:item.invert,erase:item.erase,
+            // `rect` is the fit rectangle in points; the eraser's percentages and its millimetre brush are
+            // measured on exactly that rectangle, which is the piece of the box the picture actually paints.
+            eraseWidthMm:rect.width/MM_TO_PT,eraseHeightMm:rect.height/MM_TO_PT});
           image=await outPdf.embedPng(png);
         } else {
           image=plan.route==='jpeg' ? await outPdf.embedJpg(item.src) : await outPdf.embedPng(item.src);

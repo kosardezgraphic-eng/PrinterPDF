@@ -111,6 +111,48 @@ Preview and export share one geometry engine (`overlayPlacements`), so the box, 
 
 So placement count is nearly free, and only *distinct* pictures are paid for; RSS rose about 170 MB during the first export and fell back afterwards. What is genuinely heavy is the state itself: a `PageOverlayImage.src` is a base64 data URL, so every picture costs ~1.37× its file size in memory, again for each undo snapshot, and once more in the `.psp` file. Downscale artwork before building a project that has to stay open all day.
 
+## Erasing part of a picture, and inverting its colours
+
+**Insert → Eraser** has two modes, and both of them paint on whichever picture the pointer lands on (which
+becomes the selected layer as the gesture starts, so the panel below is the panel for what you are erasing):
+
+- **Brush** — drag on the picture and whatever the round tip passes over is removed. The diameter is a real
+  size in millimetres (`engine/imageErase.ts` converts it per axis at paint time), so the brush feels the same
+  at 40 % zoom as at 400 %, and a dot on a stretched picture becomes the ellipse the operator drew.
+- **Region** — drag a rectangle and its inside is removed. Dragging back across the point where the press
+  started flips the rectangle to the other side, like every other marquee in the app.
+
+Pressing the lit mode button again turns the eraser off and hands the pointer back to moving the picture;
+`Escape` mid-drag abandons the stroke. Arming either mode also switches the sheet itself to **Select / move /
+resize**, because the overlay layer only accepts the pointer in that tool — a brush that painted nothing while
+the sheet was in crop mode would read as a dead button. The panel also offers **Undo one stroke** and **Restore picture**, so
+the eraser can be walked back gesture by gesture without reaching for `Ctrl+Z`.
+
+What is stored is the gesture, never new pixels. `PageOverlayImage.erase` is a list of `EraseShape`s —
+percentages of the rectangle the picture paints, plus a millimetre radius for a brush — and the original
+`src` is untouched. Three renderers derive pixels from that list, all of them through the same
+`eraseShapeParts()`:
+
+| Where | What happens |
+| --- | --- |
+| Preview (`TextOverlayLayer.tsx`) | a CSS luminance mask (`eraseMaskCss()`), an SVG with a hole per gesture |
+| Export raster (`rasterizeOverlayImage()`) | `destination-out` fills and ellipses on the same rectangle, after the picture is drawn |
+| Exported PDF (`pdfService.ts`) | an erased or inverted picture cannot be a raw byte embed, so it takes the Canvas route a mirror already takes, and the erase list is part of the bitmap cache key |
+
+Because the mask is cut on the *fit* rectangle, a hole stays on the artwork when the box is resized, when
+`contain` letterboxes it, or when the picture is mirrored (the pointer position is un-mirrored on the way in,
+so the hole lands under the cursor and then follows the flip).
+
+**Invert picture colours** (`PageOverlayImage.invert`) is a flag rendered as `filter: invert(1)` in the preview
+and as a pixel negation of the drawn rectangle in the export raster — alpha is preserved, so an erased corner
+stays a hole instead of becoming a black square. It is deliberately not a rewrite of the file: pressing the
+button again is the way back, and a picture that was inverted twice does not exist in this model.
+
+Both fields travel in the project file (`overlays` is saved as it is) and in every undo snapshot. A file that
+arrives from elsewhere is passed through `sanitizeEraseShapes()`: percentages are clamped to a sane band, a
+brush keeps at most `ERASE_POINT_LIMIT` points, there are at most `ERASE_SHAPE_LIMIT` gestures, and an entry
+no renderer could draw is dropped rather than guessed at.
+
 ## Files that arrive from the desktop
 
 Dropping a file on a sheet is a browser drag in both shells: the `File` objects a drop provides are read directly, and that path is unchanged in Electron.

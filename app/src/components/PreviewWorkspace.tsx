@@ -205,7 +205,10 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   }, [previewOnlyPage, layout, outputSheets]);
   const pageNumbers = useMemo(() => new Map(pages.map((page, index) => [page.id, index + 1])), [pages]);
   const textEditing = useAppStore(s => !!s.textEdit || s.overlays.some(o=>o.id===s.selectedOverlayId && (o.kind==='numbering'||o.kind==='image')));
-  useEffect(() => { if (textEditing) setCanvasTool('move'); }, [textEditing]);
+  // The eraser paints on the overlay layer, and that layer only accepts the pointer in the move tool — arming
+  // it from the Insert tab and then dragging over a picture would otherwise do nothing at all, silently.
+  const eraseArmed = useAppStore(s => s.eraseTool !== 'off');
+  useEffect(() => { if (textEditing || eraseArmed) setCanvasTool('move'); }, [textEditing, eraseArmed]);
     // A drawn shape is edited through the same interactive layer, so it has to mount for shapes alone too.
   const hasTextOverlays = useMemo(() => overlays.some(item => item.kind === 'text' || item.kind === 'shape' || item.kind === 'image' || item.kind === 'numbering' && item.enabled), [overlays]);
   useEffect(() => {

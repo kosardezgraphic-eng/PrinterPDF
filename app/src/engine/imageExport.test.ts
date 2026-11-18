@@ -79,6 +79,14 @@ describe('picture export',()=>{
   await expect(exportWith(image({flipHorizontal:true}))).rejects.toThrow('Exporting a flipped or unsupported picture needs a Canvas 2D renderer');
   await expect(exportWith(image({src:'data:image/webp;base64,AAAA'}))).rejects.toThrow('Canvas 2D renderer');
  });
+ // An erase or a negation cannot live in a raw byte stream: the file on the sheet would be the untouched
+ // artwork, printing exactly what the operator deleted. Both flags therefore take the same Canvas route a
+ // mirror already does, which is what this pins down.
+ it('flattens an erased or inverted picture instead of embedding it raw',async()=>{
+  await expect(exportWith(image({invert:true}))).rejects.toThrow('Exporting a flipped or unsupported picture needs a Canvas 2D renderer');
+  await expect(exportWith(image({erase:[{mode:'region',x:10,y:10,width:20,height:20}]}))).rejects.toThrow('Canvas 2D renderer');
+  await expect(exportWith(image({erase:[]}))).resolves.toBeTruthy();               // an empty list is not an erase
+ });
  it('patches the colour Decode only when the CMYK samples are not Adobe-complemented', async () => {
   const plain = await exportWith(image({src: jpegDataUrl([sof(0xc0, 10, 20, 4)])}));
   const dict = plain.dicts[0][0]!;

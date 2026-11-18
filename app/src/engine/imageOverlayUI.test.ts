@@ -45,6 +45,7 @@ beforeEach(()=>{
   useAppStore.setState({pages:[page],documents:[],layout:{...DEFAULT_LAYOUT,paperSize:'Custom',customWidthMm:200,customHeightMm:300,rows:1,cols:1,duplexMode:'none',
     marginMode:'custom',marginsMm:{top:0,right:0,bottom:0,left:0},horizontalGutterMm:0,verticalGutterMm:0,autoRotateToFit:false,showCellBorders:false,rulerGuides:[]},
     settings:{...DEFAULT_SETTINGS,language:'en'},overlays:[],selectedOverlayId:null,activePageId:'p',textEdit:null,pageNumbering:getDefaultPageNumberSettings(),
+    eraseTool:'off',eraseBrushMm:8,
     activeSheetIndex:0,activeRibbonTab:'insert',viewMode:'single'});
   importFiles=vi.fn(async()=>{});
   host=document.createElement('div');document.body.appendChild(host);root=createRoot(host);
@@ -257,6 +258,106 @@ describe('picture panel',()=>{
   click('Delete picture');expect(useAppStore.getState().overlays).toHaveLength(1);
   act(()=>useAppStore.getState().undo());expect(useAppStore.getState().overlays).toHaveLength(2);
  });
+ // ————— the eraser in the Insert tool: two modes, both of them reversible —————
+ const img=()=>node().querySelector('img')!;
+ const eraseButton=(mode:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.getAttribute('data-erase-tool')===mode)!;
+ const picture=(index=0)=>useAppStore.getState().overlays[index] as PageOverlayImage;
+ const stroke=(index=0)=>picture().erase?.[index] as {points:{x:number;y:number}[];radiusMm:number}|undefined;
+ // The picture box is 45 % of a 200×300 mm sheet at one pixel per millimetre: 90×45 px, so a pointer at
+ // (9, 4.5) sits at 10 % × 10 % of the artwork. That is the number the model has to hold.
+ function armErase(mode:'brush'|'region'){
+  act(()=>useAppStore.setState({overlays:[image()],selectedOverlayId:'i'}));render();rect(img(),90,45);act(()=>eraseButton(mode).click());
+  expect(useAppStore.getState().eraseTool).toBe(mode);                              // the Insert button armed it, not a leftover
+ }
+ it('takes the sheet out of the crop tool when the eraser is armed',()=>{
+  // The overlay layer only accepts the pointer in the move tool, so a brush armed while the sheet is in crop
+  // mode would paint nothing at all and look like a dead button.
+  useAppStore.setState({overlays:[image()],selectedOverlayId:'i'});render();rect(img(),90,45);
+  act(()=>{[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.getAttribute('aria-label')==='Crop')!.click();});
+  expect(host.querySelector('[aria-label="Crop"]')!.getAttribute('aria-pressed')).toBe('true');
+  act(()=>eraseButton('brush').click());
+  expect(host.querySelector('[aria-label="Select / move / resize"]')!.getAttribute('aria-pressed')).toBe('true');
+  pointer(node(),'pointerdown',9,4.5);pointer(node(),'pointermove',45,22.5);pointer(node(),'pointerup',45,22.5);
+  expect(picture().erase).toHaveLength(1);
+ });
+
+ it('erases along the brush and leaves the picture file alone',()=>{
+  armErase('brush');
+  expect(eraseButton('brush').getAttribute('aria-pressed')).toBe('true');
+  pointer(node(),'pointerdown',9,4.5);
+  expect(host.querySelector('[data-erase-live]')).not.toBeNull();                  // the stroke shows while the button is down
+  pointer(node(),'pointermove',45,22.5);pointer(node(),'pointerup',45,22.5);
+  expect(host.querySelector('[data-erase-live]')).toBeNull();
+  expect(stroke()?.points).toEqual([{x:10,y:10},{x:50,y:50}]);
+  expect(stroke()?.radiusMm).toBe(4);                                              // the 8 mm default is a diameter
+  expect(picture().src).toBe('data:image/png;base64,AAA');                          // erased, never rewritten
+  expect(picture().xPercent).toBe(20);expect(picture().yPercent).toBe(30);          // the eraser ate the drag, not the position
+  expect(img().getAttribute('style')).toContain('mask');
+ });
+ it('gives one gesture back per undo, and the panel button restores the whole picture',()=>{
+  armErase('brush');
+  pointer(node(),'pointerdown',9,4.5);pointer(node(),'pointermove',45,22.5);pointer(node(),'pointerup',45,22.5);
+  pointer(node(),'pointerdown',70,30);pointer(node(),'pointermove',85,40);pointer(node(),'pointerup',85,40);
+  expect(picture().erase).toHaveLength(2);
+  act(()=>{const undo=[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.hasAttribute('data-erase-undo'))!;undo.click();});
+  expect(picture().erase).toHaveLength(1);
+  act(()=>{const restore=[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.hasAttribute('data-erase-restore'))!;restore.click();});
+  expect(picture().erase).toBeUndefined();
+  expect(picture().src).toBe('data:image/png;base64,AAA');
+ });
+ it('erases the inside of a dragged rectangle and nothing else',()=>{
+  armErase('region');
+  pointer(node(),'pointerdown',9,4.5);pointer(node(),'pointermove',45,22.5);pointer(node(),'pointerup',45,22.5);
+  expect(picture().erase).toEqual([{mode:'region',x:10,y:10,width:40,height:40}]);
+  expect(picture().widthPercent).toBe(45);expect(picture().heightPercent).toBe(15);
+ });
+ it('leaves a click without travel as a click, and turns itself off when pressed again',()=>{
+  armErase('region');
+  pointer(node(),'pointerdown',9,4.5);pointer(node(),'pointerup',9,4.5);
+  expect(picture().erase).toBeUndefined();
+  expect(useAppStore.getState().eraseTool).toBe('region');                          // still armed, nothing lost
+  act(()=>eraseButton('region').click());
+  expect(useAppStore.getState().eraseTool).toBe('off');
+  expect(eraseButton('region').getAttribute('aria-pressed')).toBe('false');
+  pointer(node(),'pointerdown',10,10);pointer(node(),'pointermove',30,20);pointer(node(),'pointerup',30,20);
+  expect(picture().xPercent).toBeGreaterThan(20);                                   // the drag moves the picture again
+ });
+ it('paints through a mirrored picture so the hole follows the artwork, not the glass',()=>{
+  act(()=>useAppStore.setState({overlays:[image({flipHorizontal:true})],selectedOverlayId:'i'}));render();rect(img(),90,45);
+  act(()=>eraseButton('brush').click());
+  pointer(node(),'pointerdown',9,4.5);pointer(node(),'pointermove',45,22.5);pointer(node(),'pointerup',45,22.5);
+  expect(stroke()?.points.map(p=>p.x)).toEqual([90,50]);                             // 10 % and 50 % seen in the mirror
+ });
+ it('inverts the picture on one press and undoes it on the next',()=>{
+  act(()=>useAppStore.setState({overlays:[image()],selectedOverlayId:'i'}));render();
+  const invert=()=>act(()=>{[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.hasAttribute('data-image-invert'))!.click();});
+  invert();
+  expect(picture().invert).toBe(true);expect(img().getAttribute('style')).toContain('invert(1)');
+  invert();
+  expect(picture().invert).toBe(false);expect(img().getAttribute('style')??'').not.toContain('invert(1)');
+ });
+
+ it('arms the eraser from the Insert tab and takes the brush size from its field',()=>{
+  // The tool lives in the Insert tab because it edits what Insert puts on the sheet. Both halves of the
+  // switch are the same store the picture panel uses, so neither place can disagree with the other.
+  useAppStore.setState({overlays:[image()],selectedOverlayId:'i'});render();
+  act(()=>root.render(React.createElement(Ribbon)));
+  const ribbon=(mode:string)=>[...host.querySelectorAll<HTMLButtonElement>('[data-erase-tool]')].find(b=>b.getAttribute('data-erase-tool')===mode)!;
+  act(()=>ribbon('brush').click());
+  expect(useAppStore.getState().eraseTool).toBe('brush');
+  expect(ribbon('brush').getAttribute('aria-pressed')).toBe('true');
+  const size=host.querySelector<HTMLInputElement>('[aria-label="Eraser diameter in millimetres"]')!;
+  expect(size).toBeTruthy();                                                      // the size appears with the tool, not beside it
+  const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!;
+  act(()=>{setter.call(size,'24');size.dispatchEvent(new Event('input',{bubbles:true}));});
+  expect(useAppStore.getState().eraseBrushMm).toBe(24);
+  act(()=>ribbon('brush').click());
+  expect(useAppStore.getState().eraseTool).toBe('off');                            // pressing the lit button again is the way out
+  act(()=>ribbon('region').click());
+  expect(useAppStore.getState().eraseTool).toBe('region');
+  expect(host.querySelector('[aria-label="Eraser diameter in millimetres"]')).not.toBeNull();
+ });
+
  it('adds a picture from the Insert ribbon at the centre of the current page',async()=>{
   act(()=>root.render(React.createElement(Ribbon)));
   const button=field('Add picture on the page');expect(button).toBeTruthy();

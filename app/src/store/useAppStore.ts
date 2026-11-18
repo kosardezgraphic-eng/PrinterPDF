@@ -44,6 +44,8 @@ import {
   setCrispPreviewCacheLimit,
   setCrispPreviewEnabled,
 } from '../engine/vectorPreviewBridge';
+import { sanitizeEraseShapes, type EraseShape } from '@shared/models';
+import { effectiveInvert, inheritedInvert } from '../engine/effectsPipeline';
 import { CommandHistoryManager } from '../engine/commandHistory';
 import {
   getDefaultPageNumberSettings,
@@ -270,6 +272,14 @@ interface AppState {
   selectedOverlayId: string | null;
   activePageId: string | null;
   textEdit: TextEditSession | null;
+  /**
+   * Which eraser the pointer uses while it is over a picture, chosen from the Insert tab: `'brush'` paints a
+   * round hole along the drag, `'region'` deletes the rectangle it drags out, `'off'` lets the pointer move
+   * the picture as usual. UI state, deliberately never part of a saved sheet profile.
+   */
+  eraseTool: import('../engine/imageErase').EraseTool;
+  /** Brush diameter in millimetres on the sheet — a physical size, like a pen the operator picks up. */
+  eraseBrushMm: number;
   settings: AppSettings;
 
   // Printers & Spooler
@@ -403,6 +413,20 @@ interface AppState {
   /** Moves a layer in the stacking order, which is the order of the `overlays` array. */
   reorderOverlay: (overlayId: string, where: 'front' | 'forward' | 'backward' | 'back') => void;
   addImageOverlayFiles: (files: File[], sheet?: ComputedSheetSide, point?: {xMm:number;yMm:number}) => Promise<number>;
+  /**
+   * Replace the erase gestures of a picture (or all the selected ones with the same list). An empty list is
+   * the restore: the file's bytes were never touched, so clearing the list gives the picture back whole.
+   */
+  setOverlayErase: (overlayId: string, shapes: EraseShape[]) => void;
+  /**
+   * Flip the picture's own colours, once per selected overlay. It is a toggle, never a rewrite: the second
+   * press is the way back, whatever the selection looked like before.
+   */
+  toggleOverlayInvert: (overlayIds?: string[]) => void;
+  /** Pick the eraser mode from the Insert tab. `'off'` hands the pointer back to moving the picture. */
+  setEraseTool: (tool: import('../engine/imageErase').EraseTool) => void;
+  /** Brush diameter in millimetres; anything below a hairline or above a sheet is clamped. */
+  setEraseBrushMm: (diameterMm: number) => void;
   beginTextEdit: (id: string, occurrenceKey: string) => void;
   updateTextDraft: (text: string, start: number, end: number) => void;
   selectTextDraft: (start: number, end: number) => void;
@@ -658,6 +682,8 @@ export const useAppStore = create<AppState>((set, get) => {
     selectedOverlayId: null,
     activePageId: null,
     textEdit: null,
+    eraseTool: 'off',
+    eraseBrushMm: 8,
     settings: DEFAULT_SETTINGS,
 
     printers: [],
@@ -754,7 +780,7 @@ export const useAppStore = create<AppState>((set, get) => {
         documents: sample.documents,
         pages: sample.pages,
         bookmarks: sample.bookmarks,
-        overlays: [], selectedOverlayId: null, textEdit: null, activePageId: null,
+        overlays: [], selectedOverlayId: null, textEdit: null, activePageId: null, eraseTool: 'off',
         layout: { ...get().layout, cellOverrides: {} },
         activeSheetIndex: 0,
       });
@@ -819,7 +845,7 @@ export const useAppStore = create<AppState>((set, get) => {
         documents: [],
         pages: [],
         bookmarks: [],
-        overlays: [], selectedOverlayId: null, textEdit: null, activePageId: null,
+        overlays: [], selectedOverlayId: null, textEdit: null, activePageId: null, eraseTool: 'off',
         layout: { ...get().layout, cellOverrides: {} },
         activeSheetIndex: 0,
         previewPageRequest: null,
@@ -1373,13 +1399,25 @@ export const useAppStore = create<AppState>((set, get) => {
       const targets = state.pages.filter((page) => idSet.has(page.id));
       if (!targets.length) return;
       const before = captureSnapshot(state);
-      // One gesture over a set never leaves a mix behind: the value is cleared when every target
-      // already has it and turned on for all of them otherwise.
-      const nextValue = !targets.every((page) => page.overrides?.invert ?? false);
-      set({ pages: state.pages.map((page) => idSet.has(page.id) ? {
-        ...page,
-        overrides: { ...page.overrides, invert: nextValue },
-      } : page) });
+      // One gesture over a set never leaves a mix behind: the value is cleared when every target already
+      // shows an inversion and turned on for all of them otherwise. The question is asked about the
+      // *effective* inversion — what the operator actually sees — because a page that inherits the flag from
+      // the document switch is inverted just as much as one that carries it itself, and reading only the
+      // override made the first press of this button a silent no-op on those pages.
+      const nextValue = !targets.every((page) => effectiveInvert(page, state.effects));
+      set({ pages: state.pages.map((page) => {
+        if (!idSet.has(page.id)) return page;
+        // …and the second press is the way back to exactly what the page was doing before, not a second
+        // inversion: an override that only repeats what this page already inherits is dropped rather than
+        // written, so a page that had none ends with none and the document switch keeps its authority.
+        let overrides: PageItem['overrides'] = nextValue === inheritedInvert(page, state.effects)
+          ? { ...page.overrides, invert: undefined }
+          : { ...page.overrides, invert: nextValue };
+        // An object whose every key is unset is not "an override", it is noise in the project file, so the
+        // page ends up exactly as it started: no `overrides` at all.
+        if (!Object.values(overrides).some(value => value !== undefined)) overrides = undefined;
+        return { ...page, overrides };
+      }) });
       pushUndo(
         nextValue ? `معکوس رنگ ${targets.length} صفحه` : `لغو معکوس رنگ ${targets.length} صفحه`,
         nextValue ? `Invert ${targets.length} page(s)` : `Clear invert on ${targets.length} page(s)`,
@@ -1768,6 +1806,11 @@ export const useAppStore = create<AppState>((set, get) => {
         before,
         captureSnapshot(get())
       );
+      // This button is a pure flip, so pressing it again always returns the document to the state it was in
+      // a moment ago. The one thing that can hide that from the operator is a page carrying its own override:
+      // such a page answers to its own button, never to this one, and without this sentence the switch looks
+      // stuck at exactly the moment it is working.
+      const shadowed = get().pages.filter(page => page.overrides?.invert !== undefined).length;
       get().addToast({
         type: 'info',
         title:
@@ -1778,6 +1821,9 @@ export const useAppStore = create<AppState>((set, get) => {
             : nextInvert
               ? 'Invert Colors enabled for Preview, Print & Vector PDF Export'
               : 'Invert Colors disabled',
+        ...(shadowed ? { message: get().settings.language === 'fa'
+          ? `${shadowed} صفحه معکوس رنگ اختصاصی دارند؛ این دکمه آن‌ها را عوض نمی‌کند — روی همان صفحه راست‌کلیک کنید.`
+          : `${shadowed} page(s) carry their own invert override, so this switch cannot change them — use the page's own right-click menu.` } : {}),
       });
     },
 
@@ -1868,6 +1914,46 @@ export const useAppStore = create<AppState>((set, get) => {
         ?`${created.length} تصویر روی صفحه قرار گرفت؛ با کشیدن جابه‌جا و با دستگیره‌ها تغییر اندازه می‌دهد.`
         :`${created.length} picture(s) placed on the page. Drag to move, handles to resize.`});
       return created.length;
+    },
+    setEraseTool: (tool) => {
+      // Leaving the eraser also hands the pointer back: a half-finished gesture must not survive a mode flip.
+      set({ eraseTool: tool, textEdit: null });
+    },
+    setEraseBrushMm: (diameterMm) => {
+      if (!Number.isFinite(diameterMm)) return;
+      set({ eraseBrushMm: Math.max(0.2, Math.min(500, Math.abs(diameterMm))) });
+    },
+    setOverlayErase: (overlayId, shapes) => {
+      const state=get();
+      const target=state.overlays.find(o=>o.id===overlayId);
+      if(!target||target.kind!=='image')return;
+      const clean=sanitizeEraseShapes(shapes);
+      // A gesture that changes nothing must not cost the operator an undo step or a dirty document, which is
+      // why the comparison is on the sanitised lists rather than on object identity.
+      if(clean.length===(target.erase?.length??0) && JSON.stringify(target.erase??[])===JSON.stringify(clean))return;
+      const before=captureSnapshot(state);
+      set({overlays:state.overlays.map(o=>o.id===overlayId?{...o,erase:clean.length?clean:undefined}:o)});
+      pushUndo(clean.length?`پاک کردن بخشی از ${target.name}`:'بازگرداندن تصویر',
+        clean.length?`Erase part of ${target.name}`:'Restore the picture',before,captureSnapshot(get()));
+      if(!clean.length&&(target.erase?.length??0)){
+        get().addToast({type:'info',title:state.settings.language==='fa'
+          ?'همه پاک‌کردن‌ها برگشت؛ تصویر همان فایل اصلی است.'
+          :'All erasures undone — the picture is the original file.'});
+      }
+    },
+    toggleOverlayInvert: (overlayIds) => {
+      const state=get();
+      const wanted=new Set(overlayIds??[]);
+      const targets:PageOverlayImage[]=state.overlays.filter((o):o is PageOverlayImage=>o.kind==='image'&&(wanted.size?wanted.has(o.id):o.id===state.selectedOverlayId));
+      if(!targets.length)return;
+      const ids=new Set(targets.map(o=>o.id));
+      const before=captureSnapshot(state);
+      // One gesture never leaves a mix behind, and never applies a second inversion to a picture that is
+      // already inverted: the value comes from the selection as a whole, exactly like the page-level toggle.
+      const nextValue=!targets.every(o=>o.invert===true);
+      set({overlays:state.overlays.map(o=>ids.has(o.id)?{...o,invert:nextValue}:o)});
+      pushUndo(nextValue?'معکوس رنگ تصویر':'لغو معکوس رنگ تصویر',
+        nextValue?'Invert the picture':'Undo the picture inversion',before,captureSnapshot(get()));
     },
     addNumberingOverlay: (convertLegacy=false) => {
       if(get().textEdit)get().finishTextEdit();
@@ -2280,7 +2366,7 @@ export const useAppStore = create<AppState>((set, get) => {
             watermark: parsed.watermark ?? getDefaultWatermarkSettings(),
             pageNumbering: parsed.pageNumbering ?? getDefaultPageNumberSettings(),
             overlays: Array.isArray(parsed.overlays) ? parsed.overlays : [],
-            selectedOverlayId: null, textEdit: null, activePageId: null,
+            selectedOverlayId: null, textEdit: null, activePageId: null, eraseTool: 'off',
             documents: parsed.documents as SourceDocument[],
             pages: parsed.pages,
             bookmarks: parsed.bookmarks ?? [],

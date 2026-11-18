@@ -29,6 +29,8 @@ import {
   Trash2,
   FileDown,
   Magnet,
+  Eraser,
+  SquareDashedMousePointer,
 } from 'lucide-react';
 import { MatrixSizeFields } from './MatrixSizeFields';
 import { SettingsPresetMenu } from './SettingsPresets';
@@ -80,6 +82,10 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
     refreshPrinterMargins,
     updateEffects,
     toggleGlobalInvert,
+    eraseTool,
+    eraseBrushMm,
+    setEraseTool,
+    setEraseBrushMm,
     resetEffects,
     updateSettings,
     clearCrispPreviewCacheNow,
@@ -702,6 +708,35 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
               <div className="flex items-center gap-1 border-e border-slate-800 pe-3">
                 <ShapePicker onPick={(type) => { addShapeOverlay(type); }} />
               </div>
+              {/* The eraser belongs to the Insert tab because it edits what Insert puts on the sheet: pick a
+                  mode, then drag on the picture. Pressing the lit button again is the way out — a tool that
+                  could only be switched on would trap the pointer in a mode the operator has left. */}
+              <div className="flex items-center gap-1 border-e border-slate-800 pe-3" data-erase-tools>
+                <button type="button" data-erase-tool="brush" aria-pressed={eraseTool === 'brush'}
+                  onClick={() => setEraseTool(eraseTool === 'brush' ? 'off' : 'brush')}
+                  title={lang === 'fa' ? 'با قلم‌مو روی تصویر بکشید تا بخشی از آن پاک شود' : 'Drag a brush over a picture to erase part of it'}
+                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 font-bold ${eraseTool === 'brush' ? 'bg-rose-600 text-white' : 'border border-slate-700 bg-slate-800 text-slate-200 hover:border-rose-500/50'}`}>
+                  <Eraser className="h-4 w-4" aria-hidden="true" />
+                  <span>{lang === 'fa' ? 'پاک‌کن: قلم‌مو' : 'Eraser: brush'}</span>
+                </button>
+                <button type="button" data-erase-tool="region" aria-pressed={eraseTool === 'region'}
+                  onClick={() => setEraseTool(eraseTool === 'region' ? 'off' : 'region')}
+                  title={lang === 'fa' ? 'یک کادر روی تصویر بکشید؛ داخل کادر پاک می‌شود' : 'Drag a rectangle on a picture; inside it is erased'}
+                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 font-bold ${eraseTool === 'region' ? 'bg-rose-600 text-white' : 'border border-slate-700 bg-slate-800 text-slate-200 hover:border-rose-500/50'}`}>
+                  <SquareDashedMousePointer className="h-4 w-4" aria-hidden="true" />
+                  <span>{lang === 'fa' ? 'پاک‌کن: ناحیه' : 'Eraser: region'}</span>
+                </button>
+                {eraseTool !== 'off' && (
+                  <label className="flex items-center gap-1 text-[10px] text-slate-300">
+                    <span>{lang === 'fa' ? 'قطر (mm)' : 'Ø (mm)'}</span>
+                    <input data-erase-size aria-label={lang === 'fa' ? 'قطر پاک‌کن بر حسب میلی‌متر' : 'Eraser diameter in millimetres'}
+                      type="number" min="0.2" max="500" step="0.1" value={Number(eraseBrushMm.toFixed(2))}
+                      onChange={(e) => setEraseBrushMm(Number(e.target.value))}
+                      className="w-16 rounded border border-slate-600 bg-slate-800 px-1 py-0.5 text-xs text-white" />
+                  </label>
+                )}
+              </div>
+              
               <button type="button" data-watermark-panel-trigger aria-pressed={watermark.enabled}
                 onClick={onOpenWatermarkPanel}
                 className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 font-semibold transition-colors ${watermark.enabled ? 'border-sky-400 bg-sky-600 text-white' : 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'}`}>
