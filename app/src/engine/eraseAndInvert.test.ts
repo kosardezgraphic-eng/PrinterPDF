@@ -8,6 +8,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  sanitizeEraseColor,
   sanitizeEraseShapes,
   type EraseShape,
   type PageItem,
@@ -24,6 +25,10 @@ import {
   commitEraseShape,
   eraseMaskCss,
   eraseMaskSvg,
+  erasePaintCss,
+  erasePaintSvg,
+  eraseShapeIsPaint,
+  eraseToolPaints,
   eraseParts,
   eraseShapeBounds,
   eraseShapeIsMeaningful,
@@ -338,5 +343,127 @@ describe('the page invert button', () => {
     expect(useAppStore.getState().effects.enabled).toBe(true);
     useAppStore.getState().toggleGlobalInvert();
     expect(useAppStore.getState().effects.invert).toBe(false);
+  });
+});
+
+// ————— the round two: the brush can carry a colour, the eyedropper finds it, a marquee waits for Delete —————
+describe('the brush’s colour', () => {
+  it('keeps only a colour the app is willing to paint', () => {
+    expect(sanitizeEraseColor('#102030')).toBe('#102030');
+    expect(sanitizeEraseColor('#abc')).toBe('#aabbcc');                            // short form, written out
+    expect(sanitizeEraseColor(' #FF0000 ')).toBe('#ff0000');                        // normalised, never trusted raw
+    for (const junk of ['url(#x)', 'red', 'rgba(0,0,0,1)', '#12', '#12345', '123456', '', null, undefined, 7, {}]) {
+      expect(sanitizeEraseColor(junk)).toBeUndefined();
+    }
+  });
+
+  it('survives the sanitiser beside the gesture, and drops out with it', () => {
+    const kept = sanitizeEraseShapes([
+      { mode: 'region', x: 1, y: 2, width: 30, height: 40, color: '#00ff00' },
+      { mode: 'region', x: 1, y: 2, width: 30, height: 40, color: 'url(#x)' as string },
+      { mode: 'brush', radiusMm: 3, points: [{ x: 10, y: 10 }, { x: 20, y: 20 }], color: '#abc' },
+    ]);
+    expect(kept.map(shape => shape.color)).toEqual(['#00ff00', undefined, '#aabbcc']);
+    expect(kept[1]).toMatchObject({ mode: 'region' });                              // the gesture stays, the paint goes
+    expect(eraseShapeIsPaint(kept[0]!)).toBe(true);
+    expect(eraseShapeIsPaint(kept[1]!)).toBe(false);                                 // and it is a hole from then on
+  });
+
+  it('is asked for by the two painting tools, not by the eyedropper', () => {
+    expect(['brush', 'region'].map(tool => eraseToolPaints(tool as 'brush'))).toEqual([true, true]);
+    expect(eraseToolPaints('picker')).toBe(false);                                   // it only ever reads
+    expect(eraseToolPaints('off')).toBe(false);
+  });
+
+  it('starts a gesture with the colour already on it, and refuses a colour that is not one', () => {
+    expect(beginEraseShape('brush', { x: 10, y: 10 }, 4, '#123456')).toMatchObject({ color: '#123456' });
+    expect(beginEraseShape('region', { x: 10, y: 10 }, 4, '#123456')).toMatchObject({ mode: 'region', color: '#123456' });
+    expect(beginEraseShape('brush', { x: 10, y: 10 }, 4)).not.toHaveProperty('color');
+    expect(beginEraseShape('brush', { x: 10, y: 10 }, 4, null)).not.toHaveProperty('color');
+    // Only `brush` and `region` may be begun with at all — the eyedropper reads and never writes, and the
+    // parameter type is the guard for that, so a colour that is not a colour cannot smuggle itself in either.
+    expect(beginEraseShape('brush', { x: 10, y: 10 }, 4, 'url(#x)')).not.toHaveProperty('color');
+  });
+
+  it('keeps the holes in the mask and the colours in the paint layer, and only there', () => {
+    const shapes: EraseShape[] = [
+      { mode: 'region', x: 10, y: 10, width: 30, height: 30, color: '#00ff00' },
+      { mode: 'region', x: 50, y: 10, width: 30, height: 30 },
+    ];
+    const mask = eraseMaskSvg(shapes, box)!;
+    expect(mask).toContain('mask');
+    expect(mask).not.toContain('#00ff00');                                           // the paint never masks the picture away
+    const paint = erasePaintSvg(shapes, box)!;
+    expect(paint).toContain('#00ff00');
+    expect(paint).toContain('mask="url(#m0)"');                                      // …and the later hole cuts it
+    expect(erasePaintSvg([{ mode: 'region', x: 1, y: 1, width: 30, height: 30 }], box)).toBeUndefined();
+    expect(eraseMaskCss(shapes, box)).toContain('data:image/svg+xml,');
+    expect(erasePaintCss(shapes, box)).toContain('data:image/svg+xml,');
+    expect(erasePaintCss([], box)).toBeUndefined();
+  });
+
+  it('separates two pictures that differ only in the colour they were painted with', () => {
+    // The signature is the export bitmap cache key; without the colour a blue patch and a red one would
+    // share a raster and one of them would print the other's colour.
+    const hole = { mode: 'region', x: 10, y: 10, width: 30, height: 30 } as EraseShape;
+    expect(eraseSignature([hole])).toBe(eraseSignature([hole]));
+    expect(eraseSignature([{ ...hole, color: '#ff0000' }])).not.toBe(eraseSignature([{ ...hole, color: '#0000ff' }]));
+    expect(eraseSignature([{ ...hole, color: '#ff0000' }])).toContain('#ff0000');
+  });
+});
+
+describe('a marquee that waits for Delete', () => {
+  const imageOverlay = (): PageOverlayImage => ({
+    id: 'i', kind: 'image', target: 'sheet', targetScope: 'all', targetPageIds: [], targetSheetIndex: 1,
+    xPercent: 20, yPercent: 30, widthPercent: 45, heightPercent: 15, opacity: 1, rotation: 0,
+    src: 'data:image/png;base64,AAA', name: 'logo', naturalWidth: 400, naturalHeight: 200, fit: 'fill', lockAspect: true,
+  });
+  const region = { mode: 'region', x: 10, y: 10, width: 40, height: 40 } as EraseShape;
+  const pending = { overlayId: 'i', shape: region };
+
+  beforeEach(() => {
+    useAppStore.setState({
+      pages: [], overlays: [imageOverlay()], selectedOverlayId: 'i',
+      eraseTool: 'region', eraseColor: null, erasePending: null,
+    });
+  });
+  const picture = () => useAppStore.getState().overlays[0] as PageOverlayImage;
+
+  it('is stored apart from the picture, so nothing is cut before the key', () => {
+    useAppStore.getState().setErasePending(pending);
+    expect(picture().erase).toBeUndefined();
+    expect(useAppStore.getState().erasePending).toEqual(pending);
+    useAppStore.getState().commitErasePending();
+    expect(picture().erase).toEqual([region]);
+    expect(useAppStore.getState().erasePending).toBeNull();                          // spent, not reusable
+  });
+
+  it('is thrown away by leaving the tool, and one key at a time decides where it goes', () => {
+    useAppStore.getState().setErasePending(pending);
+    expect(useAppStore.getState().spendEraseKey('Enter')).toBe(false);               // any other key is not the eraser's
+    expect(picture().erase).toBeUndefined();
+    expect(useAppStore.getState().spendEraseKey('Escape')).toBe(true);
+    expect(useAppStore.getState().erasePending).toBeNull();
+    expect(useAppStore.getState().spendEraseKey('Delete')).toBe(false);              // and a key with nothing waiting is the app's own
+    useAppStore.getState().setErasePending(pending);
+    useAppStore.getState().setEraseTool('brush');                                    // switching mode drops it
+    expect(useAppStore.getState().erasePending).toBeNull();
+  });
+
+  it('does not outlive the layer it was drawn on', () => {
+    useAppStore.getState().setErasePending(pending);
+    useAppStore.getState().removeOverlay('i');
+    expect(useAppStore.getState().erasePending).toBeNull();
+    expect(picture).toBeTruthy();
+  });
+
+  it('carries the brush colour into the gesture it commits', () => {
+    useAppStore.getState().setEraseColor('#ff8800');
+    expect(useAppStore.getState().eraseColor).toBe('#ff8800');
+    useAppStore.getState().setErasePending({ overlayId: 'i', shape: { ...region, color: '#ff8800' } });
+    useAppStore.getState().commitErasePending();
+    expect(picture().erase).toEqual([{ ...region, color: '#ff8800' }]);
+    useAppStore.getState().setEraseColor('not a colour');                            // refused, not guessed
+    expect(useAppStore.getState().eraseColor).toBeNull();
   });
 });

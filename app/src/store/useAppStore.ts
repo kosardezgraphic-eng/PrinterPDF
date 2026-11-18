@@ -44,7 +44,8 @@ import {
   setCrispPreviewCacheLimit,
   setCrispPreviewEnabled,
 } from '../engine/vectorPreviewBridge';
-import { sanitizeEraseShapes, type EraseShape } from '@shared/models';
+import { sanitizeEraseColor, sanitizeEraseShapes, type EraseShape } from '@shared/models';
+import { commitEraseShape } from '../engine/imageErase';
 import { effectiveInvert, inheritedInvert } from '../engine/effectsPipeline';
 import { CommandHistoryManager } from '../engine/commandHistory';
 import {
@@ -280,6 +281,18 @@ interface AppState {
   eraseTool: import('../engine/imageErase').EraseTool;
   /** Brush diameter in millimetres on the sheet — a physical size, like a pen the operator picks up. */
   eraseBrushMm: number;
+  /**
+   * What the brush lays down: `null` removes the pixels, a `#rrggbb` covers them with that colour. It is the
+   * answer to "paint this corner the colour of the background" without touching the picture's own file, and it
+   * is what the eyedropper writes when the operator picks a spot on the artwork.
+   */
+  eraseColor: string | null;
+  /**
+   * The marquee the region tool has drawn but not yet spent. A region only cuts when `Delete` is pressed, so
+   * between the drag and the key it lives here — in the store rather than in the layer, because the key is
+   * handled globally and the panel offers the same commit for hands that stay on the mouse.
+   */
+  erasePending: { overlayId: string; shape: EraseShape } | null;
   settings: AppSettings;
 
   // Printers & Spooler
@@ -427,6 +440,18 @@ interface AppState {
   setEraseTool: (tool: import('../engine/imageErase').EraseTool) => void;
   /** Brush diameter in millimetres; anything below a hairline or above a sheet is clamped. */
   setEraseBrushMm: (diameterMm: number) => void;
+  /** The brush's paint colour, or `null` to take pixels away. Junk is refused, not guessed at. */
+  setEraseColor: (color: string | null) => void;
+  /** The marquee the region tool selected, waiting for `Delete`. */
+  setErasePending: (pending: { overlayId: string; shape: EraseShape } | null) => void;
+  /** Spend the pending marquee on its picture — the same thing `Delete` does. */
+  commitErasePending: () => void;
+  /**
+   * Whether a global key belongs to the waiting marquee rather than to the rest of the app: `Delete` applies
+   * it, `Escape` throws it away. The keys are app-wide (they belong to whatever the pointer last touched, not
+   * to the focused control), so the answer lives next to the state instead of inside the key listener.
+   */
+  spendEraseKey: (key: string) => boolean;
   beginTextEdit: (id: string, occurrenceKey: string) => void;
   updateTextDraft: (text: string, start: number, end: number) => void;
   selectTextDraft: (start: number, end: number) => void;
@@ -684,6 +709,8 @@ export const useAppStore = create<AppState>((set, get) => {
     textEdit: null,
     eraseTool: 'off',
     eraseBrushMm: 8,
+    eraseColor: null,
+    erasePending: null,
     settings: DEFAULT_SETTINGS,
 
     printers: [],
@@ -780,7 +807,7 @@ export const useAppStore = create<AppState>((set, get) => {
         documents: sample.documents,
         pages: sample.pages,
         bookmarks: sample.bookmarks,
-        overlays: [], selectedOverlayId: null, textEdit: null, activePageId: null, eraseTool: 'off',
+        overlays: [], selectedOverlayId: null, textEdit: null, activePageId: null, eraseTool: 'off', erasePending: null,
         layout: { ...get().layout, cellOverrides: {} },
         activeSheetIndex: 0,
       });
@@ -845,7 +872,7 @@ export const useAppStore = create<AppState>((set, get) => {
         documents: [],
         pages: [],
         bookmarks: [],
-        overlays: [], selectedOverlayId: null, textEdit: null, activePageId: null, eraseTool: 'off',
+        overlays: [], selectedOverlayId: null, textEdit: null, activePageId: null, eraseTool: 'off', erasePending: null,
         layout: { ...get().layout, cellOverrides: {} },
         activeSheetIndex: 0,
         previewPageRequest: null,
@@ -1876,7 +1903,10 @@ export const useAppStore = create<AppState>((set, get) => {
       if(get().textEdit?.overlayId===id) get().finishTextEdit();
       const state=get(); if(!state.overlays.some(item=>item.id===id)) return;
       const before=captureSnapshot(state);
-      set({overlays:state.overlays.filter(item=>item.id!==id),selectedOverlayId:state.selectedOverlayId===id?null:state.selectedOverlayId});
+      // A marquee waiting for `Delete` on a layer that is gone must not commit onto nothing (or worse, onto a
+      // new layer that happens to take the id later).
+      set({overlays:state.overlays.filter(item=>item.id!==id),selectedOverlayId:state.selectedOverlayId===id?null:state.selectedOverlayId,
+        ...(state.erasePending?.overlayId===id?{erasePending:null}:{})});
       pushUndo('حذف لایه', 'Remove overlay', before, captureSnapshot(get()));
     },
     selectOverlay: id => {
@@ -1917,7 +1947,33 @@ export const useAppStore = create<AppState>((set, get) => {
     },
     setEraseTool: (tool) => {
       // Leaving the eraser also hands the pointer back: a half-finished gesture must not survive a mode flip.
-      set({ eraseTool: tool, textEdit: null });
+      set({ eraseTool: tool, textEdit: null, erasePending: null });
+    },
+    setEraseColor: (color) => {
+      set({ eraseColor: sanitizeEraseColor(color ?? undefined) ?? null });
+    },
+    setErasePending: (pending) => set({ erasePending: pending }),
+    spendEraseKey: (key) => {
+      const pending = get().erasePending;
+      if (!pending) return false;
+      if (key === 'Escape') {
+        set({ erasePending: null });
+        return true;
+      }
+      if (key === 'Delete' || key === 'Backspace') {
+        get().commitErasePending();
+        return true;
+      }
+      return false;
+    },
+    commitErasePending: () => {
+      const state = get();
+      const pending = state.erasePending;
+      if (!pending) return;
+      const target = state.overlays.find(o => o.id === pending.overlayId);
+      set({ erasePending: null });
+      if (!target || target.kind !== 'image') return;
+      get().setOverlayErase(pending.overlayId, commitEraseShape(target.erase, pending.shape));
     },
     setEraseBrushMm: (diameterMm) => {
       if (!Number.isFinite(diameterMm)) return;
@@ -2366,7 +2422,7 @@ export const useAppStore = create<AppState>((set, get) => {
             watermark: parsed.watermark ?? getDefaultWatermarkSettings(),
             pageNumbering: parsed.pageNumbering ?? getDefaultPageNumberSettings(),
             overlays: Array.isArray(parsed.overlays) ? parsed.overlays : [],
-            selectedOverlayId: null, textEdit: null, activePageId: null, eraseTool: 'off',
+            selectedOverlayId: null, textEdit: null, activePageId: null, eraseTool: 'off', erasePending: null,
             documents: parsed.documents as SourceDocument[],
             pages: parsed.pages,
             bookmarks: parsed.bookmarks ?? [],

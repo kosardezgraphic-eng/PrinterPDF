@@ -1,21 +1,39 @@
 /**
- * Erasing part of a picture: the geometry, in one place, for the screen and for the paper.
+ * The eraser's geometry, in one place, for the screen and for the paper.
  *
- * An erase is stored as a list of gestures on the overlay (see `EraseShape` in `shared/models.ts`) and only
- * ever *derived* into pixels — a CSS mask for the preview, a `destination-out` paint for the raster the
- * exported PDF embeds. That is what makes "delete a bit of this logo" reversible: the picture's own bytes are
- * never rewritten, so a further stroke adds to the list, "one stroke back" takes one away, and "restore"
- * empties the list instead of reloading artwork from disk.
+ * A gesture is stored as a list on the overlay (see `EraseShape` in `shared/models.ts`) and only ever
+ * *derived* into pixels — a CSS mask for the preview, a Canvas paint for the raster the exported PDF embeds.
+ * That is what makes "delete a bit of this logo" reversible: the picture's own bytes are never rewritten, a
+ * further stroke adds to the list, "one stroke back" takes one away, and "restore" empties the list instead of
+ * reloading artwork from disk.
  *
- * Percentages are of the picture's **fit rectangle** — the part of the box the artwork covers — because that
- * is the rectangle the pointer paints on and the one the mask is clipped to. A hole therefore stays on the logo
- * it belongs to even when a `contain` letterbox or a resize moves the picture inside its box. A brush radius is in millimetres and is converted per axis at paint time, which is why
- * the brush feels the same size at any zoom and stays round on the sheet — the ellipse it becomes inside a
- * stretched picture is exactly what the operator saw.
+ * A gesture is either a **hole** (the pixels are removed) or a **stroke of colour** (the pixels are covered).
+ * Both live in the same list, in the order they were drawn, and both renderers keep that order exact:
+ *
+ * | | hole | colour |
+ * | --- | --- | --- |
+ * | preview | the union of all holes is a `mask-image` on the picture | a layer above the picture, each stroke masked by the holes drawn *after* it |
+ * | export | `destination-out` | an opaque fill |
+ *
+ * which is why painting over a hole fills it and erasing over a paint stroke cuts it, on the screen and on
+ * the sheet alike — the one place where a "same list, two renderers" design is allowed to cheat is nothing.
+ *
+ * Percentages are of the picture's **fit rectangle** — the part of the box the artwork covers — because that is
+ * the rectangle the pointer paints on and the one the mask is clipped to. A mark therefore stays on the logo it
+ * belongs to even when a `contain` letterbox, a resize or a mirror moves the picture inside its box. A brush
+ * radius is in millimetres and is converted per axis at paint time, which is why the brush feels the same size
+ * at any zoom and stays round on the sheet; the ellipse it becomes inside a stretched picture is exactly what
+ * the operator saw.
  */
-import { sanitizeEraseShapes, type EraseShape } from '@shared/models';
+import { sanitizeEraseColor, sanitizeEraseShapes, type EraseShape } from '@shared/models';
 
-export type EraseTool = 'off' | 'brush' | 'region';
+/** The pointer's mode on the sheet: which tool a click hands the picture. */
+export type EraseTool = 'off' | 'brush' | 'region' | 'picker';
+
+/** A tool that changes the picture; the picker only reads it. */
+export function eraseToolPaints(tool: EraseTool): boolean {
+  return tool === 'brush' || tool === 'region';
+}
 
 /**
  * Two samples closer than this (percent of the fit rectangle) are the same dot.
@@ -47,17 +65,32 @@ export interface EraseParts {
   rects: { x: number; y: number; width: number; height: number }[];
 }
 
-/** The shape a drag starts with: one dot for a brush, a zero-sized rectangle for a marquee. */
-export function beginEraseShape(tool: Exclude<EraseTool, 'off'>, at: { x: number; y: number }, radiusMm: number): EraseShape {
-  return tool === 'brush'
-    ? { mode: 'brush', radiusMm, points: [{ x: at.x, y: at.y }] }
-    : { mode: 'region', x: at.x, y: at.y, width: 0, height: 0 };
+/**
+ * The shape a gesture starts with: one dot for a brush, a zero-sized rectangle for a marquee.
+ *
+ * A colour turns it from a hole into a stroke of paint, which is what lets an operator cover a corner with the
+ * background colour picked off the artwork instead of cutting it out and showing the page through it.
+ */
+export function beginEraseShape(
+  tool: 'brush' | 'region',
+  at: { x: number; y: number },
+  radiusMm: number,
+  color?: string | null
+): EraseShape {
+  const paint = sanitizeEraseColor(color);
+  if (tool === 'region') return { mode: 'region', x: at.x, y: at.y, width: 0, height: 0, ...(paint ? { color: paint } : {}) };
+  return { mode: 'brush', radiusMm, points: [{ x: at.x, y: at.y }], ...(paint ? { color: paint } : {}) };
+}
+
+/** Is this gesture paint (a colour) rather than a hole? */
+export function eraseShapeIsPaint(shape: EraseShape): boolean {
+  return shape.color !== undefined;
 }
 
 /**
  * Grows the shape as the pointer moves. `anchor` is where the drag began — a marquee is rebuilt from it
  * rather than translated, so dragging back across the start gives a rectangle on the other side the way every
- * selection tool does.
+ * selection tool does. The colour rides along with the gesture.
  */
 export function growEraseShape(
   shape: EraseShape,
@@ -78,7 +111,7 @@ export function growEraseShape(
   return { ...shape, points: [...shape.points, { x: to.x, y: to.y }] };
 }
 
-/** Is this gesture worth committing at all? A click without travel is not. */
+/** Is this gesture worth committing at all? A click without travel is not — for a marquee. */
 export function eraseShapeIsMeaningful(shape: EraseShape): boolean {
   if (shape.mode === 'region') return shape.width >= ERASE_REGION_MIN_PERCENT && shape.height >= ERASE_REGION_MIN_PERCENT;
   return shape.points.length > 0;
@@ -128,26 +161,43 @@ export function eraseParts(shapes: EraseShape[] | undefined, box: ErasePaintBox)
   return { holes, rects };
 }
 
+/** Only the holes, in order, from a given position in the list — the mask a paint stroke is cut by. */
+function holesFrom(shapes: EraseShape[], index: number, box: ErasePaintBox): EraseParts {
+  return eraseParts(shapes.slice(index).filter(shape => !eraseShapeIsPaint(shape)), box);
+}
+
 const num = (value: number) => (Math.round(value * 1000) / 1000).toString();
 
+/** One `<rect>`/`<ellipse>` pair per part of a gesture, in the SVG's own units. */
+function partsMarkup(parts: EraseParts): string {
+  return [
+    ...parts.rects.map(rect => `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(Math.max(0.001, rect.width))}" height="${num(Math.max(0.001, rect.height))}"/>`),
+    ...parts.holes.map(hole => `<ellipse cx="${num(hole.cx)}" cy="${num(hole.cy)}" rx="${num(Math.max(0.001, hole.rx))}" ry="${num(Math.max(0.001, hole.ry))}"/>`),
+  ].join('');
+}
+
+function svgShell(body: string, box: ErasePaintBox): string {
+  const w = num(Math.max(0.001, box.width)), h = num(Math.max(0.001, box.height));
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${body}</svg>`;
+}
+
 /**
- * The SVG the preview masks with: an opaque field with the holes knocked out of it by a luminance mask.
+ * The SVG the preview masks the picture with: an opaque field with every **hole** knocked out of it.
  *
- * The mask, not an even-odd path, is the point — brush dots overlap constantly, and even-odd would make the
- * overlap of two strokes come back as un-erased paper. Black over black stays black.
+ * A luminance mask, not an even-odd path, is the point — brush dots overlap constantly, and even-odd would
+ * make the overlap of two strokes come back as un-erased paper. Black over black stays black. Paint strokes
+ * are deliberately absent: they cover the picture, they do not cut it.
  */
 export function eraseMaskSvg(shapes: EraseShape[] | undefined, box: ErasePaintBox): string | undefined {
-  const { holes, rects } = eraseParts(shapes, box);
-  if (!holes.length && !rects.length) return undefined;
-  const w = num(Math.max(0.001, box.width)), h = num(Math.max(0.001, box.height));
-  const cut = [
-    ...rects.map(rect => `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(Math.max(0.001, rect.width))}" height="${num(Math.max(0.001, rect.height))}"/>`),
-    ...holes.map(hole => `<ellipse cx="${num(hole.cx)}" cy="${num(hole.cy)}" rx="${num(Math.max(0.001, hole.rx))}" ry="${num(Math.max(0.001, hole.ry))}"/>`),
-  ].join('');
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">`
-    + `<mask id="e" maskUnits="userSpaceOnUse" x="0" y="0" width="${w}" height="${h}">`
-    + `<rect width="${w}" height="${h}" fill="#fff"/><g fill="#000">${cut}</g></mask>`
-    + `<rect width="${w}" height="${h}" fill="#fff" mask="url(#e)"/></svg>`;
+  const clean = sanitizeEraseShapes(shapes ?? []);
+  const parts = eraseParts(clean.filter(shape => !eraseShapeIsPaint(shape)), box);
+  if (!parts.holes.length && !parts.rects.length) return undefined;
+  return svgShell(
+    `<mask id="e" maskUnits="userSpaceOnUse" x="0" y="0" width="${num(Math.max(0.001, box.width))}" height="${num(Math.max(0.001, box.height))}">`
+    + `<rect width="${num(Math.max(0.001, box.width))}" height="${num(Math.max(0.001, box.height))}" fill="#fff"/><g fill="#000">${partsMarkup(parts)}</g></mask>`
+    + `<rect width="${num(Math.max(0.001, box.width))}" height="${num(Math.max(0.001, box.height))}" fill="#fff" mask="url(#e)"/></svg>`,
+    box
+  );
 }
 
 /** The `mask-image` value for the preview, or `undefined` when there is nothing to mask. */
@@ -157,28 +207,69 @@ export function eraseMaskCss(shapes: EraseShape[] | undefined, box: ErasePaintBo
 }
 
 /**
- * Punches the same holes into a canvas, which is what the exported PDF and any raster of the page see.
+ * The layer the preview paints *above* the picture: one group per coloured gesture, in the order they were
+ * drawn, and each group cut by the holes that came after it.
  *
- * `destination-out` with an opaque paint is the exact mirror of the mask above — and it is applied *after*
- * the picture and its inversion are drawn, so erasing never leaves a white rectangle where the artwork was.
+ * Without that per-stroke mask a stroke drawn before a hole would sit on top of it and hide the erasure — the
+ * Canvas route gets this right for free (a later `destination-out` clears whatever is under it), so the screen
+ * has to say so explicitly or the two would disagree about the operator's own history.
+ */
+export function erasePaintSvg(shapes: EraseShape[] | undefined, box: ErasePaintBox): string | undefined {
+  const clean = sanitizeEraseShapes(shapes ?? []);
+  const groups: string[] = [];
+  let maskId = 0;
+  const defs: string[] = [];
+  clean.forEach((shape, index) => {
+    if (!eraseShapeIsPaint(shape)) return;
+    const later = holesFrom(clean, index + 1, box);
+    let mask = '';
+    if (later.holes.length + later.rects.length > 0) {
+      const id = `m${maskId++}`;
+      defs.push(`<mask id="${id}" maskUnits="userSpaceOnUse" x="0" y="0" width="${num(Math.max(0.001, box.width))}" height="${num(Math.max(0.001, box.height))}">`
+        + `<rect width="${num(Math.max(0.001, box.width))}" height="${num(Math.max(0.001, box.height))}" fill="#fff"/>`
+        + `<g fill="#000">${partsMarkup(later)}</g></mask>`);
+      mask = ` mask="url(#${id})"`;
+    }
+    groups.push(`<g fill="${shape.color}"${mask}>${partsMarkup(eraseShapeParts(shape, box))}</g>`);
+  });
+  if (!groups.length) return undefined;
+  return svgShell(`<defs>${defs.join('')}</defs>${groups.join('')}`, box);
+}
+
+/** The `background-image` value for the painted strokes, or `undefined` when nothing was painted. */
+export function erasePaintCss(shapes: EraseShape[] | undefined, box: ErasePaintBox): string | undefined {
+  const svg = erasePaintSvg(shapes, box);
+  return svg ? `url("data:image/svg+xml,${encodeURIComponent(svg)}")` : undefined;
+}
+
+/**
+ * Cuts the holes and lays the colours down on a canvas, which is what the exported PDF and any raster see.
+ *
+ * The list is walked in order — `source-over` for a colour, `destination-out` for a hole — so an erasure after
+ * a stroke clears it and a stroke after an erasure fills it, exactly like the two preview layers above.
  */
 export function applyEraseToContext(
   ctx: CanvasRenderingContext2D,
   shapes: EraseShape[] | undefined,
   box: ErasePaintBox
 ): boolean {
-  const { holes, rects } = eraseParts(shapes, box);
-  if (!holes.length && !rects.length) return false;
-  ctx.save();
-  ctx.globalCompositeOperation = 'destination-out';
-  ctx.fillStyle = '#000';
-  for (const rect of rects) ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
-  for (const hole of holes) {
-    ctx.beginPath();
-    ctx.ellipse(hole.cx, hole.cy, Math.max(0.001, hole.rx), Math.max(0.001, hole.ry), 0, 0, Math.PI * 2);
-    ctx.fill();
+  const clean = sanitizeEraseShapes(shapes ?? []);
+  if (!clean.length) return false;
+  for (const shape of clean) {
+    const parts = eraseShapeParts(shape, box);
+    if (!parts.holes.length && !parts.rects.length) continue;
+    ctx.save();
+    if (shape.color) ctx.fillStyle = shape.color;
+    else ctx.fillStyle = '#000';
+    ctx.globalCompositeOperation = shape.color ? 'source-over' : 'destination-out';
+    for (const rect of parts.rects) ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+    for (const hole of parts.holes) {
+      ctx.beginPath();
+      ctx.ellipse(hole.cx, hole.cy, Math.max(0.001, hole.rx), Math.max(0.001, hole.ry), 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
   }
-  ctx.restore();
   return true;
 }
 
@@ -201,7 +292,7 @@ export function invertPixelsInContext(
   ctx.putImageData(data, x, y);
 }
 
-/** The box a gesture covers, in percent of the fit rectangle — the rubber band, and what tests read. */
+/** The box a gesture covers, in percent of the fit rectangle — the rubber band, and what the tests read. */
 export function eraseShapeBounds(
   shape: EraseShape,
   box: { widthMm: number; heightMm: number }
@@ -214,13 +305,13 @@ export function eraseShapeBounds(
   return { x: minX - rx / 2, y: minY - ry / 2, width: maxX - minX + rx, height: maxY - minY + ry };
 }
 
-/** A stable string for "which erasures does this picture carry", used as a bitmap cache key on export. */
+/** A stable string for "which marks does this picture carry", used as a bitmap cache key on export. */
 export function eraseSignature(shapes: EraseShape[] | undefined): string {
   const clean = sanitizeEraseShapes(shapes ?? []);
   if (!clean.length) return '';
   return clean.map(shape => shape.mode === 'region'
-    ? `r${num(shape.x)},${num(shape.y)},${num(shape.width)},${num(shape.height)}`
-    : `b${num(shape.radiusMm)}:${shape.points.length}:${num(shape.points[0]!.x)},${num(shape.points[0]!.y)}:${num(shape.points[shape.points.length - 1]!.x)},${num(shape.points[shape.points.length - 1]!.y)}`
+    ? `r${num(shape.x)},${num(shape.y)},${num(shape.width)},${num(shape.height)}${shape.color ? `:${shape.color}` : ''}`
+    : `b${num(shape.radiusMm)}:${shape.points.length}:${num(shape.points[0]!.x)},${num(shape.points[0]!.y)}:${num(shape.points[shape.points.length - 1]!.x)},${num(shape.points[shape.points.length - 1]!.y)}${shape.color ? `:${shape.color}` : ''}`
   ).join('|');
 }
 
@@ -230,4 +321,68 @@ export function erasePointFromPixels(xPx: number, yPx: number, box: { width: num
     x: box.width > 0 ? xPx / box.width * 100 : 0,
     y: box.height > 0 ? yPx / box.height * 100 : 0,
   };
+}
+
+/** `#rrggbb` from raw samples, the one colour format the app is willing to store and paint. */
+export function hexColor(r: number, g: number, b: number): string {
+  const part = (value: number) => Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, '0');
+  return `#${part(r)}${part(g)}${part(b)}`;
+}
+
+/**
+ * The colour of a spot of an `RGBA` buffer — the eyedropper's maths, kept apart from the browser so it can be
+ * tested without a real image.
+ *
+ * `radius` widens the sample to a square of `2 r + 1` pixels and the answer is the average of what is there.
+ * That is what "the colour of this area" means to an operator: a click on a JPEG logo or an anti-aliased edge
+ * otherwise picks one noise pixel and paints a patch that does not match its surroundings, and a mean over
+ * the spot the brush will cover matches. Transparent pixels are left out of the mean rather than mixed in as
+ * black, so sampling a soft edge gives the edge's own colour; a spot with nothing but transparency returns
+ * `undefined` — there is nothing to pick there, and inventing white would paint a hole with paper.
+ *
+ * `invert` negates the answer, because when the picture is displayed inverted the operator is picking the
+ * colour they *see*. Averaging first is the same number: negation and a mean are both linear.
+ */
+export function colorFromPixels(
+  pixels: Uint8Array | Uint8ClampedArray,
+  width: number,
+  x: number,
+  y: number,
+  options: { invert?: boolean; radius?: number } = {}
+): string | undefined {
+  if (!(width > 0) || !Number.isFinite(x) || !Number.isFinite(y)) return undefined;
+  const height = Math.floor(pixels.length / 4);
+  if (!(height > 0)) return undefined;
+  const px = Math.max(0, Math.min(width - 1, Math.floor(x)));
+  const py = Math.max(0, Math.min(height - 1, Math.floor(y)));
+  const radius = Math.max(0, Math.min(32, Math.floor(options.radius ?? 0)));
+  const mix = (value: number) => (options.invert ? 255 - value : value);
+  let red = 0, green = 0, blue = 0, taken = 0;
+  for (let row = py - radius; row <= py + radius; row++) {
+    if (row < 0 || row >= height) continue;
+    for (let column = px - radius; column <= px + radius; column++) {
+      if (column < 0 || column >= width) continue;
+      const offset = (row * width + column) * 4;
+      if (offset + 3 >= pixels.length) continue;
+      if (pixels[offset + 3] === 0) continue;
+      red += pixels[offset]; green += pixels[offset + 1]; blue += pixels[offset + 2]; taken++;
+    }
+  }
+  if (!taken) return undefined;
+  // A half-transparent pixel is still a colour the operator can aim at; premultiplying it against nothing
+  // would darken every soft edge, so the samples are read as they are.
+  return hexColor(mix(red / taken), mix(green / taken), mix(blue / taken));
+}
+
+/** A box the size of the decoded file, so a percent of the artwork can be turned into a pixel of it. */
+export function sampleBoxForImage(naturalWidth: number, naturalHeight: number): ErasePaintBox {
+  return { width: naturalWidth, height: naturalHeight, widthMm: naturalWidth, heightMm: naturalHeight };
+}
+
+/**
+ * The marquee a region gesture is about to become, while the pointer is still down — an outline, not a commit.
+ * A region only takes effect when the operator presses `Delete`, so this is what the sheet shows in between.
+ */
+export function eraseRegionIsSelected(shape: EraseShape | null | undefined): shape is Extract<EraseShape, { mode: 'region' }> {
+  return !!shape && shape.mode === 'region' && eraseShapeIsMeaningful(shape);
 }

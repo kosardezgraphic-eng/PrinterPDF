@@ -85,6 +85,9 @@ describe('picture export',()=>{
  it('flattens an erased or inverted picture instead of embedding it raw',async()=>{
   await expect(exportWith(image({invert:true}))).rejects.toThrow('Exporting a flipped or unsupported picture needs a Canvas 2D renderer');
   await expect(exportWith(image({erase:[{mode:'region',x:10,y:10,width:20,height:20}]}))).rejects.toThrow('Canvas 2D renderer');
+  // A stroke that carries a colour is the same kind of change to the pixels, so it too has to leave the raw
+  // byte stream — an embedded PNG would print the untouched file with neither hole nor paint on it.
+  await expect(exportWith(image({erase:[{mode:'brush',radiusMm:4,points:[{x:10,y:10},{x:40,y:40}],color:'#ff0000'}]}))).rejects.toThrow('Canvas 2D renderer');
   await expect(exportWith(image({erase:[]}))).resolves.toBeTruthy();               // an empty list is not an erase
  });
  it('patches the colour Decode only when the CMYK samples are not Adobe-complemented', async () => {

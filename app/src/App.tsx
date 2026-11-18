@@ -205,6 +205,15 @@ export const App: React.FC = () => {
         selectAllForPrint(true);
         return;
       }
+      // The region tool is a two-step verb: drag the marquee, then `Delete` to spend it on the picture, `Escape`
+      // to drop it. Both would otherwise act on the selected layer or the highlighted pages, so the waiting
+      // marquee is asked first and eats the key when there is one.
+      if (e.key === 'Delete' || e.key === 'Backspace' || e.key === 'Escape') {
+        if (useAppStore.getState().spendEraseKey(e.key)) {
+          e.preventDefault();
+          return;
+        }
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const selectedOverlay = useAppStore.getState().selectedOverlayId;
         if (selectedOverlay) {

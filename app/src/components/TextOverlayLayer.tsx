@@ -5,7 +5,7 @@ import {imageDrawRect,overlayPlacements,type OverlayPlacement} from '../engine/o
 import {centreWithinLimits,moveOverlay,overlayLimitsForBox,resizeOverlay,resizeOverlayKeepingAspect,rotationFromPointer,pointerAngle,type OverlayHandle,type OverlayLimits} from '../engine/overlayGeometry';
 import {rotateVector} from '../engine/pageGeometry';
 import type {EraseShape} from '@shared/models';
-import {beginEraseShape,commitEraseShape,eraseMaskCss,eraseShapeIsMeaningful,eraseShapeParts,growEraseShape} from '../engine/imageErase';
+import {beginEraseShape,commitEraseShape,colorFromPixels,eraseMaskCss,erasePaintCss,eraseRegionIsSelected,eraseShapeIsMeaningful,eraseShapeParts,eraseToolPaints,growEraseShape} from '../engine/imageErase';
 import {MM_PER_PT, SHAPE_NAMES, shapeCommands, shapeDashPattern, shapeHasFill, shapeIsStrokedOnly, shapeSvgPath} from '../engine/shapes';
 import {useSmartGuides} from './SmartGuidesOverlay';
 import {useAppStore} from '../store/useAppStore';
@@ -39,21 +39,36 @@ function eraseSpaceOf(item:PageOverlayImage,widthMm:number,heightMm:number) {
  * `rasterizeOverlayImage` cuts the export bitmap in — the screen and the sheet therefore remove exactly the
  * same part of the same picture, which is the whole reason an erase is stored as geometry instead of pixels.
  */
-function ImagePicture({item,width,height,erasing,live}:{item:PageOverlayImage;width:number;height:number;erasing?:boolean;live?:EraseShape|null}) {
+/** A box that carries a picture: the props of the image branch of `overlayProps()`. */
+interface PictureBox {image:PageOverlayImage;width:number;height:number}
+/** The rectangle the artwork covers inside the box, in millimetres — the eraser's own space. */
+function pictureRect(p:PictureBox) {
+ return imageDrawRect((p as {image:PageOverlayImage}).image,p.width,p.height);
+}
+/** The same rectangle as percentages of the box, so a mark can be laid over the picture it belongs to. */
+function pictureFit(p:PictureBox) {
+ const rect=pictureRect(p),width=p.width,height=p.height;
+ return rect.width>0&&rect.height>0
+   ?{left:`${rect.x/width*100}%`,top:`${rect.y/height*100}%`,width:`${rect.width/width*100}%`,height:`${rect.height/height*100}%`}
+   :{left:'0%',top:'0%',width:'100%',height:'100%'};
+}
+function ImagePicture({item,width,height,live}:{item:PageOverlayImage;width:number;height:number;live?:EraseShape|null}) {
  const {rect,box}=eraseSpaceOf(item,width,height);
  const fit=rect.width>0&&rect.height>0?{left:`${rect.x/width*100}%`,top:`${rect.y/height*100}%`,width:`${rect.width/width*100}%`,height:`${rect.height/height*100}%`}:{left:'0%',top:'0%',width:'100%',height:'100%'};
- const mask=eraseMaskCss(item.erase,box);
+ // The stroke in progress is drawn *as the result*, not as a red band over it: while the button is held the
+ // operator is looking for "did that spot go away", and an approximation there would be a second renderer.
+ const shapes=live?[...(item.erase??[]),live]:(item.erase??[]);
+ const mask=eraseMaskCss(shapes,box);
+ const paint=erasePaintCss(shapes,box);
  const mirror=`scaleX(${item.flipHorizontal?-1:1}) scaleY(${item.flipVertical?-1:1})`;
- return <>
-   <img src={item.src} alt={item.name} draggable={false} style={{position:'absolute',...fit,maxWidth:'100%',maxHeight:'100%',
-     transform:mirror,opacity:item.opacity,pointerEvents:'none',userSelect:'none',
+ return <div style={{position:'absolute',...fit,transform:mirror,opacity:item.opacity,pointerEvents:'none',userSelect:'none'}}>
+   <img src={item.src} alt={item.name} draggable={false} style={{position:'relative',display:'block',width:'100%',height:'100%',maxWidth:'100%',maxHeight:'100%',
      ...(item.invert?{filter:'invert(1)'}:{}),
-     ...(mask?{maskImage:mask,WebkitMaskImage:mask,maskSize:'100% 100%',WebkitMaskSize:'100% 100%',maskRepeat:'no-repeat',WebkitMaskRepeat:'no-repeat'}:{}),
-     ...(erasing?{outline:'1px dashed #f87171'}:{})}}/>
-   {/* The stroke in progress, on the same rectangle and with the same mirror as the picture it will cut, so
-       the red band sits under the cursor and lands exactly where the mask will. */}
-   {live && <div aria-hidden="true" style={{position:'absolute',...fit,transform:mirror,pointerEvents:'none'}}><EraseLiveMark shape={live} widthMm={rect.width} heightMm={rect.height}/></div>}
- </>;
+     ...(mask?{maskImage:mask,WebkitMaskImage:mask,maskSize:'100% 100%',WebkitMaskSize:'100% 100%',maskRepeat:'no-repeat',WebkitMaskRepeat:'no-repeat'}:{})}}/>
+   {/* Coloured strokes sit above the picture, each cut by the holes that came after it — the same order the
+       exported raster keeps, so the screen and the sheet agree about the operator's own history. */}
+   {paint && <div aria-hidden="true" data-image-paint style={{position:'absolute',inset:0,pointerEvents:'none',backgroundImage:paint,backgroundSize:'100% 100%',backgroundRepeat:'no-repeat'}}/>}
+ </div>;
 }
 
 /**
@@ -61,13 +76,18 @@ function ImagePicture({item,width,height,erasing,live}:{item:PageOverlayImage;wi
  * millimetre space as the mask, in the red of "this will not be on the paper". No second renderer —
  * `eraseShapeParts` is the only geometry, so the band cannot drift away from what the release commits.
  */
-function EraseLiveMark({shape,widthMm,heightMm}:{shape:EraseShape;widthMm:number;heightMm:number}) {
- const {holes,rects}=eraseShapeParts(shape,{width:widthMm,height:heightMm,widthMm,heightMm});
- return <svg data-erase-live aria-hidden="true" width="100%" height="100%" style={{position:'absolute',inset:0,pointerEvents:'none',overflow:'visible'}}
+/**
+ * A region that has been drawn but not yet spent: a marching outline with the colour it would cut (or the
+ * colour it would paint), because "drag a rectangle, press Delete" only reads as a tool if the rectangle waits
+ * in plain sight in between.
+ */
+function EraseSelectionMark({shape,widthMm,heightMm}:{shape:EraseShape;widthMm:number;heightMm:number}) {
+ const {rects}=eraseShapeParts(shape,{width:widthMm,height:heightMm,widthMm,heightMm});
+ const stroke=shape.color??'#f87171';
+ return <svg data-erase-selection aria-hidden="true" width="100%" height="100%" style={{position:'absolute',inset:0,pointerEvents:'none',overflow:'visible'}}
    viewBox={`0 0 ${widthMm} ${heightMm}`} preserveAspectRatio="none">
-   <g fill="#ef4444" fillOpacity="0.4" stroke="#ef4444" strokeOpacity="0.9" strokeWidth="0.2">
+   <g fill={shape.color??'none'} fillOpacity={shape.color?0.35:0} stroke={stroke} strokeWidth="0.4" strokeDasharray="1.6 1.2">
      {rects.map((r,i)=><rect key={`r${i}`} x={r.x} y={r.y} width={r.width} height={r.height}/>)}
-     {holes.map((h,i)=><ellipse key={`h${i}`} cx={h.cx} cy={h.cy} rx={h.rx} ry={h.ry}/>)}
    </g>
  </svg>;
 }
@@ -111,11 +131,24 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
  const isShape='shape' in p;
  const eraseTool=useAppStore(s=>s.eraseTool);
  const eraseBrushMm=useAppStore(s=>s.eraseBrushMm);
- /** The stroke under the pointer, kept out of the store until the button is released. */
+ const eraseColor=useAppStore(s=>s.eraseColor);
+ const setEraseColor=useAppStore(s=>s.setEraseColor);
+ const setErasePending=useAppStore(s=>s.setErasePending);
+ /** The marquee this picture is holding, if the region tool left one. */
+ const pending=useAppStore(s=>s.erasePending&&s.erasePending.overlayId===item.id?s.erasePending.shape:null);
+ /** The gesture under the pointer, kept out of the store until it is finished. */
  const [liveErase,setLiveErase]=useState<EraseShape|null>(null);
  const erase=useRef<{pointer:number;anchor:{x:number;y:number};shape:EraseShape}|null>(null);
+ const ring=useRef<HTMLDivElement>(null);
+ const ringAt=useRef<{x:number;y:number}|null>(null);
  // A locked layer or an open text edit keeps the pointer: the eraser paints on the picture, and nowhere else.
  const eraseActive=!!isImage && !!enabled && !edit && eraseTool!=='off';
+ const erasing=eraseActive && eraseToolPaints(eraseTool);
+ // A brush is applied as it is drawn, so its live gesture goes straight into the picture's own layers. A region
+ // is only *selected* until `Delete`, so its live outline is the marching rectangle — the same mark it keeps
+ // waiting with, which is what tells the operator the rectangle has not been spent yet.
+ const liveBrush=liveErase&&liveErase.mode==='brush'?liveErase:null;
+ const selection=liveErase&&eraseRegionIsSelected(liveErase)?liveErase:pending;
  /**
   * A client point → percent of the picture **as it is painted**, not of the box around it, so a `contain`
   * letterbox cannot make the hole land somewhere other than under the cursor. A mirrored picture is flipped
@@ -129,6 +162,60 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
    if(image.flipHorizontal)x=100-x;
    if(image.flipVertical)y=100-y;
    return {x,y};
+ };
+ /** The ring that replaces the arrow while the brush is armed — the cursor *is* the brush, at its size. */
+ const moveRing=(node:HTMLElement,clientX:number,clientY:number)=>{
+   const box=node.getBoundingClientRect();
+   const x=clientX-box.left,y=clientY-box.top;
+   ringAt.current={x,y};
+   // The follow itself is a direct style write, not a state update: a pointermove arrives far faster than a
+   // frame, and re-rendering the layer per event would make the cursor lag behind the hand.
+   const el=ring.current;if(el){el.style.left=`${x}px`;el.style.top=`${y}px`;}
+ };
+ const hideRing=()=>{ringAt.current=null;const el=ring.current;if(el){el.style.left='-9999px';el.style.top='-9999px';}};
+ /**
+  * The eyedropper: the colour of the artwork under the pointer, taken from the same pixels the picture is
+  * drawn from (and negated when the picture is displayed inverted, because the operator picks what they see).
+  * An empty spot has no colour to take, and the panel says so instead of inventing white.
+  */
+ const pickColour=async(node:HTMLElement,clientX:number,clientY:number)=>{
+   const image=(p as {image:PageOverlayImage}).image;
+   const at=erasePoint(node,clientX,clientY);
+   const img=node.querySelector('img');
+   if(typeof document==='undefined'||!img||!(image.naturalWidth>0)||!(image.naturalHeight>0)){
+     useAppStore.getState().addToast({type:'warning',title:useAppStore.getState().settings.language==='fa'
+       ?'این مرورگر نمی‌تواند رنگ پیکسل‌ها را بخواند؛ رنگ را دستی انتخاب کنید.'
+       :'This browser cannot read the picture’s pixels; pick the colour by hand instead.'});
+     return;
+   }
+   const canvas=document.createElement('canvas');
+   canvas.width=Math.max(1,Math.round(image.naturalWidth));canvas.height=Math.max(1,Math.round(image.naturalHeight));
+   const ctx=canvas.getContext('2d',{willReadFrequently:true});
+   if(!ctx){
+     useAppStore.getState().addToast({type:'warning',title:useAppStore.getState().settings.language==='fa'
+       ?'خواندن رنگ تصویر به Canvas 2D نیاز دارد؛ رنگ را دستی انتخاب کنید.'
+       :'Sampling the picture needs a Canvas 2D context; pick the colour by hand instead.'});
+     return;
+   }
+   ctx.drawImage(img,0,0,canvas.width,canvas.height);
+   // The area sampled is the brush's own footprint, at the file's scale — not one pixel. A click on a JPEG
+   // logo or an anti-aliased edge would otherwise pick a single noise pixel and paint a patch that does not
+   // match the surroundings it came from.
+   const {rect}=eraseSpaceOf(image,p.width,p.height);
+   const radius=Math.max(0,Math.min(16,Math.round(rect.width>0?(eraseBrushMm/2)*(canvas.width/rect.width):0)));
+   const cx=Math.floor(at.x/100*canvas.width),cy=Math.floor(at.y/100*canvas.height);
+   const x0=Math.max(0,cx-radius),y0=Math.max(0,cy-radius);
+   const w=Math.min(canvas.width-x0,radius*2+1),h=Math.min(canvas.height-y0,radius*2+1);
+   const data=ctx.getImageData(x0,y0,w,h).data;
+   const color=colorFromPixels(data,w,cx-x0,cy-y0,{invert:!!image.invert,radius});
+   if(!color){
+     useAppStore.getState().addToast({type:'info',title:useAppStore.getState().settings.language==='fa'
+       ?'آن نقطه از تصویر خالی است؛ رنگی برای برداشتن وجود ندارد.'
+       :'That spot of the picture is empty — there is no colour to take from it.'});
+     return;
+   }
+   setEraseColor(color);
+   useAppStore.getState().setEraseTool('brush');
  };
  /** Images and text are free by default; page numbers keep their ratio unless Shift is held. */
  const lockedDefault=item.lockAspect ?? item.kind==='numbering';
@@ -146,7 +233,10 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
   gesture.current=null;smartGuidesRef.current?.clearGuides();};
  useEffect(()=>{const cancel=()=>{if(gesture.current)cleanup(gesture.current);
   // An erase that was never released must not be left hanging on the screen, and must not be committed either.
-  if(erase.current){erase.current=null;setLiveErase(null);}};const key=(e:KeyboardEvent)=>{if(e.key==='Escape')cancel();};window.addEventListener('blur',cancel);window.addEventListener('keydown',key);return()=>{window.removeEventListener('blur',cancel);window.removeEventListener('keydown',key);cancel();};},[item.id,p.parentWidth,p.parentHeight,p.parentRotation,pxPerMm,enabled]);
+  if(erase.current){erase.current=null;setLiveErase(null);}};
+ // `Delete` on a waiting marquee is a global key (the app owns it), but throwing the marquee away is this
+ // layer's business, because it is this layer that drew it.
+ const key=(e:KeyboardEvent)=>{if(e.key!=='Escape')return;cancel();if(useAppStore.getState().erasePending?.overlayId===item.id)useAppStore.getState().setErasePending(null);};window.addEventListener('blur',cancel);window.addEventListener('keydown',key);return()=>{window.removeEventListener('blur',cancel);window.removeEventListener('keydown',key);cancel();};},[item.id,p.parentWidth,p.parentHeight,p.parentRotation,pxPerMm,enabled]);
  useLayoutEffect(()=>{if(edit&&textarea.current){textarea.current.focus();textarea.current.setSelectionRange(edit.selectionStart,edit.selectionEnd);}},[!!edit]);
  useEffect(()=>{mounted.current=true;return ()=>{mounted.current=false;const pending=useAppStore.getState().textEdit;
   if(pending?.occurrenceKey===p.key)queueMicrotask(()=>{if(!mounted.current && useAppStore.getState().textEdit===pending)useAppStore.getState().finishTextEdit();});};},[p.key]);
@@ -216,12 +306,15 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
  const eraseStart=(e:React.PointerEvent<HTMLElement>)=>{
   if(!eraseActive||e.pointerType==='mouse'&&e.button!==0)return;
   e.preventDefault();e.stopPropagation();activate();select(item.id);
+  if(eraseTool==='picker'){void pickColour(e.currentTarget,e.clientX,e.clientY);return;}
   const at=erasePoint(e.currentTarget,e.clientX,e.clientY);
-  const shape=beginEraseShape(eraseTool==='region'?'region':'brush',at,eraseBrushMm/2);
-  erase.current={pointer:e.pointerId,anchor:at,shape};setLiveErase(shape);
+  const shape=beginEraseShape(eraseTool==='region'?'region':'brush',at,eraseBrushMm/2,eraseColor);
+  erase.current={pointer:e.pointerId,anchor:at,shape};setLiveErase(shape);setErasePending(null);
+  moveRing(e.currentTarget,e.clientX,e.clientY);
   e.currentTarget.setPointerCapture(e.pointerId);
  };
  const eraseMove=(e:React.PointerEvent<HTMLElement>)=>{
+  moveRing(e.currentTarget,e.clientX,e.clientY);
   const g=erase.current;if(!g||g.pointer!==e.pointerId)return;
   e.preventDefault();e.stopPropagation();
   const next=growEraseShape(g.shape,g.anchor,erasePoint(e.currentTarget,e.clientX,e.clientY));
@@ -229,13 +322,14 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
  };
  const eraseFinish=(e:React.PointerEvent<HTMLElement>,cancel=false)=>{
   const g=erase.current;if(!g||g.pointer!==e.pointerId)return;
-  e.preventDefault();e.stopPropagation();erase.current=null;setLiveErase(null);
+  e.preventDefault();e.stopPropagation();erase.current=null;setLiveErase(null);hideRing();
   if(cancel)return;
   // A press without travel is a click on the layer, not a hole in the artwork; and the whole stroke lands in
   // the store in one go, so `Ctrl+Z` gives back a gesture rather than a third of one.
   if(!eraseShapeIsMeaningful(g.shape))return;
   // The list is read from the store, not from the placement this render was built with: two pointers on the
   // same picture (or a panel button pressed mid-drag) must not silently drop the stroke that landed first.
+  if(g.shape.mode==='region'){setErasePending({overlayId:item.id,shape:g.shape});return;}
   const live=useAppStore.getState().overlays.find(o=>o.id===item.id) as PageOverlayImage|undefined;
   if(!live)return;
   useAppStore.getState().setOverlayErase(item.id,commitEraseShape(live.erase,g.shape));
@@ -267,13 +361,23 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
      const mm=(e.shiftKey?5:1),delta=rotateVector(step[0]*mm*pxPerMm,step[1]*mm*pxPerMm,-(p.parentRotation+item.rotation));
      update(item.id,moveOverlay(item,delta.x/(p.parentWidth*pxPerMm)*100,delta.y/(p.parentHeight*pxPerMm)*100,limits));return;}
    if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();activate();if(editable)beginEdit(item.id,p.key);else select(item.id);}}}
-   onPointerDown={e=>{if(erase.current)return;if(eraseActive){eraseStart(e);return;}if(!edit)start(e,'move');}} onPointerMove={e=>{if(erase.current){eraseMove(e);return;}move(e);}} onPointerUp={e=>{if(erase.current){eraseFinish(e);return;}finish(e);}} onPointerCancel={e=>{if(erase.current){eraseFinish(e,true);return;}finish(e,true);}} onLostPointerCapture={e=>{if(erase.current){eraseFinish(e,true);return;}finish(e,true);}} onClick={e=>e.stopPropagation()}
-   style={{position:'absolute',left:`${item.xPercent}%`,top:`${item.yPercent}%`,width:`${item.widthPercent}%`,height:`${item.heightPercent}%`,transform:`rotate(${item.rotation}deg)`,outline:selected?'2px solid #0ea5e9':'none',cursor:eraseActive?`crosshair, `:enabled?'move':'default',touchAction:'none',pointerEvents:enabled?'auto':'none'}}>
+   // The ring is the cursor, so it has to be where the pointer is the moment the pointer arrives — not only
+   // after the first move. It stays on while a gesture holds the pointer, even outside the box: that stroke is
+   // still drawing, and a cursor that vanishes mid-drag reads as a dropped gesture.
+   onPointerEnter={e=>{if(erasing&&!erase.current)moveRing(e.currentTarget,e.clientX,e.clientY);}}
+   onPointerLeave={()=>{if(erasing&&!erase.current)hideRing();}}
+   onPointerDown={e=>{if(erase.current)return;if(eraseActive){eraseStart(e);return;}if(!edit)start(e,'move');}} onPointerMove={e=>{if(eraseActive&&!edit)moveRing(e.currentTarget,e.clientX,e.clientY);if(erase.current){eraseMove(e);return;}move(e);}} onPointerUp={e=>{if(erase.current){eraseFinish(e);return;}finish(e);}} onPointerCancel={e=>{if(erase.current){eraseFinish(e,true);return;}finish(e,true);}} onLostPointerCapture={e=>{if(erase.current){eraseFinish(e,true);return;}finish(e,true);}} onClick={e=>e.stopPropagation()}
+   style={{position:'absolute',left:`${item.xPercent}%`,top:`${item.yPercent}%`,width:`${item.widthPercent}%`,height:`${item.heightPercent}%`,transform:`rotate(${item.rotation}deg)`,outline:erasing?'1px dashed #f87171':selected?'2px solid #0ea5e9':'none',cursor:eraseActive?(eraseTool==='brush'?'none':eraseTool==='picker'?'copy':'crosshair'):enabled?'move':'default',touchAction:'none',pointerEvents:enabled?'auto':'none'}}>
    {!edit && (isImage
-     ? <ImagePicture item={(p as {image:PageOverlayImage}).image} width={p.width} height={p.height} erasing={eraseActive} live={liveErase}/>
+     ? <ImagePicture item={(p as {image:PageOverlayImage}).image} width={p.width} height={p.height} live={liveBrush}/>
      : isShape
        ? <ShapeGlyph item={(p as {shape:PageOverlayShape}).shape} widthMm={p.width} heightMm={p.height}/>
        : <TextCanvas item={(p as {renderText:PageOverlayText}).renderText} width={p.width} height={p.height} pxPerMm={pxPerMm}/>)}
+   {isImage && eraseTool==='brush' && enabled && !edit && <div ref={ring} data-brush-cursor aria-hidden="true" style={{position:'absolute',
+     // The last position the pointer was seen at is kept in a ref *and* rendered from it, so a re-render in the
+     // middle of a stroke — which is what committing one is — cannot blink the cursor back to nowhere.
+     left:`${ringAt.current?.x??-9999}px`,top:`${ringAt.current?.y??-9999}px`,width:`${eraseBrushMm*pxPerMm}px`,height:`${eraseBrushMm*pxPerMm}px`,transform:'translate(-50%,-50%)',borderRadius:'50%',pointerEvents:'none',border:`1px solid ${eraseColor??'#f87171'}`,boxShadow:'0 0 0 1px rgba(15,23,42,0.55)',background:eraseColor?`${eraseColor}80`:'transparent'}}/>}
+   {isImage && eraseRegionIsSelected(selection) && <div style={{position:'absolute',...pictureFit(p)}}><EraseSelectionMark shape={selection} widthMm={pictureRect(p).width} heightMm={pictureRect(p).height}/></div>}
    {'formulaError' in p && p.formulaError && !edit && <span role="alert" className="absolute bottom-full left-0 whitespace-nowrap bg-red-800 px-1 text-white">{lang==='fa'?'فرمول نامعتبر':'Invalid formula'}</span>}
    {edit && editable && <textarea ref={textarea} data-inline-overlay-editor aria-label={lang==='fa'?'ویرایش متن روی صفحه':'Edit text on page'} value={edit.text}
       wrap="off" spellCheck={false} dir={/[\u0590-\u08ff]/.test(edit.text)?'rtl':'ltr'}

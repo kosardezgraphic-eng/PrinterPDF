@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { createCanvas } from '@napi-rs/canvas';
 import type { EraseShape } from '@shared/models';
-import { applyEraseToContext, invertPixelsInContext } from './imageErase';
+import { applyEraseToContext, colorFromPixels, invertPixelsInContext } from './imageErase';
 
 const box = { width: 200, height: 100, widthMm: 100, heightMm: 50 };         // two pixels per millimetre
 
@@ -108,5 +108,89 @@ describe('negating the colours in the export raster', () => {
     invertPixelsInContext(ctx, rect);
     invertPixelsInContext(ctx, rect);
     expect(at(ctx, 30, 30)).toEqual(before);
+  });
+});
+
+describe('laying the brush’s colour on the export raster', () => {
+  it('covers the spot with the chosen colour instead of cutting through it', () => {
+    const { ctx } = filled();
+    const shape: EraseShape = { mode: 'region', x: 25, y: 25, width: 50, height: 50, color: '#0000ff' };
+    expect(applyEraseToContext(ctx, [shape], box)).toBe(true);
+    expect(at(ctx, 100, 50)).toEqual({ r: 0, g: 0, b: 255, a: 255 });              // the patch, opaque — not a hole
+    expect(at(ctx, 20, 20)).toEqual({ r: 255, g: 0, b: 0, a: 255 });               // outside it, the picture
+  });
+
+  it('paints a dot the size the brush says, in millimetres', () => {
+    const { ctx } = filled();
+    applyEraseToContext(ctx, [{ mode: 'brush', radiusMm: 5, points: [{ x: 50, y: 50 }], color: '#00ff00' }], box);
+    expect(at(ctx, 100, 50)).toEqual({ r: 0, g: 255, b: 0, a: 255 });
+    // The same 20 px across the erasing test measured, only filled instead of removed.
+    const row = Array.from(ctx.getImageData(0, 50, 200, 1).data);
+    const green = row.filter((value, index) => index % 4 === 1 && value === 255).length;
+    expect(green).toBeGreaterThan(16);
+    expect(green).toBeLessThan(24);
+    expect(at(ctx, 150, 50)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  });
+
+  it('lets a hole cut through paint drawn before it, and paint refill a hole drawn before it', () => {
+    // Both orders are the operator's own history, and the canvas compositing gives them for free: a later
+    // `destination-out` clears what is under it, a later `source-over` covers it.
+    const { ctx } = filled();
+    applyEraseToContext(ctx, [
+      { mode: 'region', x: 10, y: 10, width: 30, height: 30, color: '#00ff00' },   // px 20…80
+      { mode: 'region', x: 25, y: 10, width: 30, height: 30 },                     // px 50…110
+    ], box);
+    expect(at(ctx, 40, 25)).toEqual({ r: 0, g: 255, b: 0, a: 255 });               // paint only
+    expect(at(ctx, 65, 25)).toEqual({ r: 0, g: 0, b: 0, a: 0 });                    // the hole went through it
+    expect(at(ctx, 95, 25)).toEqual({ r: 0, g: 0, b: 0, a: 0 });                    // and cut the bare picture
+
+    const { ctx: after } = filled();
+    applyEraseToContext(after, [
+      { mode: 'region', x: 25, y: 10, width: 30, height: 30 },
+      { mode: 'region', x: 10, y: 10, width: 30, height: 30, color: '#00ff00' },
+    ], box);
+    expect(at(after, 65, 25)).toEqual({ r: 0, g: 255, b: 0, a: 255 });               // the paint closed the hole again
+    expect(at(after, 95, 25)).toEqual({ r: 0, g: 0, b: 0, a: 0 });                    // where nothing was painted since
+  });
+
+  it('ignores a colour that is not a colour, and erases there instead', () => {
+    const { ctx } = filled();
+    // `sanitizeEraseShapes` is the gate in front of every renderer: a stored file with a hostile or broken
+    // `color` must fall back to a hole, not feed the canvas an expression.
+    applyEraseToContext(ctx, [{ mode: 'region', x: 25, y: 25, width: 50, height: 50, color: 'url(#x)' as string }], box);
+    expect(at(ctx, 100, 50)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  });
+});
+
+describe('reading a colour out of the artwork', () => {
+  const rgba = (r: number, g: number, b: number, a: number) => new Uint8ClampedArray([r, g, b, a]);
+
+  it('answers with the hex the brush stores, and with nothing on an empty pixel', () => {
+    expect(colorFromPixels(rgba(0x12, 0x34, 0x56, 0xff), 1, 0, 0)).toBe('#123456');
+    expect(colorFromPixels(rgba(0, 0, 0, 0), 1, 0, 0)).toBeUndefined();            // never an invented white
+  });
+
+  it('negates the sample when the picture is displayed inverted, because that is the colour on the screen', () => {
+    expect(colorFromPixels(rgba(0x12, 0x34, 0x56, 0xff), 1, 0, 0, { invert: true })).toBe('#edcba9');
+  });
+
+  it('walks the row it was given, and refuses a point outside the sample', () => {
+    const two = new Uint8ClampedArray([1, 2, 3, 255, 250, 251, 252, 255]);
+    expect(colorFromPixels(two, 2, 1, 0)).toBe('#fafbfc');
+    expect(colorFromPixels(two, 2, 0, 5)).toBeUndefined();
+    expect(colorFromPixels(two, 0, 0, 0)).toBeUndefined();
+  });
+
+  it('averages the area it is given, and ignores the empty pixels in it', () => {
+    // A 3×3 field: eight anti-aliased edge pixels around one transparent hole.
+    const field = new Uint8ClampedArray(9 * 4);
+    for (let i = 0; i < 9; i++) field.set(i === 4 ? [0, 0, 0, 0] : [10, 20, 30, 255], i * 4);
+    expect(colorFromPixels(field, 3, 1, 1, { radius: 1 })).toBe('#0a141e');
+    field.set([100, 100, 100, 255], 4 * 4);                                         // the centre joins in
+    expect(colorFromPixels(field, 3, 1, 1, { radius: 1 })).toBe('#141d26');          // (8·10+100)/9, and so on
+    expect(colorFromPixels(field, 3, 1, 1)).toBe('#646464');                          // radius 0 reads the pixel
+    // A window that hangs past the file is clipped, not wrapped, and an all-empty one still says nothing.
+    expect(colorFromPixels(field, 3, 0, 0, { radius: 8 })).toBe('#141d26');
+    expect(colorFromPixels(new Uint8ClampedArray(9 * 4), 3, 1, 1, { radius: 1 })).toBeUndefined();
   });
 });

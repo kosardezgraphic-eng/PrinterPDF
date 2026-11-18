@@ -31,6 +31,7 @@ import {
   Magnet,
   Eraser,
   SquareDashedMousePointer,
+  Pipette,
 } from 'lucide-react';
 import { MatrixSizeFields } from './MatrixSizeFields';
 import { SettingsPresetMenu } from './SettingsPresets';
@@ -84,8 +85,10 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
     toggleGlobalInvert,
     eraseTool,
     eraseBrushMm,
+    eraseColor,
     setEraseTool,
     setEraseBrushMm,
+    setEraseColor,
     resetEffects,
     updateSettings,
     clearCrispPreviewCacheNow,
@@ -726,6 +729,15 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
                   <SquareDashedMousePointer className="h-4 w-4" aria-hidden="true" />
                   <span>{lang === 'fa' ? 'پاک‌کن: ناحیه' : 'Eraser: region'}</span>
                 </button>
+                {/* The eyedropper is not a mode you stay in: one click on the artwork, and the brush is armed
+                    with that colour. That is the shortest path from "this exact grey" to "paint over there". */}
+                <button type="button" data-erase-tool="picker" aria-pressed={eraseTool === 'picker'}
+                  onClick={() => setEraseTool(eraseTool === 'picker' ? 'off' : 'picker')}
+                  title={lang === 'fa' ? 'روی تصویر کلیک کنید تا رنگ همان نقطه قلم‌مو شود' : 'Click on a picture to make the colour under the pointer the brush colour'}
+                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 font-bold ${eraseTool === 'picker' ? 'bg-amber-500 text-slate-950' : 'border border-slate-700 bg-slate-800 text-slate-200 hover:border-amber-400/60'}`}>
+                  <Pipette className="h-4 w-4" aria-hidden="true" />
+                  <span>{lang === 'fa' ? 'قطره‌چکان' : 'Eyedropper'}</span>
+                </button>
                 {eraseTool !== 'off' && (
                   <label className="flex items-center gap-1 text-[10px] text-slate-300">
                     <span>{lang === 'fa' ? 'قطر (mm)' : 'Ø (mm)'}</span>
@@ -733,6 +745,20 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
                       type="number" min="0.2" max="500" step="0.1" value={Number(eraseBrushMm.toFixed(2))}
                       onChange={(e) => setEraseBrushMm(Number(e.target.value))}
                       className="w-16 rounded border border-slate-600 bg-slate-800 px-1 py-0.5 text-xs text-white" />
+                  </label>
+                )}
+                {eraseTool !== 'off' && (
+                  <label className="flex items-center gap-1 text-[10px] text-slate-300" title={lang === 'fa'
+                    ? 'اگر رنگی انتخاب شود، قلم‌مو آن رنگ را می‌گذارد نه اینکه سوراخ کند'
+                    : 'A colour makes the brush lay that colour down instead of cutting a hole'}>
+                    <span>{lang === 'fa' ? 'رنگ' : 'Colour'}</span>
+                    <input data-erase-color type="color" aria-label={lang === 'fa' ? 'رنگ قلم‌مو' : 'Brush colour'} value={eraseColor ?? '#ffffff'}
+                      onChange={(e) => setEraseColor(e.target.value)}
+                      className="h-6 w-8 cursor-pointer rounded border border-slate-600 bg-slate-800 p-0.5" />
+                    <button type="button" data-erase-color="hole" onClick={() => setEraseColor(null)}
+                      className={`rounded px-1.5 py-0.5 ${!eraseColor ? 'bg-rose-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>
+                      {lang === 'fa' ? 'بدون رنگ' : 'No colour'}
+                    </button>
                   </label>
                 )}
               </div>

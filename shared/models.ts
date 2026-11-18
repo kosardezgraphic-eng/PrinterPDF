@@ -664,18 +664,34 @@ export interface PageOverlayNumbering extends OverlayBase {
   align?: 'left' | 'center' | 'right';
 }
 /**
- * One erase gesture on a picture, in **percent of the piece of the box the picture actually paints** (its
- * fit rectangle) — the same space the preview masks and the exporter cuts, so a hole stays on the artwork
- * when the box is moved, resized or letterboxed.
+ * One gesture the eraser tool leaves on a picture, in **percent of the piece of the box the picture actually
+ * paints** (its fit rectangle) — the same space the preview masks and the exporter cuts, so a mark stays on
+ * the artwork when the box is moved, resized, letterboxed or mirrored.
  *
- * It is stored as geometry, not as a rasterised copy of the file: the original bytes stay intact, an erased
- * picture can be erased further or restored completely, and the project file stays small. A brush is a list
- * of points with a physical radius (millimetres, so the brush feels the same size whatever the zoom); a
- * region is the marquee rectangle itself.
+ * It is stored as geometry, not as a rasterised copy of the file: the original bytes stay intact, a picture
+ * can be worked on further and restored completely, and the project file stays small. A brush is a list of
+ * points with a physical radius (millimetres, so the brush feels the same size whatever the zoom); a region
+ * is the marquee rectangle itself.
  */
-export interface EraseBrushStroke { mode: 'brush'; radiusMm: number; points: { x: number; y: number }[] }
-export interface EraseRegion { mode: 'region'; x: number; y: number; width: number; height: number }
+export interface EraseBrushStroke { mode: 'brush'; radiusMm: number; points: { x: number; y: number }[]; color?: string }
+export interface EraseRegion { mode: 'region'; x: number; y: number; width: number; height: number; color?: string }
 export type EraseShape = EraseBrushStroke | EraseRegion;
+
+/**
+ * The colour a gesture was drawn with, or `undefined` when it removes pixels instead of covering them.
+ *
+ * Only `#rgb`/`#rrggbb` survives — this string is written into a CSS mask, a canvas fill and a project file,
+ * so anything else (`url(#x)`, an expression) is not a colour the app is willing to paint. A gesture without
+ * a colour is the honest default: an eraser that quietly became a paintbrush is worse than one that only
+ * erases.
+ */
+export function sanitizeEraseColor(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const value = raw.trim().toLowerCase();
+  if (/^#[0-9a-f]{6}$/.test(value)) return value;
+  if (/^#[0-9a-f]{3}$/.test(value)) return `#${value[1]}${value[1]}${value[2]}${value[2]}${value[3]}${value[3]}`;
+  return undefined;
+}
 
 /** The most erase gestures one picture may carry, and the most points one brush stroke may carry. */
 export const ERASE_SHAPE_LIMIT = 240;
@@ -719,7 +735,8 @@ export function sanitizeEraseShapes(raw: unknown): EraseShape[] {
       const rawHeight = typeof source.height === 'number' && Number.isFinite(source.height) ? source.height : 0;
       const width = Math.max(0, Math.min(500, rawWidth)), height = Math.max(0, Math.min(500, rawHeight));
       if (width < 0.01 || height < 0.01) continue;
-      out.push({ mode: 'region', x: within(source.x), y: within(source.y), width, height });
+      const regionColor = sanitizeEraseColor(source.color);
+      out.push({ mode: 'region', x: within(source.x), y: within(source.y), width, height, ...(regionColor ? { color: regionColor } : {}) });
       continue;
     }
     if (source.mode === 'brush') {
@@ -736,7 +753,8 @@ export function sanitizeEraseShapes(raw: unknown): EraseShape[] {
         if (points.length >= ERASE_POINT_LIMIT) break;
       }
       if (!points.length) continue;
-      out.push({ mode: 'brush', radiusMm, points });
+      const brushColor = sanitizeEraseColor(source.color);
+      out.push({ mode: 'brush', radiusMm, points, ...(brushColor ? { color: brushColor } : {}) });
     }
     if (out.length >= ERASE_SHAPE_LIMIT) break;
   }

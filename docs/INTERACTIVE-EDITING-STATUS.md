@@ -22,3 +22,16 @@ invert is now a round trip at every level: the page toggle answers to what the o
 how many pages are holding their own override. What stays unverified is the browser side — brush feel on
 Windows Chromium, `mask-image` behaviour across renderers, and pixel-level parity between the CSS mask and the
 exported raster.
+
+The round after that gave the same three tools hands: the brush replaces the arrow with a ring of its own
+diameter and paints wherever the button is held (points outside the picture are clamped, so a stroke may leave
+the artwork and come back), a colour on the brush turns a hole into a patch of that colour, an eyedropper
+samples the artwork's own pixel for it, and the region tool stops at *selection* — the marquee waits in the
+store (`erasePending`) until `Delete` spends it, which the app-level key handler is asked about first via
+`spendEraseKey()` so a waiting marquee is never confused with removing a layer or the highlighted pages. Colour
+is part of the gesture (`EraseShape.color`, sanitised to `#rrggbb`), of the paint layer above the preview
+(`erasePaintCss()`, each stroke masked by the holes drawn after it), of the ordered canvas walk
+(`source-over` for paint, `destination-out` for holes) and of the export bitmap cache key. What still needs a
+real browser: the ring's size under `cursor: none`, reading pixels out of a same-origin `<img>` in Chromium,
+and whether the two preview layers and the raster agree to the pixel on a rotated, mirrored, letterboxed
+picture — the tests pin the geometry, the ordering and the compositing, not the compositor.
