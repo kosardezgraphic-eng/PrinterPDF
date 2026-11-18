@@ -1,5 +1,6 @@
 using System.IO;
 using System.Printing;
+using System.Printing.Interop;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -70,7 +71,7 @@ public sealed class PrinterSpoolerService
 
                     var profile = _profiles.TryGetValue(name, out var cached)
                         ? cached
-                        : ReadActiveProfile(name, port, caps, queue, IntPtr.Zero);
+                        : ReadEffectiveProfile(name, port, caps, queue, IntPtr.Zero);
                     _profiles[name] = profile;
 
                     var location = SanitizeDriverText(queue.Location);
@@ -202,7 +203,7 @@ public sealed class PrinterSpoolerService
 
                 if (!_profiles.TryGetValue(name, out var profile))
                 {
-                    profile = ReadActiveProfile(name, port, caps, queue, info.pDevMode);
+                    profile = ReadEffectiveProfile(name, port, caps, queue, info.pDevMode);
                     _profiles[name] = profile;
                 }
 
@@ -256,7 +257,7 @@ public sealed class PrinterSpoolerService
                 var caps = QueryCapabilities(name, string.Empty, null);
                 var profile = _profiles.TryGetValue(name, out var cached)
                     ? cached
-                    : ReadActiveProfile(name, string.Empty, caps, null, IntPtr.Zero);
+                    : ReadEffectiveProfile(name, string.Empty, caps, null, IntPtr.Zero);
                 _profiles[name] = profile;
 
                 result.Add(new PrinterInfoDto(
@@ -606,6 +607,43 @@ public sealed class PrinterSpoolerService
         return list;
     }
 
+    private static PrinterProfileDto ReadEffectiveProfile(
+        string printerName,
+        string portName,
+        PrinterCapabilitiesDto caps,
+        PrintQueue? queue,
+        IntPtr fallbackDevMode)
+    {
+        IntPtr hPrinter = IntPtr.Zero;
+        IntPtr pDevMode = IntPtr.Zero;
+        try
+        {
+            if (WinSpoolInterop.OpenPrinter(printerName, out hPrinter, IntPtr.Zero) && hPrinter != IntPtr.Zero)
+            {
+                int dmSize = WinSpoolInterop.DocumentProperties(IntPtr.Zero, hPrinter, printerName, IntPtr.Zero, IntPtr.Zero, 0);
+                if (dmSize > 0)
+                {
+                    pDevMode = Marshal.AllocHGlobal(dmSize);
+                    if (WinSpoolInterop.DocumentProperties(IntPtr.Zero, hPrinter, printerName, pDevMode, IntPtr.Zero, WinSpoolInterop.DM_OUT_BUFFER) >= 0)
+                    {
+                        return ReadActiveProfile(printerName, portName, caps, queue, pDevMode);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Program.Log($"ReadEffectiveProfile('{printerName}') fell back to fallback DEVMODE: {ex.Message}");
+        }
+        finally
+        {
+            if (pDevMode != IntPtr.Zero) Marshal.FreeHGlobal(pDevMode);
+            if (hPrinter != IntPtr.Zero) WinSpoolInterop.ClosePrinter(hPrinter);
+        }
+
+        return ReadActiveProfile(printerName, portName, caps, queue, fallbackDevMode);
+    }
+
     private static PrinterProfileDto ReadActiveProfile(
         string printerName,
         string portName,
@@ -620,18 +658,25 @@ public sealed class PrinterSpoolerService
         double? heightMm = null;
         string orientation = "portrait";
         string tray = caps.SupportedTrays.FirstOrDefault() ?? "Auto Select";
-        string duplexMode = caps.SupportsDuplex ? "long-edge" : "none";
+        string mediaType = caps.SupportedMediaTypes.FirstOrDefault() ?? "Plain Paper";
+        string duplexMode = "none";
         string colorMode = caps.SupportsColor ? "color" : "monochrome";
         int dpi = caps.SupportedDpi.Contains(600) ? 600 : caps.SupportedDpi.FirstOrDefault(300);
+        string quality = "normal";
         bool collate = true;
+        string? staple = null;
+        string? holePunch = null;
+        string? fold = null;
+        string? outputBin = null;
+        bool borderless = false;
 
         if (pDevMode != IntPtr.Zero)
         {
             try
             {
                 var dm = Marshal.PtrToStructure<WinSpoolInterop.DEVMODEW>(pDevMode);
-                if ((dm.dmFields & WinSpoolInterop.DM_ORIENTATION) != 0 && dm.dmOrientation == 2)
-                    orientation = "landscape";
+                if ((dm.dmFields & WinSpoolInterop.DM_ORIENTATION) != 0)
+                    orientation = dm.dmOrientation == WinSpoolInterop.DMORIENT_LANDSCAPE ? "landscape" : "portrait";
 
                 if ((dm.dmFields & WinSpoolInterop.DM_PAPERWIDTH) != 0 && dm.dmPaperWidth > 0 &&
                     (dm.dmFields & WinSpoolInterop.DM_PAPERLENGTH) != 0 && dm.dmPaperLength > 0)
@@ -665,19 +710,25 @@ public sealed class PrinterSpoolerService
                     if (!string.IsNullOrWhiteSpace(matchedTray)) tray = matchedTray;
                 }
 
-                if ((dm.dmFields & WinSpoolInterop.DM_DUPLEX) != 0 && caps.SupportsDuplex)
+                if ((dm.dmFields & WinSpoolInterop.DM_MEDIATYPE) != 0 && dm.dmMediaType > 0)
+                {
+                    var matchedMedia = MatchMediaTypeById(printerName, portName, dm.dmMediaType);
+                    if (!string.IsNullOrWhiteSpace(matchedMedia)) mediaType = matchedMedia;
+                }
+
+                if ((dm.dmFields & WinSpoolInterop.DM_DUPLEX) != 0)
                 {
                     duplexMode = dm.dmDuplex switch
                     {
-                        2 => "long-edge",
-                        3 => "short-edge",
+                        WinSpoolInterop.DMDUP_VERTICAL => "long-edge",
+                        WinSpoolInterop.DMDUP_HORIZONTAL => "short-edge",
                         _ => "none"
                     };
                 }
 
                 if ((dm.dmFields & WinSpoolInterop.DM_COLOR) != 0 && caps.SupportsColor)
                 {
-                    colorMode = dm.dmColor == 1 ? "monochrome" : "color";
+                    colorMode = dm.dmColor == WinSpoolInterop.DMCOLOR_MONOCHROME ? "monochrome" : "color";
                 }
 
                 if ((dm.dmFields & WinSpoolInterop.DM_PRINTQUALITY) != 0 && dm.dmPrintQuality > 0)
@@ -687,7 +738,7 @@ public sealed class PrinterSpoolerService
 
                 if ((dm.dmFields & WinSpoolInterop.DM_COLLATE) != 0)
                 {
-                    collate = dm.dmCollate == 1;
+                    collate = dm.dmCollate == WinSpoolInterop.DMCOLLATE_TRUE;
                 }
             }
             catch
@@ -701,15 +752,90 @@ public sealed class PrinterSpoolerService
             try
             {
                 var ticket = queue.UserPrintTicket ?? queue.DefaultPrintTicket;
-                var media = ticket?.PageMediaSize;
-                if (media?.Width is double w && w > 0 && media?.Height is double h && h > 0)
+                if (ticket != null)
                 {
-                    widthMm ??= Math.Round(w / dipPerMm, 1);
-                    heightMm ??= Math.Round(h / dipPerMm, 1);
-                    paper ??= MatchPaperSize(widthMm.Value, heightMm.Value);
+                    var media = ticket.PageMediaSize;
+                    if (media?.Width is double w && w > 0 && media?.Height is double h && h > 0)
+                    {
+                        widthMm ??= Math.Round(w / dipPerMm, 1);
+                        heightMm ??= Math.Round(h / dipPerMm, 1);
+                        paper ??= MatchPaperSize(widthMm.Value, heightMm.Value);
+                    }
+                    if (ticket.PageOrientation == PageOrientation.Landscape)
+                        orientation = "landscape";
+                    else if (ticket.PageOrientation == PageOrientation.Portrait && pDevMode == IntPtr.Zero)
+                        orientation = "portrait";
+
+                    if (pDevMode == IntPtr.Zero && ticket.Duplexing.HasValue)
+                    {
+                        duplexMode = ticket.Duplexing.Value switch
+                        {
+                            Duplexing.TwoSidedLongEdge => "long-edge",
+                            Duplexing.TwoSidedShortEdge => "short-edge",
+                            _ => "none"
+                        };
+                    }
+
+                    if (pDevMode == IntPtr.Zero && ticket.OutputColor.HasValue && caps.SupportsColor)
+                    {
+                        colorMode = ticket.OutputColor.Value == OutputColor.Monochrome ? "monochrome" : "color";
+                    }
+
+                    if (ticket.OutputQuality.HasValue)
+                    {
+                        quality = ticket.OutputQuality.Value switch
+                        {
+                            OutputQuality.Draft => "draft",
+                            OutputQuality.High => "high",
+                            _ => "normal"
+                        };
+                    }
+
+                    if (pDevMode == IntPtr.Zero && ticket.Collation.HasValue)
+                    {
+                        collate = ticket.Collation.Value == Collation.Collated;
+                    }
+
+                    if (pDevMode == IntPtr.Zero && ticket.PageResolution?.X is int rx && rx >= 72)
+                    {
+                        dpi = Math.Max(rx, ticket.PageResolution.Y ?? rx);
+                    }
+
+                    if (ticket.PageBorderless == PageBorderless.Borderless)
+                        borderless = true;
+
+                    try
+                    {
+                        var ticketDoc = new XmlDocument();
+                        using (var tStream = ticket.GetXmlStream())
+                            ticketDoc.Load(tStream);
+
+                        var capsDoc = new XmlDocument();
+                        using (var cStream = queue.GetPrintCapabilitiesAsXml())
+                            capsDoc.Load(cStream);
+
+                        var xmlMedia = ReadTicketFeatureDisplayName(ticketDoc, capsDoc, "PageMediaType");
+                        if (!string.IsNullOrWhiteSpace(xmlMedia) && (pDevMode == IntPtr.Zero || mediaType == (caps.SupportedMediaTypes.FirstOrDefault() ?? "Plain Paper")))
+                            mediaType = xmlMedia;
+
+                        var xmlTray = ReadTicketFeatureDisplayName(ticketDoc, capsDoc, "InputBin");
+                        if (!string.IsNullOrWhiteSpace(xmlTray) && pDevMode == IntPtr.Zero)
+                            tray = xmlTray;
+
+                        var xmlPaperName = ReadTicketFeatureDisplayName(ticketDoc, capsDoc, "PageMediaSize");
+                        if (!string.IsNullOrWhiteSpace(xmlPaperName))
+                            paperName ??= xmlPaperName;
+
+                        staple = ReadTicketFeatureDisplayName(ticketDoc, capsDoc, "Staple");
+                        holePunch = ReadTicketFeatureDisplayName(ticketDoc, capsDoc, "HolePunch");
+                        fold = ReadTicketFeatureDisplayName(ticketDoc, capsDoc, "Fold");
+                        outputBin = ReadTicketFeatureDisplayName(ticketDoc, capsDoc, "OutputBin");
+                    }
+                    catch
+                    {
+                        // Optional XML enrichment
+                    }
                 }
-                if (ticket?.PageOrientation == PageOrientation.Landscape)
-                    orientation = "landscape";
             }
             catch
             {
@@ -736,17 +862,36 @@ public sealed class PrinterSpoolerService
             PrinterName: printerName,
             PaperSize: paper,
             Tray: tray,
-            MediaType: caps.SupportedMediaTypes.FirstOrDefault() ?? "Plain Paper",
+            MediaType: mediaType,
             DuplexMode: duplexMode,
             Orientation: orientation,
             ColorMode: colorMode,
             Dpi: dpi,
-            Quality: "normal",
+            Quality: quality,
             PaperWidthMm: widthMm.HasValue && heightMm.HasValue ? Math.Min(widthMm.Value, heightMm.Value) : null,
             PaperHeightMm: widthMm.HasValue && heightMm.HasValue ? Math.Max(widthMm.Value, heightMm.Value) : null,
             PaperName: paperName ?? paper,
-            Collate: collate
+            Collate: collate,
+            Staple: string.IsNullOrWhiteSpace(staple) ? null : staple,
+            OutputBin: string.IsNullOrWhiteSpace(outputBin) ? null : outputBin,
+            HolePunch: string.IsNullOrWhiteSpace(holePunch) ? null : holePunch,
+            Fold: string.IsNullOrWhiteSpace(fold) ? null : fold,
+            Borderless: borderless ? true : null
         );
+    }
+
+    private static string? ReadTicketFeatureDisplayName(XmlDocument ticketDoc, XmlDocument capsDoc, string featureContains)
+    {
+        var optNode = ticketDoc.SelectSingleNode($"//*[local-name()='Feature' and contains(@name, '{featureContains}')]/*[local-name()='Option']") as XmlElement;
+        var optName = optNode?.GetAttribute("name");
+        if (string.IsNullOrWhiteSpace(optName)) return null;
+
+        var capOpt = capsDoc.SelectSingleNode($"//*[local-name()='Feature' and contains(@name, '{featureContains}')]/*[local-name()='Option' and @name='{optName}']");
+        var dn = capOpt?.SelectSingleNode("./*[local-name()='Property' and contains(@name,'DisplayName')]/*[local-name()='Value']")?.InnerText;
+        var colonIdx = optName.IndexOf(':');
+        var cleanRaw = colonIdx >= 0 ? optName[(colonIdx + 1)..] : optName;
+        var resolved = SanitizeDriverText(!string.IsNullOrWhiteSpace(dn) ? dn : cleanRaw);
+        return string.IsNullOrWhiteSpace(resolved) ? null : resolved;
     }
 
     private static string? MatchBinById(string printerName, string portName, short targetBinId)
@@ -764,6 +909,108 @@ public sealed class PrinterSpoolerService
             {
                 if (Marshal.ReadInt16(idBuffer, i * sizeof(short)) == targetBinId)
                     return names[i];
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(idBuffer);
+        }
+        return null;
+    }
+
+    private static string? MatchMediaTypeById(string printerName, string portName, int targetMediaId)
+    {
+        int count = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_MEDIATYPES, IntPtr.Zero, IntPtr.Zero);
+        if (count <= 0) return null;
+        var names = ReadCapabilityStrings(printerName, portName, WinSpoolInterop.DC_MEDIATYPENAMES, 64);
+        int totalBytes = count * sizeof(int);
+        var idBuffer = Marshal.AllocHGlobal(totalBytes);
+        try
+        {
+            Marshal.Copy(new byte[totalBytes], 0, idBuffer, totalBytes);
+            int fetched = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_MEDIATYPES, idBuffer, IntPtr.Zero);
+            for (int i = 0; i < Math.Min(Math.Min(count, fetched), names.Count); i++)
+            {
+                if (Marshal.ReadInt32(idBuffer, i * sizeof(int)) == targetMediaId)
+                    return names[i];
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(idBuffer);
+        }
+        return null;
+    }
+
+    private static short? FindBinIdByName(string printerName, string portName, string? trayName)
+    {
+        if (string.IsNullOrWhiteSpace(trayName)) return null;
+        int count = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_BINS, IntPtr.Zero, IntPtr.Zero);
+        if (count <= 0) return null;
+        var names = ReadCapabilityStrings(printerName, portName, WinSpoolInterop.DC_BINNAMES, 24);
+        int totalBytes = count * sizeof(short);
+        var idBuffer = Marshal.AllocHGlobal(totalBytes);
+        try
+        {
+            Marshal.Copy(new byte[totalBytes], 0, idBuffer, totalBytes);
+            int fetched = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_BINS, idBuffer, IntPtr.Zero);
+            int limit = Math.Min(Math.Min(count, fetched), names.Count);
+            string target = trayName.Trim();
+
+            for (int i = 0; i < limit; i++)
+            {
+                if (string.Equals(names[i], target, StringComparison.OrdinalIgnoreCase))
+                    return Marshal.ReadInt16(idBuffer, i * sizeof(short));
+            }
+            for (int i = 0; i < limit; i++)
+            {
+                if (names[i].Contains(target, StringComparison.OrdinalIgnoreCase) ||
+                    target.Contains(names[i], StringComparison.OrdinalIgnoreCase))
+                    return Marshal.ReadInt16(idBuffer, i * sizeof(short));
+            }
+            if (target.Contains("auto", StringComparison.OrdinalIgnoreCase))
+            {
+                for (int i = 0; i < limit; i++)
+                {
+                    if (names[i].Contains("auto", StringComparison.OrdinalIgnoreCase) ||
+                        names[i].Contains("default", StringComparison.OrdinalIgnoreCase))
+                        return Marshal.ReadInt16(idBuffer, i * sizeof(short));
+                }
+                return 7; // DMBIN_AUTO
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(idBuffer);
+        }
+        return null;
+    }
+
+    private static int? FindMediaTypeIdByName(string printerName, string portName, string? mediaName)
+    {
+        if (string.IsNullOrWhiteSpace(mediaName)) return null;
+        int count = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_MEDIATYPES, IntPtr.Zero, IntPtr.Zero);
+        if (count <= 0) return null;
+        var names = ReadCapabilityStrings(printerName, portName, WinSpoolInterop.DC_MEDIATYPENAMES, 64);
+        int totalBytes = count * sizeof(int);
+        var idBuffer = Marshal.AllocHGlobal(totalBytes);
+        try
+        {
+            Marshal.Copy(new byte[totalBytes], 0, idBuffer, totalBytes);
+            int fetched = WinSpoolInterop.DeviceCapabilities(printerName, portName, WinSpoolInterop.DC_MEDIATYPES, idBuffer, IntPtr.Zero);
+            int limit = Math.Min(Math.Min(count, fetched), names.Count);
+            string target = mediaName.Trim();
+
+            for (int i = 0; i < limit; i++)
+            {
+                if (string.Equals(names[i], target, StringComparison.OrdinalIgnoreCase))
+                    return Marshal.ReadInt32(idBuffer, i * sizeof(int));
+            }
+            for (int i = 0; i < limit; i++)
+            {
+                if (names[i].Contains(target, StringComparison.OrdinalIgnoreCase) ||
+                    target.Contains(names[i], StringComparison.OrdinalIgnoreCase))
+                    return Marshal.ReadInt32(idBuffer, i * sizeof(int));
             }
         }
         finally
@@ -895,11 +1142,702 @@ public sealed class PrinterSpoolerService
         return items;
     }
 
+    public IReadOnlyList<PrinterInfoDto> ReloadPrinters(string? printerName = null)
+    {
+        if (string.IsNullOrWhiteSpace(printerName))
+            _profiles.Clear();
+        else
+            _profiles.Remove(printerName);
+        return ListPrinters();
+    }
+
     public PrinterInfoDto? UpdateProfile(PrinterProfileDto profile)
     {
         _profiles[profile.PrinterName] = profile;
-        return ListPrinters().FirstOrDefault(p =>
+        TryApplyProfileToWindowsPrinter(profile);
+        var matched = ListPrinters().FirstOrDefault(p =>
             string.Equals(p.Name, profile.PrinterName, StringComparison.OrdinalIgnoreCase));
+        return matched is null
+            ? null
+            : matched with { ActiveProfile = profile };
+    }
+
+    private static (short? RawKind, string? MatchedName, double ShortMm, double LongMm) ResolveDriverPaperMatch(
+        string printerName,
+        string portName,
+        string? paperSize,
+        string? paperName,
+        double? widthMm,
+        double? heightMm)
+    {
+        var stdDims = paperSize switch
+        {
+            "A0" => (841.0, 1189.0),
+            "A1" => (594.0, 841.0),
+            "A2" => (420.0, 594.0),
+            "A3" => (297.0, 420.0),
+            "A4" => (210.0, 297.0),
+            "A5" => (148.0, 210.0),
+            "A6" => (105.0, 148.0),
+            "B4" => (250.0, 353.0),
+            "B5" => (176.0, 250.0),
+            "Letter" => (215.9, 279.4),
+            "Legal" => (215.9, 355.6),
+            _ => (210.0, 297.0)
+        };
+
+        double rawW = widthMm is > 10 ? widthMm.Value : stdDims.Item1;
+        double rawH = heightMm is > 10 ? heightMm.Value : stdDims.Item2;
+        double shortMm = Math.Min(rawW, rawH);
+        double longMm = Math.Max(rawW, rawH);
+
+        var options = ReadSupportedPaperOptions(printerName, portName);
+        PrinterPaperOptionDto? matched = null;
+
+        if (!string.IsNullOrWhiteSpace(paperName))
+        {
+            matched = options.FirstOrDefault(o =>
+                o.RawKind.HasValue &&
+                string.Equals(o.Name, paperName.Trim(), StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (matched == null && !string.IsNullOrWhiteSpace(paperSize) && !string.Equals(paperSize, "Custom", StringComparison.OrdinalIgnoreCase))
+        {
+            matched = options.FirstOrDefault(o =>
+                o.RawKind.HasValue &&
+                string.Equals(o.Id, paperSize, StringComparison.OrdinalIgnoreCase) &&
+                Math.Abs(Math.Min(o.WidthMm, o.HeightMm) - shortMm) <= 2.5 &&
+                Math.Abs(Math.Max(o.WidthMm, o.HeightMm) - longMm) <= 2.5);
+        }
+
+        if (matched == null)
+        {
+            matched = options.FirstOrDefault(o =>
+                o.RawKind.HasValue &&
+                Math.Abs(Math.Min(o.WidthMm, o.HeightMm) - shortMm) <= 2.2 &&
+                Math.Abs(Math.Max(o.WidthMm, o.HeightMm) - longMm) <= 2.2);
+        }
+
+        short? rawKind = matched?.RawKind is int rk && rk > 0 ? (short)rk : null;
+        rawKind ??= paperSize switch
+        {
+            "Letter" => (short)1,
+            "Legal" => (short)5,
+            "A3" => (short)8,
+            "A4" => (short)9,
+            "A5" => (short)11,
+            "B4" => (short)12,
+            "B5" => (short)13,
+            "A2" => (short)66,
+            "A1" => (short)67,
+            "A0" => (short)68,
+            "A6" => (short)70,
+            _ => (short?)null
+        };
+
+        return (rawKind, matched?.Name ?? paperName, shortMm, longMm);
+    }
+
+    private static byte[]? TryBuildConfiguredDevModeBytes(
+        string printerName,
+        string portName,
+        string? paperSize,
+        string? paperName,
+        double? paperWidthMm,
+        double? paperHeightMm,
+        string? orientation,
+        string? tray,
+        string? mediaType,
+        string? duplexMode,
+        string? colorMode,
+        int dpi,
+        int? copies,
+        bool? collate)
+    {
+        IntPtr hPrinter = IntPtr.Zero;
+        IntPtr pDevMode = IntPtr.Zero;
+        try
+        {
+            var defaults = new WinSpoolInterop.PRINTER_DEFAULTS { DesiredAccess = WinSpoolInterop.PRINTER_ACCESS_USE };
+            if (!WinSpoolInterop.OpenPrinter(printerName, out hPrinter, ref defaults) || hPrinter == IntPtr.Zero)
+            {
+                if (!WinSpoolInterop.OpenPrinter(printerName, out hPrinter, IntPtr.Zero) || hPrinter == IntPtr.Zero)
+                    return null;
+            }
+
+            int dmBytes = WinSpoolInterop.DocumentProperties(IntPtr.Zero, hPrinter, printerName, IntPtr.Zero, IntPtr.Zero, 0);
+            if (dmBytes < Marshal.SizeOf<WinSpoolInterop.DEVMODEW>())
+                return null;
+
+            pDevMode = Marshal.AllocHGlobal(dmBytes);
+            if (WinSpoolInterop.DocumentProperties(IntPtr.Zero, hPrinter, printerName, pDevMode, IntPtr.Zero, WinSpoolInterop.DM_OUT_BUFFER) < 0)
+                return null;
+
+            int fieldsOffset = Marshal.OffsetOf<WinSpoolInterop.DEVMODEW>(nameof(WinSpoolInterop.DEVMODEW.dmFields)).ToInt32();
+            int orientOffset = Marshal.OffsetOf<WinSpoolInterop.DEVMODEW>(nameof(WinSpoolInterop.DEVMODEW.dmOrientation)).ToInt32();
+            int paperSizeOffset = Marshal.OffsetOf<WinSpoolInterop.DEVMODEW>(nameof(WinSpoolInterop.DEVMODEW.dmPaperSize)).ToInt32();
+            int paperLengthOffset = Marshal.OffsetOf<WinSpoolInterop.DEVMODEW>(nameof(WinSpoolInterop.DEVMODEW.dmPaperLength)).ToInt32();
+            int paperWidthOffset = Marshal.OffsetOf<WinSpoolInterop.DEVMODEW>(nameof(WinSpoolInterop.DEVMODEW.dmPaperWidth)).ToInt32();
+            int copiesOffset = Marshal.OffsetOf<WinSpoolInterop.DEVMODEW>(nameof(WinSpoolInterop.DEVMODEW.dmCopies)).ToInt32();
+            int sourceOffset = Marshal.OffsetOf<WinSpoolInterop.DEVMODEW>(nameof(WinSpoolInterop.DEVMODEW.dmDefaultSource)).ToInt32();
+            int qualityOffset = Marshal.OffsetOf<WinSpoolInterop.DEVMODEW>(nameof(WinSpoolInterop.DEVMODEW.dmPrintQuality)).ToInt32();
+            int colorOffset = Marshal.OffsetOf<WinSpoolInterop.DEVMODEW>(nameof(WinSpoolInterop.DEVMODEW.dmColor)).ToInt32();
+            int duplexOffset = Marshal.OffsetOf<WinSpoolInterop.DEVMODEW>(nameof(WinSpoolInterop.DEVMODEW.dmDuplex)).ToInt32();
+            int yResOffset = Marshal.OffsetOf<WinSpoolInterop.DEVMODEW>(nameof(WinSpoolInterop.DEVMODEW.dmYResolution)).ToInt32();
+            int collateOffset = Marshal.OffsetOf<WinSpoolInterop.DEVMODEW>(nameof(WinSpoolInterop.DEVMODEW.dmCollate)).ToInt32();
+            int mediaTypeOffset = Marshal.OffsetOf<WinSpoolInterop.DEVMODEW>(nameof(WinSpoolInterop.DEVMODEW.dmMediaType)).ToInt32();
+
+            // PASS 1: Apply paper size and orientation first so driver paper-change resets do not wipe duplex/tray/media.
+            var (matchedRawKind, _, shortMm, longMm) = ResolveDriverPaperMatch(
+                printerName, portName, paperSize, paperName, paperWidthMm, paperHeightMm);
+
+            int dmFields = Marshal.ReadInt32(pDevMode, fieldsOffset);
+            dmFields |= WinSpoolInterop.DM_ORIENTATION;
+            Marshal.WriteInt16(
+                pDevMode,
+                orientOffset,
+                string.Equals(orientation, "landscape", StringComparison.OrdinalIgnoreCase)
+                    ? WinSpoolInterop.DMORIENT_LANDSCAPE
+                    : WinSpoolInterop.DMORIENT_PORTRAIT);
+
+            if (matchedRawKind.HasValue && matchedRawKind.Value != WinSpoolInterop.DMPAPER_USER)
+            {
+                dmFields |= WinSpoolInterop.DM_PAPERSIZE;
+                dmFields &= ~(WinSpoolInterop.DM_PAPERWIDTH | WinSpoolInterop.DM_PAPERLENGTH | WinSpoolInterop.DM_FORMNAME);
+                Marshal.WriteInt16(pDevMode, paperSizeOffset, matchedRawKind.Value);
+            }
+            else
+            {
+                dmFields |= WinSpoolInterop.DM_PAPERSIZE | WinSpoolInterop.DM_PAPERWIDTH | WinSpoolInterop.DM_PAPERLENGTH;
+                dmFields &= ~WinSpoolInterop.DM_FORMNAME;
+                Marshal.WriteInt16(pDevMode, paperSizeOffset, WinSpoolInterop.DMPAPER_USER);
+                Marshal.WriteInt16(pDevMode, paperWidthOffset, (short)Math.Clamp((int)Math.Round(shortMm * 10.0), 100, 20000));
+                Marshal.WriteInt16(pDevMode, paperLengthOffset, (short)Math.Clamp((int)Math.Round(longMm * 10.0), 100, 20000));
+            }
+            Marshal.WriteInt32(pDevMode, fieldsOffset, dmFields);
+            WinSpoolInterop.DocumentProperties(IntPtr.Zero, hPrinter, printerName, pDevMode, pDevMode, WinSpoolInterop.DM_IN_BUFFER | WinSpoolInterop.DM_OUT_BUFFER);
+
+            // PASS 2: Apply duplex, tray, media type, color, copies, collate, and resolution on top of resolved paper.
+            dmFields = Marshal.ReadInt32(pDevMode, fieldsOffset);
+            dmFields |= WinSpoolInterop.DM_DUPLEX;
+            short dmDuplex = duplexMode switch
+            {
+                "long-edge" => WinSpoolInterop.DMDUP_VERTICAL,
+                "short-edge" => WinSpoolInterop.DMDUP_HORIZONTAL,
+                _ => WinSpoolInterop.DMDUP_SIMPLEX
+            };
+            Marshal.WriteInt16(pDevMode, duplexOffset, dmDuplex);
+
+            short? binId = FindBinIdByName(printerName, portName, tray);
+            if (binId.HasValue)
+            {
+                dmFields |= WinSpoolInterop.DM_DEFAULTSOURCE;
+                Marshal.WriteInt16(pDevMode, sourceOffset, binId.Value);
+            }
+
+            int? mediaId = FindMediaTypeIdByName(printerName, portName, mediaType);
+            if (mediaId.HasValue)
+            {
+                dmFields |= WinSpoolInterop.DM_MEDIATYPE;
+                Marshal.WriteInt32(pDevMode, mediaTypeOffset, mediaId.Value);
+            }
+
+            dmFields |= WinSpoolInterop.DM_COLOR;
+            bool isMono = string.Equals(colorMode, "bw", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(colorMode, "monochrome", StringComparison.OrdinalIgnoreCase);
+            Marshal.WriteInt16(pDevMode, colorOffset, isMono ? WinSpoolInterop.DMCOLOR_MONOCHROME : WinSpoolInterop.DMCOLOR_COLOR);
+
+            if (copies.HasValue && copies.Value >= 1)
+            {
+                dmFields |= WinSpoolInterop.DM_COPIES;
+                Marshal.WriteInt16(pDevMode, copiesOffset, (short)Math.Clamp(copies.Value, 1, 999));
+            }
+
+            if (collate.HasValue)
+            {
+                dmFields |= WinSpoolInterop.DM_COLLATE;
+                Marshal.WriteInt16(pDevMode, collateOffset, collate.Value ? WinSpoolInterop.DMCOLLATE_TRUE : WinSpoolInterop.DMCOLLATE_FALSE);
+            }
+
+            if (dpi >= 72)
+            {
+                dmFields |= WinSpoolInterop.DM_PRINTQUALITY | WinSpoolInterop.DM_YRESOLUTION;
+                Marshal.WriteInt16(pDevMode, qualityOffset, (short)Math.Clamp(dpi, 72, 9600));
+                Marshal.WriteInt16(pDevMode, yResOffset, (short)Math.Clamp(dpi, 72, 9600));
+            }
+
+            Marshal.WriteInt32(pDevMode, fieldsOffset, dmFields);
+            WinSpoolInterop.DocumentProperties(IntPtr.Zero, hPrinter, printerName, pDevMode, pDevMode, WinSpoolInterop.DM_IN_BUFFER | WinSpoolInterop.DM_OUT_BUFFER);
+
+            var bytes = new byte[dmBytes];
+            Marshal.Copy(pDevMode, bytes, 0, dmBytes);
+            return bytes;
+        }
+        catch (Exception ex)
+        {
+            Program.Log($"TryBuildConfiguredDevModeBytes('{printerName}') failed: {ex.Message}");
+            return null;
+        }
+        finally
+        {
+            if (pDevMode != IntPtr.Zero) Marshal.FreeHGlobal(pDevMode);
+            if (hPrinter != IntPtr.Zero) WinSpoolInterop.ClosePrinter(hPrinter);
+        }
+    }
+
+    private static bool TryWritePerUserDevMode(string printerName, byte[] devModeBytes)
+    {
+        IntPtr hPrinter = IntPtr.Zero;
+        GCHandle pinned = default;
+        try
+        {
+            var defaults = new WinSpoolInterop.PRINTER_DEFAULTS { DesiredAccess = WinSpoolInterop.PRINTER_ACCESS_USE };
+            if (!WinSpoolInterop.OpenPrinter(printerName, out hPrinter, ref defaults) || hPrinter == IntPtr.Zero)
+            {
+                if (!WinSpoolInterop.OpenPrinter(printerName, out hPrinter, IntPtr.Zero) || hPrinter == IntPtr.Zero)
+                    return false;
+            }
+
+            pinned = GCHandle.Alloc(devModeBytes, GCHandleType.Pinned);
+            var info9 = new WinSpoolInterop.PRINTER_INFO_9 { pDevMode = pinned.AddrOfPinnedObject() };
+            return WinSpoolInterop.SetPrinter(hPrinter, 9, ref info9, 0);
+        }
+        catch (Exception ex)
+        {
+            Program.Log($"TryWritePerUserDevMode('{printerName}') failed: {ex.Message}");
+            return false;
+        }
+        finally
+        {
+            if (pinned.IsAllocated) pinned.Free();
+            if (hPrinter != IntPtr.Zero) WinSpoolInterop.ClosePrinter(hPrinter);
+        }
+    }
+
+    private static void TryApplyProfileToWindowsPrinter(PrinterProfileDto profile)
+    {
+        try
+        {
+            string portName = string.Empty;
+            using var server = new LocalPrintServer();
+            var queue = server.GetPrintQueues(new[]
+            {
+                EnumeratedPrintQueueTypes.Local,
+                EnumeratedPrintQueueTypes.Connections
+            }).FirstOrDefault(q => string.Equals(q.FullName, profile.PrinterName, StringComparison.OrdinalIgnoreCase));
+
+            if (queue != null)
+            {
+                using (queue)
+                {
+                    portName = SanitizeDriverText(queue.QueuePort?.Name);
+                    var devModeBytes = TryBuildConfiguredDevModeBytes(
+                        printerName: profile.PrinterName,
+                        portName: portName,
+                        paperSize: profile.PaperSize,
+                        paperName: profile.PaperName,
+                        paperWidthMm: profile.PaperWidthMm,
+                        paperHeightMm: profile.PaperHeightMm,
+                        orientation: profile.Orientation,
+                        tray: profile.Tray,
+                        mediaType: profile.MediaType,
+                        duplexMode: profile.DuplexMode,
+                        colorMode: profile.ColorMode,
+                        dpi: profile.Dpi,
+                        copies: null,
+                        collate: profile.Collate
+                    );
+                    if (devModeBytes != null)
+                        TryWritePerUserDevMode(profile.PrinterName, devModeBytes);
+
+                    try
+                    {
+                        var validated = BuildValidatedPrintTicket(
+                            queue,
+                            portName,
+                            devModeBytes,
+                            paperSize: profile.PaperSize,
+                            paperName: profile.PaperName,
+                            paperWidthMm: profile.PaperWidthMm,
+                            paperHeightMm: profile.PaperHeightMm,
+                            orientation: profile.Orientation,
+                            tray: profile.Tray,
+                            mediaType: profile.MediaType,
+                            duplexMode: profile.DuplexMode,
+                            colorMode: profile.ColorMode,
+                            dpi: profile.Dpi,
+                            quality: profile.Quality,
+                            copies: 1,
+                            collate: profile.Collate ?? true,
+                            staple: profile.Staple,
+                            holePunch: profile.HolePunch,
+                            fold: profile.Fold,
+                            outputBin: profile.OutputBin,
+                            borderless: profile.Borderless ?? false
+                        );
+                        queue.UserPrintTicket = validated;
+                        queue.Commit();
+                    }
+                    catch (Exception ex)
+                    {
+                        Program.Log($"UserPrintTicket commit skipped for '{profile.PrinterName}': {ex.Message}");
+                    }
+                    return;
+                }
+            }
+
+            var fallbackDevMode = TryBuildConfiguredDevModeBytes(
+                printerName: profile.PrinterName,
+                portName: portName,
+                paperSize: profile.PaperSize,
+                paperName: profile.PaperName,
+                paperWidthMm: profile.PaperWidthMm,
+                paperHeightMm: profile.PaperHeightMm,
+                orientation: profile.Orientation,
+                tray: profile.Tray,
+                mediaType: profile.MediaType,
+                duplexMode: profile.DuplexMode,
+                colorMode: profile.ColorMode,
+                dpi: profile.Dpi,
+                copies: null,
+                collate: profile.Collate
+            );
+            if (fallbackDevMode != null)
+                TryWritePerUserDevMode(profile.PrinterName, fallbackDevMode);
+        }
+        catch (Exception ex)
+        {
+            Program.Log($"TryApplyProfileToWindowsPrinter('{profile.PrinterName}') failed: {ex.Message}");
+        }
+    }
+
+    private static PrintTicket BuildValidatedPrintTicket(
+        PrintQueue queue,
+        string portName,
+        byte[]? devModeBytes,
+        string? paperSize,
+        string? paperName,
+        double? paperWidthMm,
+        double? paperHeightMm,
+        string? orientation,
+        string? tray,
+        string? mediaType,
+        string? duplexMode,
+        string? colorMode,
+        int dpi,
+        string? quality,
+        int copies,
+        bool collate,
+        string? staple,
+        string? holePunch,
+        string? fold,
+        string? outputBin,
+        bool borderless)
+    {
+        const double dipPerMm = 96.0 / 25.4;
+        PrintTicket ticket;
+        if (devModeBytes != null)
+        {
+            try
+            {
+                using var converter = new PrintTicketConverter(queue.FullName, queue.ClientPrintSchemaVersion);
+                ticket = converter.ConvertDevModeToPrintTicket(devModeBytes);
+            }
+            catch (Exception ex)
+            {
+                Program.Log($"ConvertDevModeToPrintTicket('{queue.FullName}') fallback: {ex.Message}");
+                ticket = (queue.UserPrintTicket ?? queue.DefaultPrintTicket ?? new PrintTicket()).Clone();
+            }
+        }
+        else
+        {
+            ticket = (queue.UserPrintTicket ?? queue.DefaultPrintTicket ?? new PrintTicket()).Clone();
+        }
+
+        bool isLandscape = string.Equals(orientation, "landscape", StringComparison.OrdinalIgnoreCase);
+        ticket.PageOrientation = isLandscape ? PageOrientation.Landscape : PageOrientation.Portrait;
+        ticket.CopyCount = Math.Max(1, Math.Min(999, copies));
+        ticket.Collation = collate ? Collation.Collated : Collation.Uncollated;
+        ticket.OutputColor = string.Equals(colorMode, "bw", StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(colorMode, "monochrome", StringComparison.OrdinalIgnoreCase)
+            ? OutputColor.Monochrome
+            : OutputColor.Color;
+        ticket.Duplexing = duplexMode switch
+        {
+            "long-edge" => Duplexing.TwoSidedLongEdge,
+            "short-edge" => Duplexing.TwoSidedShortEdge,
+            _ => Duplexing.OneSided
+        };
+        ticket.OutputQuality = quality?.ToLowerInvariant() switch
+        {
+            "draft" => OutputQuality.Draft,
+            "high" => OutputQuality.High,
+            _ => OutputQuality.Normal
+        };
+        if (borderless)
+            ticket.PageBorderless = PageBorderless.Borderless;
+
+        var (_, _, shortMm, longMm) = ResolveDriverPaperMatch(
+            queue.FullName, portName, paperSize, paperName, paperWidthMm, paperHeightMm);
+
+        bool ticketMediaMatches =
+            ticket.PageMediaSize?.Width is double tw &&
+            ticket.PageMediaSize?.Height is double th &&
+            Math.Abs(Math.Min(tw, th) / dipPerMm - shortMm) <= 2.5 &&
+            Math.Abs(Math.Max(tw, th) / dipPerMm - longMm) <= 2.5;
+
+        if (!ticketMediaMatches)
+        {
+            PageMediaSizeName? stdName = paperSize switch
+            {
+                "A0" => PageMediaSizeName.ISOA0,
+                "A1" => PageMediaSizeName.ISOA1,
+                "A2" => PageMediaSizeName.ISOA2,
+                "A3" => PageMediaSizeName.ISOA3,
+                "A4" => PageMediaSizeName.ISOA4,
+                "A5" => PageMediaSizeName.ISOA5,
+                "A6" => PageMediaSizeName.ISOA6,
+                "B4" => PageMediaSizeName.JISB4,
+                "B5" => PageMediaSizeName.JISB5,
+                "Letter" => PageMediaSizeName.NorthAmericaLetter,
+                "Legal" => PageMediaSizeName.NorthAmericaLegal,
+                _ => null
+            };
+            ticket.PageMediaSize = stdName.HasValue
+                ? new PageMediaSize(stdName.Value, shortMm * dipPerMm, longMm * dipPerMm)
+                : new PageMediaSize(shortMm * dipPerMm, longMm * dipPerMm);
+        }
+
+        // Only set PageResolution when the driver advertises the exact DPI (so validation doesn't fail and revert other features)
+        if (dpi >= 72)
+        {
+            try
+            {
+                var capsObj = queue.GetPrintCapabilities(ticket);
+                var matchedRes = capsObj.PageResolutionCapability.FirstOrDefault(r =>
+                    Math.Max(r.X ?? 0, r.Y ?? 0) == dpi);
+                if (matchedRes != null)
+                    ticket.PageResolution = matchedRes;
+            }
+            catch
+            {
+                // Keep DEVMODE-converted resolution
+            }
+        }
+
+        // Patch PrintSchema XML directly against driver's PrintCapabilities XML so driver-specific Tray, MediaType, Duplex, PaperSize, and Finishing options stick.
+        try
+        {
+            var capsDoc = new XmlDocument();
+            using (var cStream = queue.GetPrintCapabilitiesAsXml())
+                capsDoc.Load(cStream);
+
+            var ticketDoc = new XmlDocument();
+            using (var tStream = ticket.GetXmlStream())
+                ticketDoc.Load(tStream);
+
+            if (!string.IsNullOrWhiteSpace(paperName) || !string.IsNullOrWhiteSpace(paperSize))
+                TrySetPaperMediaSizeOptionInXml(ticketDoc, capsDoc, paperName, paperSize, shortMm, longMm);
+
+            string duplexTarget = duplexMode switch
+            {
+                "long-edge" => "TwoSidedLongEdge",
+                "short-edge" => "TwoSidedShortEdge",
+                _ => "OneSided"
+            };
+            TrySetCapabilityOptionInXml(ticketDoc, capsDoc, new[] { "JobDuplexAllDocumentsContiguously", "DocumentDuplex", "Duplex" }, duplexTarget);
+
+            if (!string.IsNullOrWhiteSpace(tray))
+                TrySetCapabilityOptionInXml(ticketDoc, capsDoc, new[] { "JobInputBin", "DocumentInputBin", "PageInputBin", "InputBin" }, tray);
+
+            if (!string.IsNullOrWhiteSpace(mediaType))
+                TrySetCapabilityOptionInXml(ticketDoc, capsDoc, new[] { "PageMediaType" }, mediaType);
+
+            if (!string.IsNullOrWhiteSpace(staple))
+                TrySetCapabilityOptionInXml(ticketDoc, capsDoc, new[] { "JobStapleAllDocuments", "DocumentStaple", "Staple" }, staple);
+
+            if (!string.IsNullOrWhiteSpace(holePunch))
+                TrySetCapabilityOptionInXml(ticketDoc, capsDoc, new[] { "JobHolePunch", "DocumentHolePunch", "HolePunch" }, holePunch);
+
+            if (!string.IsNullOrWhiteSpace(fold))
+                TrySetCapabilityOptionInXml(ticketDoc, capsDoc, new[] { "JobFold", "DocumentFold", "Fold" }, fold);
+
+            if (!string.IsNullOrWhiteSpace(outputBin))
+                TrySetCapabilityOptionInXml(ticketDoc, capsDoc, new[] { "JobOutputBin", "DocumentOutputBin", "PageOutputBin", "OutputBin" }, outputBin);
+
+            using var outMs = new MemoryStream();
+            ticketDoc.Save(outMs);
+            outMs.Position = 0;
+            ticket = new PrintTicket(outMs);
+        }
+        catch (Exception ex)
+        {
+            Program.Log($"XML PrintTicket enrichment skipped for '{queue.FullName}': {ex.Message}");
+        }
+
+        // Validate our configured ticket against driver capabilities using an empty delta PrintTicket so DefaultPrintTicket cannot override Duplex/Media/PaperSize.
+        return queue.MergeAndValidatePrintTicket(ticket, new PrintTicket()).ValidatedPrintTicket;
+    }
+
+    private static void TrySetPaperMediaSizeOptionInXml(
+        XmlDocument ticketDoc,
+        XmlDocument capsDoc,
+        string? paperName,
+        string? paperSize,
+        double shortMm,
+        double longMm)
+    {
+        var feat = capsDoc.SelectSingleNode("//*[local-name()='Feature' and contains(@name, 'PageMediaSize')]");
+        if (feat == null) return;
+
+        XmlElement? chosen = null;
+        var options = feat.SelectNodes("./*[local-name()='Option']");
+        if (options == null || options.Count == 0) return;
+
+        foreach (XmlNode node in options)
+        {
+            if (node is not XmlElement optEl) continue;
+            var dn = SanitizeDriverText(optEl.SelectSingleNode("./*[local-name()='Property' and contains(@name,'DisplayName')]/*[local-name()='Value']")?.InnerText);
+            var rawName = optEl.GetAttribute("name");
+            var cleanRaw = rawName.Contains(':') ? rawName[(rawName.IndexOf(':') + 1)..] : rawName;
+            if (!string.IsNullOrWhiteSpace(paperName) &&
+                (string.Equals(dn, paperName, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(cleanRaw, paperName, StringComparison.OrdinalIgnoreCase)))
+            {
+                chosen = optEl;
+                break;
+            }
+        }
+
+        if (chosen == null)
+        {
+            double targetShortMicrons = shortMm * 1000.0;
+            double targetLongMicrons = longMm * 1000.0;
+            foreach (XmlNode node in options)
+            {
+                if (node is not XmlElement optEl) continue;
+                var wText = optEl.SelectSingleNode("./*[local-name()='ScoredProperty' and contains(@name,'MediaSizeWidth')]/*[local-name()='Value']")?.InnerText;
+                var hText = optEl.SelectSingleNode("./*[local-name()='ScoredProperty' and contains(@name,'MediaSizeHeight')]/*[local-name()='Value']")?.InnerText;
+                if (double.TryParse(wText, System.Globalization.CultureInfo.InvariantCulture, out var wMic) &&
+                    double.TryParse(hText, System.Globalization.CultureInfo.InvariantCulture, out var hMic))
+                {
+                    double oShort = Math.Min(wMic, hMic);
+                    double oLong = Math.Max(wMic, hMic);
+                    if (Math.Abs(oShort - targetShortMicrons) <= 2500 && Math.Abs(oLong - targetLongMicrons) <= 2500)
+                    {
+                        chosen = optEl;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (chosen == null && !string.IsNullOrWhiteSpace(paperSize) && !string.Equals(paperSize, "Custom", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (XmlNode node in options)
+            {
+                if (node is not XmlElement optEl) continue;
+                var dn = SanitizeDriverText(optEl.SelectSingleNode("./*[local-name()='Property' and contains(@name,'DisplayName')]/*[local-name()='Value']")?.InnerText);
+                var rawName = optEl.GetAttribute("name");
+                if (rawName.Contains(paperSize, StringComparison.OrdinalIgnoreCase) ||
+                    dn.Contains(paperSize, StringComparison.OrdinalIgnoreCase))
+                {
+                    chosen = optEl;
+                    break;
+                }
+            }
+        }
+
+        if (chosen != null)
+            ReplaceTicketFeatureWithOption(ticketDoc, (feat as XmlElement)?.GetAttribute("name") ?? "psk:PageMediaSize", chosen);
+    }
+
+    private static void TrySetCapabilityOptionInXml(
+        XmlDocument ticketDoc,
+        XmlDocument capsDoc,
+        string[] featureKeywords,
+        string targetValue)
+    {
+        string target = targetValue.Trim();
+        foreach (var keyword in featureKeywords)
+        {
+            var featNodes = capsDoc.SelectNodes($"//*[local-name()='Feature' and contains(@name, '{keyword}')]");
+            if (featNodes == null || featNodes.Count == 0) continue;
+
+            foreach (XmlNode featNode in featNodes)
+            {
+                if (featNode is not XmlElement featEl) continue;
+                var featName = featEl.GetAttribute("name");
+                var options = featEl.SelectNodes("./*[local-name()='Option']");
+                if (options == null) continue;
+
+                XmlElement? exactMatch = null;
+                XmlElement? partialMatch = null;
+                foreach (XmlNode optNode in options)
+                {
+                    if (optNode is not XmlElement optEl) continue;
+                    var rawName = optEl.GetAttribute("name");
+                    var cleanRaw = rawName.Contains(':') ? rawName[(rawName.IndexOf(':') + 1)..] : rawName;
+                    var dn = SanitizeDriverText(optEl.SelectSingleNode("./*[local-name()='Property' and contains(@name,'DisplayName')]/*[local-name()='Value']")?.InnerText);
+
+                    if (string.Equals(dn, target, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(cleanRaw, target, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(rawName, target, StringComparison.OrdinalIgnoreCase))
+                    {
+                        exactMatch = optEl;
+                        break;
+                    }
+
+                    if (partialMatch == null &&
+                        ((!string.IsNullOrWhiteSpace(dn) && (dn.Contains(target, StringComparison.OrdinalIgnoreCase) || target.Contains(dn, StringComparison.OrdinalIgnoreCase))) ||
+                         (!string.IsNullOrWhiteSpace(cleanRaw) && (cleanRaw.Contains(target, StringComparison.OrdinalIgnoreCase) || target.Contains(cleanRaw, StringComparison.OrdinalIgnoreCase))) ||
+                         (target.Contains("auto", StringComparison.OrdinalIgnoreCase) && (dn.Contains("auto", StringComparison.OrdinalIgnoreCase) || cleanRaw.Contains("AutoSelect", StringComparison.OrdinalIgnoreCase))) ||
+                         (target.Contains("plain", StringComparison.OrdinalIgnoreCase) && (dn.Contains("plain", StringComparison.OrdinalIgnoreCase) || cleanRaw.Equals("Plain", StringComparison.OrdinalIgnoreCase)))))
+                    {
+                        partialMatch = optEl;
+                    }
+                }
+
+                var chosen = exactMatch ?? partialMatch;
+                if (chosen != null && !string.IsNullOrWhiteSpace(featName))
+                {
+                    ReplaceTicketFeatureWithOption(ticketDoc, featName, chosen);
+                    return;
+                }
+            }
+        }
+    }
+
+    private static void ReplaceTicketFeatureWithOption(XmlDocument ticketDoc, string featureName, XmlElement capOptionEl)
+    {
+        var root = ticketDoc.DocumentElement;
+        if (root == null) return;
+        string psfNs = root.NamespaceURI;
+        if (string.IsNullOrWhiteSpace(psfNs))
+            psfNs = "http://schemas.microsoft.com/windows/2003/08/printing/printschemaframework";
+        string psfPrefix = string.IsNullOrWhiteSpace(root.Prefix) ? "psf" : root.Prefix;
+
+        var existingFeatures = ticketDoc.SelectNodes($"//*[local-name()='Feature' and @name='{featureName}']");
+        if (existingFeatures != null)
+        {
+            foreach (XmlNode old in existingFeatures)
+                old.ParentNode?.RemoveChild(old);
+        }
+
+        var featureEl = ticketDoc.CreateElement(psfPrefix, "Feature", psfNs);
+        featureEl.SetAttribute("name", featureName);
+
+        var optionEl = ticketDoc.CreateElement(psfPrefix, "Option", psfNs);
+        optionEl.SetAttribute("name", capOptionEl.GetAttribute("name"));
+
+        foreach (XmlNode child in capOptionEl.ChildNodes)
+        {
+            if (child.LocalName == "ScoredProperty")
+                optionEl.AppendChild(ticketDoc.ImportNode(child, true));
+        }
+
+        featureEl.AppendChild(optionEl);
+        root.AppendChild(featureEl);
     }
 
     public bool SetDefaultPrinter(string printerName)
@@ -909,7 +1847,7 @@ public sealed class PrinterSpoolerService
 
     /// <summary>
     /// Submits rendered imposed PNG sheet pages directly to the selected Windows Spooler queue
-    /// using WPF FixedDocument + PrintTicket on an STA thread.
+    /// using WPF FixedDocument + driver-validated DEVMODE/PrintTicket on an STA thread.
     /// </summary>
     public SpoolerJobDto SubmitPrintJob(PrintJobRpcParams request)
     {
@@ -960,44 +1898,59 @@ public sealed class PrinterSpoolerService
         using (queue)
         {
             queue.Refresh();
-            var baseTicket = (queue.UserPrintTicket ?? queue.DefaultPrintTicket ?? new PrintTicket()).Clone();
+            var portName = SanitizeDriverText(queue.QueuePort?.Name);
             double widthMm = request.PaperWidthMm is > 10 ? request.PaperWidthMm.Value : 210;
             double heightMm = request.PaperHeightMm is > 10 ? request.PaperHeightMm.Value : 297;
             bool isLandscape = string.Equals(request.Orientation, "landscape", StringComparison.OrdinalIgnoreCase);
 
-            var shortDip = Math.Min(widthMm, heightMm) * dipPerMm;
-            var longDip = Math.Max(widthMm, heightMm) * dipPerMm;
-            baseTicket.PageMediaSize = new PageMediaSize(shortDip, longDip);
-            baseTicket.PageOrientation = isLandscape ? PageOrientation.Landscape : PageOrientation.Portrait;
-            baseTicket.CopyCount = Math.Max(1, Math.Min(999, request.Copies));
-            baseTicket.Collation = request.Collate ? Collation.Collated : Collation.Uncollated;
-            baseTicket.OutputColor = string.Equals(request.ColorMode, "bw", StringComparison.OrdinalIgnoreCase)
-                ? OutputColor.Monochrome
-                : OutputColor.Color;
-            baseTicket.Duplexing = request.DuplexMode switch
-            {
-                "long-edge" => Duplexing.TwoSidedLongEdge,
-                "short-edge" => Duplexing.TwoSidedShortEdge,
-                _ => Duplexing.OneSided
-            };
-            if (request.Dpi >= 72)
-                baseTicket.PageResolution = new PageResolution(request.Dpi, request.Dpi);
-            if (string.Equals(request.Quality, "draft", StringComparison.OrdinalIgnoreCase))
-                baseTicket.OutputQuality = OutputQuality.Draft;
-            else if (string.Equals(request.Quality, "high", StringComparison.OrdinalIgnoreCase))
-                baseTicket.OutputQuality = OutputQuality.High;
-            else
-                baseTicket.OutputQuality = OutputQuality.Normal;
+            var devModeBytes = TryBuildConfiguredDevModeBytes(
+                printerName: queue.FullName,
+                portName: portName,
+                paperSize: request.PaperSize,
+                paperName: request.PaperName,
+                paperWidthMm: widthMm,
+                paperHeightMm: heightMm,
+                orientation: request.Orientation,
+                tray: request.Tray,
+                mediaType: request.MediaType,
+                duplexMode: request.DuplexMode,
+                colorMode: request.ColorMode,
+                dpi: request.Dpi,
+                copies: request.Copies,
+                collate: request.Collate
+            );
 
-            if (request.Borderless == true)
-                baseTicket.PageBorderless = PageBorderless.Borderless;
-
-            var validated = queue.MergeAndValidatePrintTicket(queue.DefaultPrintTicket ?? new PrintTicket(), baseTicket).ValidatedPrintTicket;
+            var validated = BuildValidatedPrintTicket(
+                queue,
+                portName,
+                devModeBytes,
+                paperSize: request.PaperSize,
+                paperName: request.PaperName,
+                paperWidthMm: widthMm,
+                paperHeightMm: heightMm,
+                orientation: request.Orientation,
+                tray: request.Tray,
+                mediaType: request.MediaType,
+                duplexMode: request.DuplexMode,
+                colorMode: request.ColorMode,
+                dpi: request.Dpi,
+                quality: request.Quality,
+                copies: request.Copies,
+                collate: request.Collate,
+                staple: request.Staple,
+                holePunch: request.HolePunch,
+                fold: request.Fold,
+                outputBin: request.OutputBin,
+                borderless: request.Borderless == true
+            );
 
             double pageWidthDip = (isLandscape ? Math.Max(widthMm, heightMm) : Math.Min(widthMm, heightMm)) * dipPerMm;
             double pageHeightDip = (isLandscape ? Math.Min(widthMm, heightMm) : Math.Max(widthMm, heightMm)) * dipPerMm;
 
-            var fixedDoc = new FixedDocument();
+            var fixedDoc = new FixedDocument
+            {
+                PrintTicket = validated
+            };
             fixedDoc.DocumentPaginator.PageSize = new Size(pageWidthDip, pageHeightDip);
 
             foreach (var imgPath in imagePaths)

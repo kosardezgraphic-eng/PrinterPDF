@@ -20,6 +20,7 @@ public static class WinSpoolInterop
     public const int DC_STAPLE = 30;
     public const int DC_COLORDEVICE = 32;
     public const int DC_MEDIATYPENAMES = 34;
+    public const int DC_MEDIATYPES = 35;
 
     public const int DM_ORIENTATION = 0x00000001;
     public const int DM_PAPERSIZE = 0x00000002;
@@ -30,7 +31,22 @@ public static class WinSpoolInterop
     public const int DM_PRINTQUALITY = 0x00000400;
     public const int DM_COLOR = 0x00000800;
     public const int DM_DUPLEX = 0x00001000;
+    public const int DM_YRESOLUTION = 0x00002000;
     public const int DM_COLLATE = 0x00008000;
+    public const int DM_FORMNAME = 0x00010000;
+    public const int DM_MEDIATYPE = 0x02000000;
+
+    public const short DMORIENT_PORTRAIT = 1;
+    public const short DMORIENT_LANDSCAPE = 2;
+    public const short DMCOLOR_MONOCHROME = 1;
+    public const short DMCOLOR_COLOR = 2;
+    public const short DMDUP_SIMPLEX = 1;
+    public const short DMDUP_VERTICAL = 2;
+    public const short DMDUP_HORIZONTAL = 3;
+    public const short DMCOLLATE_FALSE = 0;
+    public const short DMCOLLATE_TRUE = 1;
+
+    public const int PRINTER_ACCESS_USE = 0x00000008;
 
     public const int DM_OUT_BUFFER = 2;
     public const int DM_IN_BUFFER = 8;
@@ -93,6 +109,20 @@ public static class WinSpoolInterop
         public int dmPelsHeight;
         public int dmDisplayFlags;
         public int dmDisplayFrequency;
+        public int dmICMMethod;
+        public int dmICMIntent;
+        public int dmMediaType;
+        public int dmDitherType;
+        public int dmReserved1;
+        public int dmReserved2;
+        public int dmPanningWidth;
+        public int dmPanningHeight;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct PRINTER_INFO_9
+    {
+        public IntPtr pDevMode;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -196,6 +226,14 @@ public static class WinSpoolInterop
         IntPtr hPrinter,
         int Level,
         IntPtr pPrinter,
+        int Command
+    );
+
+    [DllImport("winspool.drv", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool SetPrinter(
+        IntPtr hPrinter,
+        int Level,
+        ref PRINTER_INFO_9 pPrinter,
         int Command
     );
 

@@ -167,6 +167,11 @@ export const ModalsAndToasts: React.FC = () => {
     activeProfile?.mediaType,
     activeProfile?.quality,
     activeProfile?.colorMode,
+    activeProfile?.staple,
+    activeProfile?.holePunch,
+    activeProfile?.fold,
+    activeProfile?.outputBin,
+    activeProfile?.borderless,
   ]);
 
   const sheetDims = getSheetDimensionsMm(layout);
@@ -543,9 +548,16 @@ export const ModalsAndToasts: React.FC = () => {
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input
                         type="checkbox"
+                        aria-label={isFa ? 'مرتب‌سازی دسته‌ها (Collate)' : 'Collate'}
                         checked={collate}
                         disabled={caps?.supportsCollate === false}
-                        onChange={(e) => setCollate(e.target.checked)}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setCollate(checked);
+                          if (selectedPrinter) {
+                            void updatePrinterProfile(selectedPrinter.name, { collate: checked });
+                          }
+                        }}
                         className="accent-sky-500"
                       />
                       <span>{isFa ? 'مرتب‌سازی دسته‌ها (Collate)' : 'Collate'}</span>
@@ -755,8 +767,15 @@ export const ModalsAndToasts: React.FC = () => {
                           {isFa ? 'منگنه (Staple):' : 'Staple:'}
                         </label>
                         <select
+                          aria-label={isFa ? 'منگنه (Staple)' : 'Staple'}
                           value={staple}
-                          onChange={(e) => setStaple(e.target.value)}
+                          onChange={(e) => {
+                            const next = e.target.value;
+                            setStaple(next);
+                            if (selectedPrinter) {
+                              void updatePrinterProfile(selectedPrinter.name, { staple: next });
+                            }
+                          }}
                           className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
                         >
                           {(caps.supportedStapleModes ?? ['None', 'TopLeft']).map((s) => (
@@ -771,8 +790,15 @@ export const ModalsAndToasts: React.FC = () => {
                           {isFa ? 'پانچ (Hole Punch):' : 'Hole Punch:'}
                         </label>
                         <select
+                          aria-label={isFa ? 'پانچ (Hole Punch)' : 'Hole Punch'}
                           value={holePunch}
-                          onChange={(e) => setHolePunch(e.target.value)}
+                          onChange={(e) => {
+                            const next = e.target.value;
+                            setHolePunch(next);
+                            if (selectedPrinter) {
+                              void updatePrinterProfile(selectedPrinter.name, { holePunch: next });
+                            }
+                          }}
                           className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
                         >
                           {caps.supportedHolePunchModes!.map((hp) => (
@@ -787,8 +813,15 @@ export const ModalsAndToasts: React.FC = () => {
                           {isFa ? 'سینی خروجی (Output Bin):' : 'Output Bin:'}
                         </label>
                         <select
+                          aria-label={isFa ? 'سینی خروجی (Output Bin)' : 'Output Bin'}
                           value={outputBin}
-                          onChange={(e) => setOutputBin(e.target.value)}
+                          onChange={(e) => {
+                            const next = e.target.value;
+                            setOutputBin(next);
+                            if (selectedPrinter) {
+                              void updatePrinterProfile(selectedPrinter.name, { outputBin: next });
+                            }
+                          }}
                           className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
                         >
                           {caps.supportedOutputBins!.map((b) => (
@@ -803,8 +836,15 @@ export const ModalsAndToasts: React.FC = () => {
                           {isFa ? 'تا کردن (Fold):' : 'Fold:'}
                         </label>
                         <select
+                          aria-label={isFa ? 'تا کردن (Fold)' : 'Fold'}
                           value={fold}
-                          onChange={(e) => setFold(e.target.value)}
+                          onChange={(e) => {
+                            const next = e.target.value;
+                            setFold(next);
+                            if (selectedPrinter) {
+                              void updatePrinterProfile(selectedPrinter.name, { fold: next });
+                            }
+                          }}
                           className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
                         >
                           {caps.supportedFoldModes!.map((f) => (
@@ -849,8 +889,15 @@ export const ModalsAndToasts: React.FC = () => {
                       <label className="flex items-center gap-2 cursor-pointer">
                         <input
                           type="checkbox"
+                          aria-label={isFa ? 'چاپ بدون حاشیه (Borderless)' : 'Borderless'}
                           checked={borderless}
-                          onChange={(e) => setBorderless(e.target.checked)}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setBorderless(checked);
+                            if (selectedPrinter) {
+                              void updatePrinterProfile(selectedPrinter.name, { borderless: checked });
+                            }
+                          }}
                           className="accent-sky-500"
                         />
                         <span>{isFa ? 'چاپ بدون حاشیه (Borderless)' : 'Borderless'}</span>

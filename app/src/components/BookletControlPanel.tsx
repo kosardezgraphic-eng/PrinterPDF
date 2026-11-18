@@ -8,6 +8,7 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
   const layout = useAppStore(state => state.layout);
   const updateLayout = useAppStore(state => state.updateLayout);
   const updateMargins = useAppStore(state => state.updateMargins);
+  const updatePrinterProfile = useAppStore(state => state.updatePrinterProfile);
   const printerMargins = useAppStore(state => state.printerMargins);
   const printers = useAppStore(state => state.printers);
   const selectedPrinterName = useAppStore(state => state.selectedPrinterName);
@@ -58,7 +59,42 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
 
       <label className={label}>
         <span className="text-slate-400">{isFa ? 'اندازه کاغذ هر برگ چاپی' : 'Printed sheet size'}</span>
-        <select value={layout.paperSize} onChange={e => updateLayout({ paperSize: e.target.value as PaperSizeId })} className={input}>
+        <select
+          value={layout.paperSize}
+          onChange={e => {
+            const nextPaper = e.target.value as PaperSizeId;
+            if (nextPaper === 'Custom') {
+              updateLayout({ paperSize: 'Custom' });
+              if (activePrinter) {
+                void updatePrinterProfile(activePrinter.name, {
+                  paperSize: 'Custom',
+                  paperName: 'Custom',
+                  paperWidthMm: layout.customWidthMm,
+                  paperHeightMm: layout.customHeightMm,
+                });
+              }
+              return;
+            }
+            const matchedOpt = activePrinter?.capabilities.paperOptions?.find(o => o.id === nextPaper);
+            const stdDims = STANDARD_PAPER_SIZES[nextPaper];
+            const wMm = matchedOpt ? Math.min(matchedOpt.widthMm, matchedOpt.heightMm) : stdDims.widthMm;
+            const hMm = matchedOpt ? Math.max(matchedOpt.widthMm, matchedOpt.heightMm) : stdDims.heightMm;
+            updateLayout({
+              paperSize: nextPaper,
+              customWidthMm: wMm,
+              customHeightMm: hMm,
+            });
+            if (activePrinter) {
+              void updatePrinterProfile(activePrinter.name, {
+                paperSize: nextPaper,
+                paperName: matchedOpt?.name ?? nextPaper,
+                paperWidthMm: wMm,
+                paperHeightMm: hMm,
+              });
+            }
+          }}
+          className={input}
+        >
           {Object.entries(STANDARD_PAPER_SIZES).map(([id, paper]) => <option key={id} value={id}>{paper.label}</option>)}
           <option value="Custom">{isFa ? 'ابعاد سفارشی' : 'Custom size'}</option>
         </select>

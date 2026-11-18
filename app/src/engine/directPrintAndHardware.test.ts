@@ -5,7 +5,11 @@ import { PDFDocument } from 'pdf-lib';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PageItem, PrinterInfo, SourceDocument } from '@shared/models';
 import { sanitizeDriverText, sanitizePrinterInfo } from '@shared/models';
-import { matchStandardPaperId } from '../../../electron/windowsPrinterFallback';
+import {
+  buildApplyProfilePowerShellScript,
+  buildWindowsPrintPowerShellScript,
+  matchStandardPaperId,
+} from '../../../electron/windowsPrinterFallback';
 import { parsePageRangeText } from './pdfService';
 import { computeImpositionSheets, getSheetDimensionsMm } from './layoutEngine';
 import { ipcBridge } from './ipcBridge';
@@ -576,6 +580,103 @@ describe('direct print & printer hardware integration', () => {
     state = useAppStore.getState();
     expect(state.layout.duplexMode).toBe('short-edge');
     expect(state.printers.every((p) => p.activeProfile.duplexMode === 'short-edge')).toBe(true);
+
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  it('generates C# 5.0 compatible 2-pass DEVMODE + UserPrintTicket PowerShell scripts for profile sync & print', () => {
+    const applyScript = buildApplyProfilePowerShellScript('C:\\Temp\\profile.json');
+    const printScript = buildWindowsPrintPowerShellScript('C:\\Temp\\dispatch.json');
+
+    for (const script of [applyScript, printScript]) {
+      expect(script).toContain('PrintStudioWin32DevMode');
+      expect(script).toContain('Sync-PrintStudioUserPrintTicket');
+      expect(script).toContain('PRINTER_INFO_9');
+      expect(script).toContain('SetPrinter(hPrinter, 9, ref info9, 0)');
+      expect(script).toContain('DM_MEDIATYPE');
+      expect(script).toContain('DM_DEFAULTSOURCE');
+      expect(script).toContain('DM_DUPLEX');
+      expect(script).toContain('DM_IN_BUFFER | DM_OUT_BUFFER');
+
+      // Pass 1 (paper size + orientation) must occur before Pass 2 (duplex + tray + media)
+      const pass1Idx = script.indexOf('// Pass 1: Paper Size & Orientation');
+      const pass2Idx = script.indexOf('// Pass 2: Duplex, Tray, MediaType');
+      expect(pass1Idx).toBeGreaterThan(-1);
+      expect(pass2Idx).toBeGreaterThan(pass1Idx);
+
+      // Extract embedded C# block to verify strict C# 5.0 compatibility for Windows PowerShell 5.1 Add-Type
+      const csStart = script.indexOf("@'\r\n") + 4;
+      const csEnd = script.indexOf("\r\n'@", csStart);
+      const csBody = script.slice(csStart, csEnd);
+      expect(csBody).not.toContain('nameof(');
+      expect(csBody).not.toContain('?.');
+      expect(csBody).not.toContain('out var ');
+      expect(csBody).not.toContain('using var ');
+    }
+
+    expect(printScript).toContain('ConfigurePrinterSettingsForPrint');
+    expect(printScript).toContain('SetHdevmode');
+    expect(printScript).toContain('add_QueryPageSettings');
+    expect(printScript).toContain('MergeAndValidatePrintTicket($newTicket, (New-Object System.Printing.PrintTicket))');
+  });
+
+  it('syncs sheet paperSize/orientation changes from updateLayout and finishing options from Print Modal to activeProfile', async () => {
+    const profileSpy = vi.spyOn(ipcBridge, 'updatePrinterProfile');
+
+    // Standalone updateLayout (e.g. from booklet panel or preset) syncs selected printer activeProfile & IPC
+    act(() => {
+      useAppStore.getState().updateLayout({ paperSize: 'A3', orientation: 'landscape' });
+    });
+    await Promise.resolve();
+
+    const updatedPrinter = useAppStore.getState().printers[0];
+    expect(updatedPrinter.activeProfile.paperSize).toBe('A3');
+    expect(updatedPrinter.activeProfile.orientation).toBe('landscape');
+    expect(profileSpy).toHaveBeenCalledWith(
+      'SHARP MX-M453U PCL6',
+      expect.objectContaining({ paperSize: 'A3', orientation: 'landscape' })
+    );
+
+    profileSpy.mockClear();
+
+    // Open Print Modal and change Collate, Staple, Hole Punch, Output Bin -> updates activeProfile immediately
+    (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+
+    act(() => {
+      useAppStore.setState({ showPrintModal: true });
+      root.render(React.createElement(ModalsAndToasts));
+    });
+
+    const collateCheckbox = container.querySelector<HTMLInputElement>('input[aria-label="مرتب‌سازی دسته‌ها (Collate)"]');
+    const stapleSelect = container.querySelector<HTMLSelectElement>('select[aria-label="منگنه (Staple)"]');
+    const punchSelect = container.querySelector<HTMLSelectElement>('select[aria-label="پانچ (Hole Punch)"]');
+    const binSelect = container.querySelector<HTMLSelectElement>('select[aria-label="سینی خروجی (Output Bin)"]');
+    expect(collateCheckbox).toBeTruthy();
+    expect(stapleSelect).toBeTruthy();
+    expect(punchSelect).toBeTruthy();
+    expect(binSelect).toBeTruthy();
+
+    await act(async () => {
+      collateCheckbox!.click();
+      stapleSelect!.value = 'TopLeft';
+      stapleSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+      punchSelect!.value = '2Hole';
+      punchSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+      binSelect!.value = 'Finisher Bin';
+      binSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    const prof = useAppStore.getState().printers[0].activeProfile;
+    expect(prof.collate).toBe(false);
+    expect(prof.staple).toBe('TopLeft');
+    expect(prof.holePunch).toBe('2Hole');
+    expect(prof.outputBin).toBe('Finisher Bin');
+    expect(profileSpy).toHaveBeenCalled();
 
     act(() => root.unmount());
     container.remove();

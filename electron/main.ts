@@ -7,6 +7,8 @@ import { IPC_CHANNELS, type LocalFilePayload } from '../shared/ipc-channels';
 import { PrinterSidecarClient } from './printerSidecarClient';
 import { SessionStore } from './sessionStore';
 import {
+  applyProfileToWindowsPrinterViaPowerShell,
+  isVirtualPrinterName,
   mapElectronPrintersToPrinterInfo,
   printToWindowsPrinterViaPowerShell,
   queryWindowsPrinterMarginsViaPowerShell,
@@ -41,6 +43,53 @@ let sessionStore: SessionStore;
 let lastNativeFallbackWorked = false;
 /** User-edited printer profiles preserved across refreshes when using Windows PowerShell fallback. */
 const userProfileOverrides = new Map<string, PrinterProfileSettings>();
+let lastKnownPrinters: PrinterInfo[] = [];
+
+interface QueuedProfileSync {
+  latestProfile: PrinterProfileSettings;
+  running: Promise<void> | null;
+  dirty: boolean;
+}
+const fallbackProfileSyncQueue = new Map<string, QueuedProfileSync>();
+
+function queueFallbackProfileSync(printerName: string, profile: PrinterProfileSettings): Promise<void> {
+  if (process.platform !== 'win32' || sidecar.isRunning || isVirtualPrinterName(printerName)) {
+    return Promise.resolve();
+  }
+  const key = printerName.toLowerCase();
+  let entry = fallbackProfileSyncQueue.get(key);
+  if (!entry) {
+    entry = { latestProfile: profile, running: null, dirty: true };
+    fallbackProfileSyncQueue.set(key, entry);
+  } else {
+    entry.latestProfile = profile;
+    entry.dirty = true;
+  }
+
+  if (!entry.running) {
+    entry.running = (async () => {
+      try {
+        while (entry.dirty) {
+          entry.dirty = false;
+          const toApply = entry.latestProfile;
+          await applyProfileToWindowsPrinterViaPowerShell(printerName, toApply).catch(() => false);
+        }
+      } finally {
+        entry.running = null;
+      }
+    })();
+  }
+  return entry.running;
+}
+
+async function flushFallbackProfileSync(printerName: string): Promise<void> {
+  const key = printerName.toLowerCase();
+  const entry = fallbackProfileSyncQueue.get(key);
+  while (entry?.running) {
+    await entry.running.catch(() => undefined);
+  }
+}
+
 /** Files that arrived before the renderer had a listener, flushed once it does. */
 let pendingOpenFiles: string[] = [];
 
@@ -244,7 +293,9 @@ async function listRealWindowsPrinters(): Promise<PrinterInfo[]> {
   try {
     const printers = await withSidecarDiagnostics(sidecar.listPrinters());
     lastNativeFallbackWorked = false;
-    return applyCachedProfileOverrides(printers);
+    const resolved = applyCachedProfileOverrides(printers);
+    lastKnownPrinters = resolved;
+    return resolved;
   } catch (sidecarError) {
     if (process.platform !== 'win32') {
       throw sidecarError;
@@ -255,7 +306,9 @@ async function listRealWindowsPrinters(): Promise<PrinterInfo[]> {
     const psPrinters = await queryWindowsPrintersViaPowerShell().catch(() => []);
     if (psPrinters.length > 0) {
       lastNativeFallbackWorked = true;
-      return applyCachedProfileOverrides(psPrinters);
+      const resolved = applyCachedProfileOverrides(psPrinters);
+      lastKnownPrinters = resolved;
+      return resolved;
     }
 
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -263,7 +316,9 @@ async function listRealWindowsPrinters(): Promise<PrinterInfo[]> {
       const mapped = mapElectronPrintersToPrinterInfo(nativePrinters);
       if (mapped.length > 0) {
         lastNativeFallbackWorked = true;
-        return applyCachedProfileOverrides(mapped);
+        const resolved = applyCachedProfileOverrides(mapped);
+        lastKnownPrinters = resolved;
+        return resolved;
       }
     }
 
@@ -310,10 +365,32 @@ function registerIpcHandlers(): void {
       userProfileOverrides.set(payload.printerName, mergedProfile);
       try {
         if (sidecar.isRunning) {
-          return await sidecar.updateProfile(payload.printerName, mergedProfile);
+          const updated = await sidecar.updateProfile(payload.printerName, mergedProfile);
+          lastKnownPrinters = lastKnownPrinters.map((p) =>
+            p.name.toLowerCase() === payload.printerName.toLowerCase() ? updated : p
+          );
+          return updated;
         }
       } catch {
-        // Fall back to refreshing local Windows printer entry with updated profile
+        // Fall back to syncing Windows DEVMODE/UserPrintTicket via PowerShell
+      }
+      void queueFallbackProfileSync(payload.printerName, mergedProfile);
+      const cachedMatch = lastKnownPrinters.find(
+        (p) => p.name.toLowerCase() === payload.printerName.toLowerCase()
+      );
+      if (cachedMatch) {
+        const updatedCached: PrinterInfo = {
+          ...cachedMatch,
+          activeProfile: {
+            ...cachedMatch.activeProfile,
+            ...mergedProfile,
+            printerName: cachedMatch.name,
+          },
+        };
+        lastKnownPrinters = lastKnownPrinters.map((p) =>
+          p.name.toLowerCase() === payload.printerName.toLowerCase() ? updatedCached : p
+        );
+        return updatedCached;
       }
       const printers = await listRealWindowsPrinters();
       const matched = printers.find(
@@ -338,6 +415,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.PRINTER_OPEN_PREFERENCES, async (_e, printerName: string) => {
     if (process.platform !== 'win32') throw new Error('Windows printer preferences are only available on Windows');
     if (typeof printerName !== 'string' || !printerName.trim()) throw new Error('A printer must be selected');
+    await flushFallbackProfileSync(printerName);
     await new Promise<void>((resolve, reject) => {
       execFile('rundll32.exe', ['printui.dll,PrintUIEntry', '/e', '/n', printerName], { windowsHide: false }, (error) => {
         if (error) reject(new Error(`Could not open Windows printer preferences: ${error.message}`));
@@ -346,6 +424,9 @@ function registerIpcHandlers(): void {
     });
     // Native Windows driver preferences take precedence; clear cached override so fresh driver settings load.
     userProfileOverrides.delete(printerName);
+    if (sidecar.isRunning) {
+      await sidecar.reloadProfile(printerName).catch(() => undefined);
+    }
     return listRealWindowsPrinters();
   });
 
@@ -370,6 +451,9 @@ function registerIpcHandlers(): void {
         }
       }
       try {
+        if (payload.request?.printerName) {
+          await flushFallbackProfileSync(payload.request.printerName);
+        }
         if (sidecar.isRunning) {
           return await sidecar.submitPrintJob(payload.request, tempPdfPath, tempImagePaths);
         }

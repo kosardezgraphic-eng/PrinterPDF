@@ -118,6 +118,7 @@ let printRunSequence = 0;
 let activePrintRunId = 0;
 const canceledPrintRuns = new Set<number>();
 let activeSpoolerJob: { printerName: string; jobId: number } | null = null;
+const profileSyncSeq = new Map<string, number>();
 
 function syncPrintersDuplex(printers: PrinterInfo[], duplexMode: DuplexMode): PrinterInfo[] {
   let changed = false;
@@ -1433,6 +1434,12 @@ export const useAppStore = create<AppState>((set, get) => {
     updateLayout: (patch, recordUndo = true) => {
       const before = captureSnapshot(get());
       let duplexToPersist: DuplexMode | undefined;
+      let profileToSync: PrinterProfileSettings | undefined;
+      const paperOrOrientChanged =
+        patch.paperSize !== undefined ||
+        patch.customWidthMm !== undefined ||
+        patch.customHeightMm !== undefined ||
+        patch.orientation !== undefined;
       set((state) => {
         // While booklet imposition is active, editing its controls must not send the preview
         // back to the first sheet. Keep the operator on the current sheet; the preview clamps
@@ -1471,14 +1478,83 @@ export const useAppStore = create<AppState>((set, get) => {
         if (unifiedDuplex !== undefined && unifiedDuplex !== state.layout.duplexMode) {
           duplexToPersist = unifiedDuplex;
         }
+
+        let nextPrinters = synced.printers;
+        if (paperOrOrientChanged && state.selectedPrinterName) {
+          const nextLayout = synced.layout;
+          const stdDims = nextLayout.paperSize !== 'Custom' ? STANDARD_PAPER_SIZES[nextLayout.paperSize] : null;
+          const matchedPaperOpt =
+            activePrinter?.capabilities.paperOptions?.find(
+              (o) =>
+                (activePrinter.activeProfile.paperName &&
+                  nextLayout.paperSize === activePrinter.activeProfile.paperSize &&
+                  o.name.toLowerCase() === activePrinter.activeProfile.paperName.toLowerCase()) ||
+                o.id === nextLayout.paperSize
+            ) ?? null;
+          const nextWidthMm =
+            nextLayout.paperSize === 'Custom'
+              ? nextLayout.customWidthMm
+              : matchedPaperOpt
+                ? Math.min(matchedPaperOpt.widthMm, matchedPaperOpt.heightMm)
+                : stdDims?.widthMm ?? nextLayout.customWidthMm;
+          const nextHeightMm =
+            nextLayout.paperSize === 'Custom'
+              ? nextLayout.customHeightMm
+              : matchedPaperOpt
+                ? Math.max(matchedPaperOpt.widthMm, matchedPaperOpt.heightMm)
+                : stdDims?.heightMm ?? nextLayout.customHeightMm;
+          const nextPaperName =
+            nextLayout.paperSize === 'Custom'
+              ? (activePrinter?.activeProfile.paperSize === 'Custom' &&
+                 activePrinter.activeProfile.paperName &&
+                 Math.abs((activePrinter.activeProfile.paperWidthMm ?? 0) - nextWidthMm) <= 2.2 &&
+                 Math.abs((activePrinter.activeProfile.paperHeightMm ?? 0) - nextHeightMm) <= 2.2
+                  ? activePrinter.activeProfile.paperName
+                  : 'Custom')
+              : matchedPaperOpt?.name ?? nextLayout.paperSize;
+
+          nextPrinters = nextPrinters.map((p) => {
+            if (p.name !== state.selectedPrinterName) return p;
+            const ap = p.activeProfile;
+            if (
+              ap.paperSize === nextLayout.paperSize &&
+              ap.paperName === nextPaperName &&
+              ap.orientation === nextLayout.orientation &&
+              ap.paperWidthMm === nextWidthMm &&
+              ap.paperHeightMm === nextHeightMm
+            ) {
+              return p;
+            }
+            profileToSync = {
+              ...ap,
+              paperSize: nextLayout.paperSize,
+              paperName: nextPaperName,
+              paperWidthMm: nextWidthMm,
+              paperHeightMm: nextHeightMm,
+              orientation: nextLayout.orientation,
+              duplexMode: nextLayout.duplexMode,
+            };
+            return { ...p, activeProfile: profileToSync };
+          });
+        }
+
         return {
           layout: synced.layout,
-          ...(synced.printers !== state.printers ? { printers: synced.printers } : {}),
+          ...(nextPrinters !== state.printers ? { printers: nextPrinters } : {}),
           ...(preserveBookletPreview ? {} : { activeSheetIndex: 0 }),
         };
       });
+      if (profileToSync) {
+        const syncTarget = profileToSync;
+        const expectedSeq = profileSyncSeq.get(syncTarget.printerName) ?? 0;
+        queueMicrotask(() => {
+          if ((profileSyncSeq.get(syncTarget.printerName) ?? 0) === expectedSeq) {
+            void ipcBridge.updatePrinterProfile(syncTarget.printerName, syncTarget).catch(() => {});
+          }
+        });
+      }
       if (duplexToPersist !== undefined) {
-        persistDuplexAcrossPrinters(get().printers, duplexToPersist);
+        persistDuplexAcrossPrinters(get().printers, duplexToPersist, profileToSync?.printerName);
       }
       if (recordUndo) {
         pushUndo(
@@ -2280,6 +2356,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     updatePrinterProfile: async (printerName, profileOrPatch) => {
+      profileSyncSeq.set(printerName, (profileSyncSeq.get(printerName) ?? 0) + 1);
       const state = get();
       const existing = state.printers.find((p) => p.name === printerName);
       const baseProfile: PrinterProfileSettings = existing?.activeProfile ?? {

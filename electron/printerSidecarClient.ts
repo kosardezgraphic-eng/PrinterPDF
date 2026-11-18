@@ -255,6 +255,10 @@ export class PrinterSidecarClient {
     return this.callRpc<PrinterInfo[]>('printer:list');
   }
 
+  public async reloadProfile(printerName?: string): Promise<PrinterInfo[]> {
+    return this.callRpc<PrinterInfo[]>('printer:reload-profile', { printerName });
+  }
+
   public async getPrinterMargins(request: PrinterMarginRequest): Promise<PrinterMarginResult> {
     return this.callRpc<PrinterMarginResult>('printer:get-margins', request);
   }

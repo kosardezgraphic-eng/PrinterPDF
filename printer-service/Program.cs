@@ -200,6 +200,11 @@ public static class Program
                 object? result = req.Method switch
                 {
                     "printer:list" => Spooler.ListPrinters(),
+                    "printer:reload-profile" => Spooler.ReloadPrinters(
+                        req.Params.ValueKind == JsonValueKind.Object && req.Params.TryGetProperty("printerName", out var rpProp)
+                            ? rpProp.GetString()
+                            : null
+                    ),
                     "printer:get-margins" => Spooler.GetPrinterMargins(req.Params.Deserialize<PrinterMarginRequestDto>()!),
                     "printer:update-profile" => Spooler.UpdateProfile(
                         req.Params.Deserialize<PrinterProfileDto>()!

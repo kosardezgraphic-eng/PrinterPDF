@@ -127,3 +127,30 @@ describe('single-file publish keeps the native WPF dependencies', () => {
     expect(selfExtract).toBeGreaterThan(singleFile);
   });
 });
+
+describe('sidecar Win32 DEVMODE & PrintTicket driver sync contract', () => {
+  const interop = read('../../../printer-service/Services/WinSpoolInterop.cs');
+  const program = read('../../../printer-service/Program.cs');
+  const service = read('../../../printer-service/Services/PrinterSpoolerService.cs');
+
+  it('defines per-user PRINTER_INFO_9, DC_MEDIATYPES, and DM_MEDIATYPE in WinSpoolInterop', () => {
+    expect(interop).toContain('DC_MEDIATYPES = 35');
+    expect(interop).toContain('DM_MEDIATYPE = 0x02000000');
+    expect(interop).toContain('struct PRINTER_INFO_9');
+    expect(interop).toContain('ref PRINTER_INFO_9 pPrinter');
+    expect(interop).toContain('int dmMediaType');
+  });
+
+  it('wires printer:reload-profile and 2-pass DEVMODE + PrintTicketConverter validation in C# sidecar', () => {
+    expect(program).toContain('"printer:reload-profile"');
+    expect(service).toContain('using System.Printing.Interop;');
+    expect(service).toContain('TryBuildConfiguredDevModeBytes');
+    expect(service).toContain('TryWritePerUserDevMode');
+    expect(service).toContain('BuildValidatedPrintTicket');
+    expect(service).toContain('PrintTicketConverter');
+    expect(service).toContain('queue.MergeAndValidatePrintTicket(ticket, new PrintTicket())');
+    expect(service).not.toContain('ResolutionX');
+    expect(service).not.toContain('ResolutionY');
+  });
+});
+
