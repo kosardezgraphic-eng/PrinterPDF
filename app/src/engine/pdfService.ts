@@ -36,9 +36,9 @@ import { imagePlacements, imageDrawRect, shapePlacements } from './overlayPlacem
 import { MM_PER_PT, shapeColorComponents, shapeCommands, shapeDashPattern, shapeHasFill, shapeSvgPath } from './shapes';
 import { rasterizeOverlayImage } from './imageImport';
 import { planPictureEmbedding } from './imageFormat';
-import { computeImpositionSheets, sortCellsByLayer } from './layoutEngine';
+import { computeImpositionSheets, sortCellsByLayer, stripTrailingEmptyDuplexSides } from './layoutEngine';
 import { normalizeAngle, pageCropFractions, rotateInsets } from './pageGeometry';
-import { shouldApplyEffectsToPage } from './effectsPipeline';
+import { applyEffectsToRgbaBuffer, resolvePageEffects, type ResolvedPageEffects } from './effectsPipeline';
 import { formatPageNumberLabel, resolveTextMacros } from './watermarkEngine';
 import { globalThumbnailCache } from './pageCache';
 import {
@@ -68,6 +68,134 @@ async function applyCmykDecode(doc: PDFDocument, image: Awaited<ReturnType<PDFDo
   const decode = PDFArray.withContext(doc.context);
   for (const value of [0, 1, 0, 1, 0, 1, 0, 1]) decode.push(PDFNumber.of(value));
   stream.dict.set(PDFName.of('Decode'), decode);
+}
+
+type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
+type PdfJsDocumentProxy = Awaited<ReturnType<PdfJsModule['getDocument']>['promise']>;
+
+interface Canvas2DSurface {
+  canvas: HTMLCanvasElement | OffscreenCanvas;
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+}
+
+async function loadPdfJsLib(): Promise<PdfJsModule> {
+  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  if (!(globalThis as { pdfjsWorker?: unknown }).pdfjsWorker && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+    const workerMod = await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = workerMod.default;
+  }
+  return pdfjsLib;
+}
+
+function createCanvas2DSurface(width: number, height: number): Canvas2DSurface | null {
+  const w = Math.max(1, Math.round(width));
+  const h = Math.max(1, Math.round(height));
+  if (typeof document !== 'undefined') {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (ctx) return { canvas, ctx };
+    } catch {
+      // fall through to OffscreenCanvas
+    }
+  }
+  if (typeof OffscreenCanvas !== 'undefined') {
+    try {
+      const canvas = new OffscreenCanvas(w, h);
+      const ctx = canvas.getContext('2d');
+      if (ctx) return { canvas, ctx };
+    } catch {
+      // unavailable
+    }
+  }
+  return null;
+}
+
+async function surfaceToPngBytes(canvas: HTMLCanvasElement | OffscreenCanvas): Promise<Uint8Array> {
+  const anyCanvas = canvas as unknown as {
+    convertToBlob?: (opts?: { type?: string }) => Promise<Blob>;
+    toBlob?: (cb: (blob: Blob | null) => void, type?: string) => void;
+    encode?: (type: 'png') => Promise<Uint8Array | ArrayBuffer>;
+    toDataURL?: (type?: string) => string;
+  };
+  if (typeof anyCanvas.convertToBlob === 'function') {
+    const blob = await anyCanvas.convertToBlob({ type: 'image/png' });
+    return new Uint8Array(await blob.arrayBuffer());
+  }
+  if (typeof anyCanvas.toBlob === 'function') {
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      anyCanvas.toBlob!((b) => (b ? resolve(b) : reject(new Error('PNG encoding failed'))), 'image/png');
+    });
+    return new Uint8Array(await blob.arrayBuffer());
+  }
+  if (typeof anyCanvas.encode === 'function') {
+    const encoded = await anyCanvas.encode('png');
+    return new Uint8Array(encoded);
+  }
+  if (typeof anyCanvas.toDataURL === 'function') {
+    const dataUrl = anyCanvas.toDataURL('image/png');
+    const commaIdx = dataUrl.indexOf(',');
+    if (commaIdx >= 0) {
+      const bin = atob(dataUrl.slice(commaIdx + 1));
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    }
+  }
+  throw new Error('Canvas PNG export is unavailable');
+}
+
+async function decodeImageSource(
+  bytes: Uint8Array,
+  mimeType: string
+): Promise<{ source: CanvasImageSource; width: number; height: number; cleanup?: () => void }> {
+  const safeBytes = new Uint8Array(bytes);
+  const type = mimeType || 'image/png';
+  if (typeof createImageBitmap === 'function') {
+    const bitmap = await createImageBitmap(new Blob([safeBytes], { type }));
+    return {
+      source: bitmap,
+      width: bitmap.width,
+      height: bitmap.height,
+      cleanup: () => bitmap.close?.(),
+    };
+  }
+  if (typeof Image !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+    const url = URL.createObjectURL(new Blob([safeBytes], { type }));
+    return await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        resolve({
+          source: img,
+          width: img.naturalWidth || img.width,
+          height: img.naturalHeight || img.height,
+          cleanup: () => URL.revokeObjectURL(url),
+        });
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('Failed to decode source image for effects export'));
+      };
+      img.src = url;
+    });
+  }
+  throw new Error('Image decoding is unavailable in this environment');
+}
+
+function buildResolvedEffectsKey(r: ResolvedPageEffects): string {
+  return [
+    r.applyGlobal ? 1 : 0,
+    r.effectiveInvert ? 1 : 0,
+    r.effectiveGrayscale ? 1 : 0,
+    r.effectiveBlackAndWhite ? 1 : 0,
+    r.brightness,
+    r.contrast,
+    r.gamma,
+    r.blackText ? 1 : 0,
+    r.threshold,
+  ].join(':');
 }
 
 export interface ImportErrorItem {
@@ -562,7 +690,8 @@ export async function exportImposedPdf(params: {
   const font = await outPdf.embedFont(StandardFonts.Helvetica);
   const boldFont = await outPdf.embedFont(StandardFonts.HelveticaBold);
 
-  // Cache loaded source PDFDocuments by documentId
+  // Cache loaded source PDFDocuments and SourceDocuments by documentId
+  const docById = new Map(documents.map((d) => [d.id, d]));
   const loadedSourceDocs = new Map<string, PDFDocument>();
   const loadedImages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPng>>>();
   for (const doc of documents) {
@@ -576,13 +705,61 @@ export async function exportImposedPdf(params: {
     }
   }
 
-  const sheets = computeImpositionSheets(pages, layout);
-  const totalSides = Math.max(1, sheets.length);
+  const rawSheets = computeImpositionSheets(pages, layout);
   const pageIndices = new Map(allPages.map((page,index)=>[page.id,index+1]));
+  const effectiveDuplex = layout.booklet?.enabled ? layout.booklet.duplexMode : layout.duplexMode;
+  const sheets = stripTrailingEmptyDuplexSides(rawSheets, effectiveDuplex, (side, originalTotal) =>
+    overlays.length > 0 &&
+    (shapePlacements(side, originalTotal, allPages, overlays, pageIndices).length > 0 ||
+      textPlacements(side, originalTotal, allPages, overlays, pageIndices).length > 0 ||
+      imagePlacements(side, originalTotal, allPages, overlays, pageIndices).length > 0)
+  );
+  const totalSides = Math.max(1, sheets.length);
   const textImages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPng>>>();
   const pictureImages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPng>>>();
+  const processedImages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPng>>>();
+  const processedPdfPages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPng>>>();
+  const loadedPdfJsTasks = new Map<string, ReturnType<PdfJsModule['getDocument']>>();
+  const loadedPdfJsDocs = new Map<string, Promise<PdfJsDocumentProxy>>();
   const loadedTextFonts = new Set<string>();
 
+  const getPdfJsDoc = (docId: string, rawBytes: Uint8Array): Promise<PdfJsDocumentProxy> => {
+    let promise = loadedPdfJsDocs.get(docId);
+    if (!promise) {
+      promise = (async () => {
+        const pdfjsLib = await loadPdfJsLib();
+        const canvasFactory =
+          typeof document === 'undefined' && typeof OffscreenCanvas !== 'undefined'
+            ? class {
+                create(width: number, height: number) {
+                  const canvas = new OffscreenCanvas(Math.max(1, Math.ceil(width)), Math.max(1, Math.ceil(height)));
+                  return { canvas, context: canvas.getContext('2d') };
+                }
+                reset(pair: { canvas: OffscreenCanvas }, width: number, height: number) {
+                  pair.canvas.width = Math.max(1, Math.ceil(width));
+                  pair.canvas.height = Math.max(1, Math.ceil(height));
+                }
+                destroy(pair: { canvas: OffscreenCanvas | null; context: OffscreenCanvasRenderingContext2D | null }) {
+                  pair.canvas = null;
+                  pair.context = null;
+                }
+              }
+            : undefined;
+        const task = pdfjsLib.getDocument({
+          data: new Uint8Array(rawBytes),
+          useSystemFonts: true,
+          isEvalSupported: false,
+          ...(canvasFactory ? { CanvasFactory: canvasFactory as never } : {}),
+        });
+        loadedPdfJsTasks.set(docId, task);
+        return await task.promise;
+      })();
+      loadedPdfJsDocs.set(docId, promise);
+    }
+    return promise;
+  };
+
+  try {
   for (let sIdx = 0; sIdx < sheets.length; sIdx++) {
     const sheetSide = sheets[sIdx];
     const sheetWidthPt = sheetSide.widthMm * MM_TO_PT;
@@ -606,9 +783,11 @@ export async function exportImposedPdf(params: {
       const contentWPt = cell.contentWidthMm * MM_TO_PT;
       const contentHPt = cell.contentHeightMm * MM_TO_PT;
 
-      // Embed source PDF page if available
+      // Embed source PDF page or image if available
+      const sourceDoc = docById.get(cell.page.documentId);
       const srcPdf = loadedSourceDocs.get(cell.page.documentId);
       const srcImage = loadedImages.get(cell.page.documentId);
+      const resolved = resolvePageEffects(cell.page, effects);
       const rotation = cell.effectiveRotation;
       // Preview uses clockwise CSS rotation; PDF coordinates increase upwards.
       const rotated = rotation === 90 || rotation === 270;
@@ -635,28 +814,150 @@ export async function exportImposedPdf(params: {
           throw new Error(`Invalid source page ${cell.page.sourcePageNumber} in ${cell.page.documentName}`);
         }
         const sourcePage = srcPdf.getPage(pageIdxZero);
-        // The PDF thumbnail is rendered on white paper; keep that opaque paper when layers overlap.
-        outPage.drawRectangle({ x:contentXPt, y:contentYPt, width:contentWPt, height:contentHPt, color:rgb(1,1,1) });
-        // pdf-lib cannot embed a page with no Contents; such a page is empty.
-        if (sourcePage.node.Contents()) {
-          const box = sourcePage.getCropBox();
-          const crop = pageCropFractions(cell.page);
-          const [embeddedPage] = await outPdf.embedPages([sourcePage], [{
-            left: box.x + box.width * crop.left,
-            right: box.x + box.width * (1 - crop.right),
-            bottom: box.y + box.height * crop.bottom,
-            top: box.y + box.height * (1 - crop.top),
-          }]);
-          outPage.drawPage(embeddedPage, drawPlacement);
+        if (resolved.hasPixelEffects && sourceDoc?.rawBytes) {
+          if (!sourcePage.node.Contents()) {
+            const tinted = applyEffectsToRgbaBuffer(
+              new Uint8ClampedArray([255, 255, 255, 255]),
+              effects,
+              cell.page.overrides,
+              resolved.applyGlobal
+            );
+            outPage.drawRectangle({
+              x: contentXPt,
+              y: contentYPt,
+              width: contentWPt,
+              height: contentHPt,
+              color: rgb(tinted[0] / 255, tinted[1] / 255, tinted[2] / 255),
+            });
+          } else {
+            const crop = pageCropFractions(cell.page);
+            const targetCellW = rotated ? contentHPt : contentWPt;
+            const targetCellH = rotated ? contentWPt : contentHPt;
+            const visibleFractionW = Math.max(0.02, 1 - crop.left - crop.right);
+            const visibleFractionH = Math.max(0.02, 1 - crop.top - crop.bottom);
+            const pdfJsDoc = await getPdfJsDoc(cell.page.documentId, sourceDoc.rawBytes);
+            const pdfPage = await pdfJsDoc.getPage(cell.page.sourcePageNumber);
+            try {
+              const baseViewport = pdfPage.getViewport({ scale: 1, rotation: 0 });
+              const maxSidePx = 3200;
+              const desiredScaleW = (targetCellW * (300 / 72)) / Math.max(1, baseViewport.width * visibleFractionW);
+              const desiredScaleH = (targetCellH * (300 / 72)) / Math.max(1, baseViewport.height * visibleFractionH);
+              const maxScale = Math.min(
+                maxSidePx / Math.max(1, baseViewport.width),
+                maxSidePx / Math.max(1, baseViewport.height)
+              );
+              const minScale = Math.min(maxScale, 2);
+              const renderScale = Math.max(minScale, Math.min(maxScale, Math.max(desiredScaleW, desiredScaleH)));
+              const viewport = pdfPage.getViewport({ scale: renderScale, rotation: 0 });
+              const fullW = Math.max(1, Math.round(viewport.width));
+              const fullH = Math.max(1, Math.round(viewport.height));
+              const cropX = Math.max(0, Math.min(fullW - 1, Math.round(crop.left * fullW)));
+              const cropY = Math.max(0, Math.min(fullH - 1, Math.round(crop.top * fullH)));
+              const cropW = Math.max(1, Math.min(fullW - cropX, Math.round(visibleFractionW * fullW)));
+              const cropH = Math.max(1, Math.min(fullH - cropY, Math.round(visibleFractionH * fullH)));
+
+              const pdfEffectKey = JSON.stringify([
+                cell.page.documentId,
+                cell.page.sourcePageNumber,
+                cropX,
+                cropY,
+                cropW,
+                cropH,
+                fullW,
+                fullH,
+                buildResolvedEffectsKey(resolved),
+              ]);
+              let processedPdfImg = processedPdfPages.get(pdfEffectKey);
+              if (!processedPdfImg) {
+                const fullSurface = createCanvas2DSurface(fullW, fullH);
+                if (!fullSurface) throw new Error('Effects export requires a Canvas 2D renderer');
+                fullSurface.ctx.fillStyle = '#ffffff';
+                fullSurface.ctx.fillRect(0, 0, fullW, fullH);
+                await pdfPage.render({
+                  canvasContext: fullSurface.ctx as unknown as CanvasRenderingContext2D,
+                  viewport,
+                }).promise;
+                const imgData = fullSurface.ctx.getImageData(cropX, cropY, cropW, cropH);
+                const processed = applyEffectsToRgbaBuffer(
+                  imgData.data,
+                  effects,
+                  cell.page.overrides,
+                  resolved.applyGlobal
+                );
+                const outSurface =
+                  cropX === 0 && cropY === 0 && cropW === fullW && cropH === fullH
+                    ? fullSurface
+                    : createCanvas2DSurface(cropW, cropH);
+                if (!outSurface) throw new Error('Effects export requires a Canvas 2D renderer');
+                const targetImgData =
+                  outSurface === fullSurface ? imgData : outSurface.ctx.createImageData(cropW, cropH);
+                targetImgData.data.set(processed);
+                outSurface.ctx.putImageData(targetImgData, 0, 0);
+                const pngBytes = await surfaceToPngBytes(outSurface.canvas);
+                processedPdfImg = await outPdf.embedPng(pngBytes);
+                processedPdfPages.set(pdfEffectKey, processedPdfImg);
+              }
+              outPage.drawImage(processedPdfImg, drawPlacement);
+            } finally {
+              pdfPage.cleanup();
+            }
+          }
+        } else {
+          // The PDF thumbnail is rendered on white paper; keep that opaque paper when layers overlap.
+          outPage.drawRectangle({ x:contentXPt, y:contentYPt, width:contentWPt, height:contentHPt, color:rgb(1,1,1) });
+          // pdf-lib cannot embed a page with no Contents; such a page is empty.
+          if (sourcePage.node.Contents()) {
+            const box = sourcePage.getCropBox();
+            const crop = pageCropFractions(cell.page);
+            const [embeddedPage] = await outPdf.embedPages([sourcePage], [{
+              left: box.x + box.width * crop.left,
+              right: box.x + box.width * (1 - crop.right),
+              bottom: box.y + box.height * crop.bottom,
+              top: box.y + box.height * (1 - crop.top),
+            }]);
+            outPage.drawPage(embeddedPage, drawPlacement);
+          }
         }
       } else if (srcImage && cell.page.sourcePageNumber > 0) {
+        let imageToDraw = srcImage;
+        if (resolved.hasPixelEffects && sourceDoc?.rawBytes) {
+          const imgEffectKey = `${cell.page.documentId}|${buildResolvedEffectsKey(resolved)}`;
+          let processedImg = processedImages.get(imgEffectKey);
+          if (!processedImg) {
+            const decoded = await decodeImageSource(sourceDoc.rawBytes, sourceDoc.mimeType || 'image/png');
+            try {
+              const scale = Math.min(1, 3600 / Math.max(1, decoded.width, decoded.height));
+              const w = Math.max(1, Math.round(decoded.width * scale));
+              const h = Math.max(1, Math.round(decoded.height * scale));
+              const surface = createCanvas2DSurface(w, h);
+              if (!surface) throw new Error('Effects export requires a Canvas 2D renderer');
+              surface.ctx.clearRect(0, 0, w, h);
+              surface.ctx.drawImage(decoded.source, 0, 0, w, h);
+              const imgData = surface.ctx.getImageData(0, 0, w, h);
+              const processed = applyEffectsToRgbaBuffer(
+                imgData.data,
+                effects,
+                cell.page.overrides,
+                resolved.applyGlobal
+              );
+              imgData.data.set(processed);
+              surface.ctx.putImageData(imgData, 0, 0);
+              const pngBytes = await surfaceToPngBytes(surface.canvas);
+              processedImg = await outPdf.embedPng(pngBytes);
+              processedImages.set(imgEffectKey, processedImg);
+            } finally {
+              decoded.cleanup?.();
+            }
+          }
+          imageToDraw = processedImg;
+        }
         const crop = rotateInsets(pageCropFractions(cell.page), rotation);
         const fullW = contentWPt / (1 - crop.left - crop.right);
         const fullH = contentHPt / (1 - crop.top - crop.bottom);
         const fullX = contentXPt - crop.left * fullW;
         const fullY = contentYPt - crop.bottom * fullH;
         outPage.pushOperators(pushGraphicsState(), rectangle(contentXPt, contentYPt, contentWPt, contentHPt), clip(), endPath());
-        outPage.drawImage(srcImage, {
+        outPage.drawImage(imageToDraw, {
           x: fullX + (rotation === 180 || rotation === 270 ? fullW : 0),
           y: fullY + (rotation === 90 || rotation === 180 ? fullH : 0),
           width: rotated ? fullH : fullW,
@@ -665,7 +966,17 @@ export async function exportImposedPdf(params: {
         });
         outPage.pushOperators(popGraphicsState());
       } else if (cell.page.sourcePageNumber === 0 && cell.page.isBlankPage) {
-        outPage.drawRectangle({ x:contentXPt, y:contentYPt, width:contentWPt, height:contentHPt, color:rgb(1,1,1) });
+        let blankColor = rgb(1, 1, 1);
+        if (resolved.hasPixelEffects) {
+          const tinted = applyEffectsToRgbaBuffer(
+            new Uint8ClampedArray([255, 255, 255, 255]),
+            effects,
+            cell.page.overrides,
+            resolved.applyGlobal
+          );
+          blankColor = rgb(tinted[0] / 255, tinted[1] / 255, tinted[2] / 255);
+        }
+        outPage.drawRectangle({ x:contentXPt, y:contentYPt, width:contentWPt, height:contentHPt, color:blankColor });
       } else if (cell.page.sourcePageNumber > 0) {
         throw new Error(`Missing or unsupported source for ${cell.page.documentName}; re-import the original file`);
       }
@@ -709,9 +1020,8 @@ export async function exportImposedPdf(params: {
         }
       }
 
-      // E1: Vector Invert via PDF BlendMode.Difference over the cell
-      const { effectiveInvert } = shouldApplyEffectsToPage(cell.page, effects);
-      if (effectiveInvert) {
+      // E1: Vector Invert via PDF BlendMode.Difference over the cell (when pixel effects already ran, Step 6 inverted pixels directly)
+      if (resolved.effectiveInvert && !resolved.hasPixelEffects) {
         outPage.pushOperators(pushGraphicsState());
         if (!cell.allowOverflow) outPage.pushOperators(rectangle(cellXPt, cellYPt, cellWPt, cellHPt), clip(), endPath());
         rotateContent();
@@ -893,6 +1203,15 @@ export async function exportImposedPdf(params: {
     }
 
     onProgress?.(Math.round(((sIdx + 1) / totalSides) * 100));
+  }
+  } finally {
+    for (const task of loadedPdfJsTasks.values()) {
+      try {
+        await task.destroy();
+      } catch {
+        // ignore cleanup errors
+      }
+    }
   }
 
   return outPdf.save();

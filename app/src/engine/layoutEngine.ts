@@ -11,11 +11,70 @@ import {
   type ComputedCellPlacement,
   type ComputedSheetSide,
   type LayoutSettings,
+  type MarginsMm,
   type MeasurementUnit,
   type PageItem,
   type PageRotation,
   type SheetOrderMode,
 } from '@shared/models';
+
+export type DuplexFlipAxis = 'none' | 'horizontal' | 'vertical';
+
+/**
+ * Determines which sheet edge flips when Duplex is enabled:
+ * - 'horizontal': swaps Left & Right margins on Back/Even sides (Portrait + Long-Edge, Landscape + Short-Edge, or Booklet)
+ * - 'vertical': swaps Top & Bottom margins on Back/Even sides (Portrait + Short-Edge, or Landscape + Long-Edge)
+ */
+export function getDuplexFlipAxis(layout: LayoutSettings): DuplexFlipAxis {
+  const effectiveDuplex = layout.booklet?.enabled
+    ? layout.booklet.duplexMode
+    : layout.duplexMode;
+  if (effectiveDuplex === 'none') {
+    return 'none';
+  }
+  const isLandscape = Boolean(layout.booklet?.enabled) || layout.orientation === 'landscape';
+  const flipsHorizontally =
+    (isLandscape && effectiveDuplex === 'short-edge') ||
+    (!isLandscape && effectiveDuplex === 'long-edge');
+  return flipsHorizontally ? 'horizontal' : 'vertical';
+}
+
+/**
+ * Computes the physical sheet margins for Front (odd) and Back (even) sides,
+ * mirroring Left/Right (or Top/Bottom) on Back sides when Duplex is active.
+ */
+export function getEffectiveSideMarginsMm(
+  layout: LayoutSettings,
+  side: 'front' | 'back'
+): MarginsMm {
+  const base: MarginsMm = {
+    top: Math.max(0, layout.marginsMm.top),
+    right: Math.max(0, layout.marginsMm.right),
+    bottom: Math.max(0, layout.marginsMm.bottom),
+    left: Math.max(0, layout.marginsMm.left),
+  };
+  if (side !== 'back') {
+    return base;
+  }
+  const axis = getDuplexFlipAxis(layout);
+  if (axis === 'horizontal') {
+    return {
+      top: base.top,
+      right: base.left,
+      bottom: base.bottom,
+      left: base.right,
+    };
+  }
+  if (axis === 'vertical') {
+    return {
+      top: base.bottom,
+      right: base.right,
+      bottom: base.top,
+      left: base.left,
+    };
+  }
+  return base;
+}
 
 export function getSheetDimensionsMm(layout: LayoutSettings): {
   widthMm: number;
@@ -239,15 +298,16 @@ export function computeImpositionSheets(
     const isDuplex = layout.duplexMode !== 'none';
     const sheetNumber = isDuplex ? Math.floor(sideIdx / 2) + 1 : sideIdx + 1;
     const side: 'front' | 'back' = isDuplex && sideIdx % 2 === 1 ? 'back' : 'front';
+    const sideMargins = getEffectiveSideMarginsMm(layout, side);
 
     // First pass: calculate individual scale factors & rotations
     const rawPlacements = orderedGrid.map((coord, cellIndex) => {
       const entry = group[cellIndex] ?? null;
       const cellXMm =
-        layout.marginsMm.left +
+        sideMargins.left +
         coord.col * (cellWidthMm + Math.max(0, layout.horizontalGutterMm));
       const cellYMm =
-        layout.marginsMm.top +
+        sideMargins.top +
         coord.row * (cellHeightMm + Math.max(0, layout.verticalGutterMm));
 
       if (!entry) {
@@ -420,11 +480,33 @@ export function computeImpositionSheets(
       sideIndex: sideIdx + 1,
       widthMm: sheetW,
       heightMm: sheetH,
+      marginsMm: sideMargins,
       cells,
     });
   });
 
   return sheets;
+}
+
+/**
+ * Removes trailing auto-padded empty back sides added only for duplex pair completeness
+ * when printing or exporting PDF so odd-sided jobs do not eject a blank final sheet.
+ */
+export function stripTrailingEmptyDuplexSides(
+  sheets: ComputedSheetSide[],
+  duplexMode: LayoutSettings['duplexMode'],
+  hasSheetOverlay?: (side: ComputedSheetSide, originalTotalSides: number) => boolean
+): ComputedSheetSide[] {
+  if (duplexMode === 'none' || sheets.length <= 1) return sheets;
+  const originalTotal = sheets.length;
+  const trimmed = sheets.slice();
+  while (trimmed.length > 1) {
+    const last = trimmed[trimmed.length - 1];
+    if (last.cells.some((c) => c.page !== null)) break;
+    if (hasSheetOverlay?.(last, originalTotal)) break;
+    trimmed.pop();
+  }
+  return trimmed;
 }
 
 /**

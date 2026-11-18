@@ -18,6 +18,7 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import { PrinterRetryButton, PrinterServiceStatus } from './PrinterStatus';
 import { SettingsPresetPanel } from './SettingsPresets';
+import { PageSetupModal } from './PageSetupModal';
 import { computeCounterSummary } from '../engine/counterEngine';
 import {
   computeImpositionSheets,
@@ -1841,6 +1842,9 @@ export const ModalsAndToasts: React.FC = () => {
           </div>
         );
       })()}
+
+      {/* 9. FULL PAGE SETUP MODAL (Margins, Presets, Spine, Paper Size & Sheet) */}
+      <PageSetupModal />
 
       {/* NON-INTRUSIVE TOAST NOTIFICATIONS */}
       <div className="pointer-events-none fixed bottom-11 end-4 z-50 flex flex-col gap-2 max-w-sm">

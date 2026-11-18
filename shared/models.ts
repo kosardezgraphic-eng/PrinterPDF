@@ -234,6 +234,7 @@ export interface ComputedSheetSide {
   sideIndex: number; // 1-based sheet side index
   widthMm: number;
   heightMm: number;
+  marginsMm?: MarginsMm;
   cells: ComputedCellPlacement[];
 }
 

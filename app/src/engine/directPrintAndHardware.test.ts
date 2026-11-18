@@ -337,9 +337,10 @@ describe('direct print & printer hardware integration', () => {
     expect(req.duplexMode).toBe('short-edge');
     expect(req.tray).toBe('Tray 1');
     expect(req.paperSize).toBe('A4');
-    expect(sheetCount).toBeGreaterThanOrEqual(1);
+    expect(sheetCount).toBe(3);
     expect(pdfBytes).toBeInstanceOf(Uint8Array);
     expect((pdfBytes as Uint8Array).byteLength).toBeGreaterThan(100);
+    expect((await PDFDocument.load(pdfBytes as Uint8Array)).getPageCount()).toBe(3);
 
     const nextState = useAppStore.getState();
     expect(nextState.pendingDuplexPrint).toBeNull();

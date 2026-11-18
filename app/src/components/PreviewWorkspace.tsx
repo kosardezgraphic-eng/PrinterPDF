@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   UploadCloud,
   ChevronRight,
@@ -25,6 +26,7 @@ import { useAppStore, type PageEditScope } from '../store/useAppStore';
 import { PageCanvasCell, type CanvasTool } from './PageCanvasCell';
 import { PrinterRetryButton, PrinterServiceStatus } from './PrinterStatus';
 import { LayoutGuides, MeasurementTool } from './SheetTools';
+import { MarginPresetsMenu } from './MarginPresetsMenu';
 import { RulerGuideProvider, SheetRuler, GuidePaperRef, UserGuideLines } from './RulerGuides';
 import { TextOverlayLayer } from './TextOverlayLayer';
 import { hasImageTransfer, routeDroppedFiles } from '../engine/imageImport';
@@ -32,6 +34,8 @@ import { AspectCropControls } from './AspectCropControls';
 import { t } from '../i18n/translations';
 import {
   computeImpositionSheets,
+  getDuplexFlipAxis,
+  getEffectiveSideMarginsMm,
   sortCellsByLayer,
   convertMmToUnit,
 } from '../engine/layoutEngine';
@@ -105,6 +109,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     controlSpoolerJob,
     purgePrinterQueue,
     removeBatchJob,
+    openPageSetup,
   } = useAppStore();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -135,6 +140,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const [navigationTarget, setNavigationTarget] = useState<{pageId: string; sheetIndex: number; previewOnly: boolean} | null>(null);
   const [panning, setPanning] = useState(false);
   const [showPreflight, setShowPreflight] = useState(false);
+  const [sheetContextMenu, setSheetContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   // A file drag fires `dragover` on the element under the cursor every few milliseconds and a
   // `dragleave` on the workspace each time the pointer crosses into a child element. Driving the
@@ -303,6 +309,15 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   }, [currentOccurrenceKey]);
 
   useEffect(() => {
+    if (!sheetContextMenu) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSheetContextMenu(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [sheetContextMenu]);
+
+  useEffect(() => {
     if (activeGuideSheet === null) return;
     const dismiss = (event: PointerEvent) => {
       const target = event.target instanceof Element ? event.target : null;
@@ -385,10 +400,26 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     const bookletSpineWidthMm = layout.booklet?.enabled ? Math.max(0, layout.booklet.spineWidthMm) : 0;
     const activePrinterObj = printers.find((p) => p.name === selectedPrinterName);
     const minMargins = resolvePrinterMinMargins(printerMargins, activePrinterObj);
-    const marginTopMm = Math.max(minMargins?.top ?? 0, layout.marginsMm.top);
-    const marginRightMm = Math.max(minMargins?.right ?? 0, layout.marginsMm.right);
-    const marginBottomMm = Math.max(minMargins?.bottom ?? 0, layout.marginsMm.bottom);
-    const marginLeftMm = Math.max(minMargins?.left ?? 0, layout.marginsMm.left);
+    const flipAxis = getDuplexFlipAxis(layout);
+    const mapSheetSideToLayoutSide = (
+      side: 'left' | 'right' | 'top' | 'bottom',
+      axis = flipAxis,
+    ): 'left' | 'right' | 'top' | 'bottom' => {
+      if (sheetSide.side !== 'back') return side;
+      if (axis === 'horizontal') {
+        if (side === 'left') return 'right';
+        if (side === 'right') return 'left';
+      } else if (axis === 'vertical') {
+        if (side === 'top') return 'bottom';
+        if (side === 'bottom') return 'top';
+      }
+      return side;
+    };
+    const rawSideMargins = sheetSide.marginsMm ?? getEffectiveSideMarginsMm(layout, sheetSide.side);
+    const marginTopMm = Math.max(minMargins?.top ?? 0, minMargins?.[mapSheetSideToLayoutSide('top')] ?? 0, rawSideMargins.top);
+    const marginRightMm = Math.max(minMargins?.right ?? 0, minMargins?.[mapSheetSideToLayoutSide('right')] ?? 0, rawSideMargins.right);
+    const marginBottomMm = Math.max(minMargins?.bottom ?? 0, minMargins?.[mapSheetSideToLayoutSide('bottom')] ?? 0, rawSideMargins.bottom);
+    const marginLeftMm = Math.max(minMargins?.left ?? 0, minMargins?.[mapSheetSideToLayoutSide('left')] ?? 0, rawSideMargins.left);
 
     // Optional back-side sheet for Light Table Transparent Mode (J2)
     const pairedBackSide =
@@ -497,6 +528,15 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 if ((canvasTool === 'move' || canvasTool === 'layout') && !previewOnlyPage) {
                   e.stopPropagation(); setActiveGuideSheet(sheetSide.sideIndex - 1); setCurrentOccurrenceKey(null);
                 }
+              }}
+              onContextMenu={(e) => {
+                if (previewOnlyPage) return;
+                e.preventDefault();
+                e.stopPropagation();
+                setSheetContextMenu({
+                  x: Math.max(0, Math.min(window.innerWidth - 220, e.clientX)),
+                  y: Math.max(0, Math.min(window.innerHeight - 170, e.clientY)),
+                });
               }}
               onMouseMove={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
@@ -620,23 +660,37 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                               : dragState.startY - clientY;
                       const deltaMm = deltaPx / Math.max(0.01, basePxPerMm);
                       const base = dragState.baseLayout;
+                      const baseAxis = getDuplexFlipAxis(base);
+                      const sideMinMargins = minMargins
+                        ? {
+                            top: Math.max(minMargins.top, minMargins[mapSheetSideToLayoutSide('top', baseAxis)]),
+                            right: Math.max(minMargins.right, minMargins[mapSheetSideToLayoutSide('right', baseAxis)]),
+                            bottom: Math.max(minMargins.bottom, minMargins[mapSheetSideToLayoutSide('bottom', baseAxis)]),
+                            left: Math.max(minMargins.left, minMargins[mapSheetSideToLayoutSide('left', baseAxis)]),
+                          }
+                        : undefined;
                       if (!base.booklet?.enabled) {
                         const dxMm = side === 'left' || side === 'right' ? (clientX - dragState.startX) / Math.max(0.01, basePxPerMm) : 0;
                         const dyMm = side === 'top' || side === 'bottom' ? (clientY - dragState.startY) / Math.max(0.01, basePxPerMm) : 0;
-                        const moved = moveLayoutGuide(base, sheetSide, { type: 'margin', side }, dxMm, dyMm, minMargins);
+                        const effectiveBase: LayoutSettings = {
+                          ...base,
+                          marginsMm: getEffectiveSideMarginsMm(base, sheetSide.side),
+                        };
+                        const moved = moveLayoutGuide(effectiveBase, sheetSide, { type: 'margin', side }, dxMm, dyMm, sideMinMargins);
                         return Math.round(moved.marginsMm[side] * 10) / 10;
                       }
-                      const startMargin = base.marginsMm[side];
+                      const effectiveBaseMargins = getEffectiveSideMarginsMm(base, sheetSide.side);
+                      const startMargin = effectiveBaseMargins[side];
                       const spine = Math.max(0, base.booklet?.spineWidthMm ?? 0);
-                      const minMargin = Math.max(0, minMargins?.[side] ?? 0);
+                      const minMargin = Math.max(0, sideMinMargins?.[side] ?? 0);
                       const maxMargin =
                         side === 'left'
-                          ? Math.max(minMargin, sheetSide.widthMm - base.marginsMm.right - 10 - spine)
+                          ? Math.max(minMargin, sheetSide.widthMm - effectiveBaseMargins.right - 10 - spine)
                           : side === 'right'
-                            ? Math.max(minMargin, sheetSide.widthMm - base.marginsMm.left - 10 - spine)
+                            ? Math.max(minMargin, sheetSide.widthMm - effectiveBaseMargins.left - 10 - spine)
                             : side === 'top'
-                              ? Math.max(minMargin, sheetSide.heightMm - base.marginsMm.bottom - 10)
-                              : Math.max(minMargin, sheetSide.heightMm - base.marginsMm.top - 10);
+                              ? Math.max(minMargin, sheetSide.heightMm - effectiveBaseMargins.bottom - 10)
+                              : Math.max(minMargin, sheetSide.heightMm - effectiveBaseMargins.top - 10);
                       return Math.round(Math.max(minMargin, Math.min(maxMargin, startMargin + deltaMm)) * 10) / 10;
                     };
                     const isDraggingThisBand =
@@ -666,9 +720,10 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                           event.preventDefault();
                           event.stopPropagation();
                           const nextSideMargin = computeNextSideMargin(event.clientX, event.clientY, dragState);
+                          const targetSide = mapSheetSideToLayoutSide(side, getDuplexFlipAxis(dragState.baseLayout));
                           setDraftLayout({
                             ...dragState.baseLayout,
-                            marginsMm: { ...dragState.baseLayout.marginsMm, [side]: nextSideMargin },
+                            marginsMm: { ...dragState.baseLayout.marginsMm, [targetSide]: nextSideMargin },
                           });
                         }}
                         onPointerUp={event => {
@@ -681,8 +736,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                           if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture?.(event.pointerId);
                           setDraftLayout(null);
                           const nextSideMargin = computeNextSideMargin(event.clientX, event.clientY, dragState);
-                          if (nextSideMargin !== dragState.baseLayout.marginsMm[side]) {
-                            commitLayoutGuides({ marginsMm: { ...dragState.baseLayout.marginsMm, [side]: nextSideMargin } });
+                          const targetSide = mapSheetSideToLayoutSide(side, getDuplexFlipAxis(dragState.baseLayout));
+                          if (nextSideMargin !== dragState.baseLayout.marginsMm[targetSide]) {
+                            commitLayoutGuides({ marginsMm: { ...dragState.baseLayout.marginsMm, [targetSide]: nextSideMargin } });
                           }
                         }}
                         onPointerCancel={event => {
@@ -1124,6 +1180,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
           const page = pages.find(item => item.id === currentEditPageId && item.isHighlighted) ?? pages.find(item => item.isHighlighted);
           return !!page && applyAspectRatioCrop(page.id, editScope, ratio);
         }} />}
+        <MarginPresetsMenu compact disabled={!!previewOnlyPage} />
         <button type="button" disabled={!!previewOnlyPage || printerMargins.status !== 'available'} onClick={resetMarginsToPrinter}
           title={lang === 'fa' ? 'بازنشانی به حاشیه چاپگر انتخاب‌شده' : 'Reset to selected printer margins'}
           className="rounded bg-slate-800 px-2 py-1.5 hover:bg-slate-700 disabled:opacity-50">{lang === 'fa' ? 'بازنشانی حاشیه چاپگر' : 'Reset printer margins'}</button>
@@ -1907,6 +1964,68 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
         </div>
         );
       })()}
+
+      {sheetContextMenu &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[9999]"
+            onClick={() => setSheetContextMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setSheetContextMenu(null);
+            }}
+          >
+            <div
+              data-sheet-context-menu
+              role="menu"
+              dir={lang === 'fa' ? 'rtl' : 'ltr'}
+              style={{ position: 'fixed', left: sheetContextMenu.x, top: sheetContextMenu.y }}
+              onClick={(e) => e.stopPropagation()}
+              className="min-w-52 rounded-lg border border-slate-600 bg-slate-900 p-1 text-sm text-white shadow-xl"
+            >
+              <button
+                role="menuitem"
+                type="button"
+                disabled={printerMargins.status !== 'available'}
+                className="flex w-full items-center gap-2 rounded px-3 py-2 text-start hover:bg-slate-700 disabled:opacity-45 cursor-pointer"
+                onClick={() => {
+                  resetMarginsToPrinter();
+                  setSheetContextMenu(null);
+                }}
+              >
+                <RotateCcw className="h-3.5 w-3.5 text-amber-400 shrink-0" aria-hidden="true" />
+                <span>{lang === 'fa' ? 'بازنشانی به حاشیه پرینتر' : 'Reset printer margins'}</span>
+              </button>
+              <button
+                role="menuitem"
+                type="button"
+                className="flex w-full items-center gap-2 rounded px-3 py-2 text-start hover:bg-slate-700 cursor-pointer"
+                onClick={() => {
+                  fitPage();
+                  setSheetContextMenu(null);
+                }}
+              >
+                <Maximize2 className="h-3.5 w-3.5 text-slate-300 shrink-0" aria-hidden="true" />
+                <span>{lang === 'fa' ? 'جاگیری کامل در صفحه' : 'Fit page to view'}</span>
+              </button>
+              <div className="my-1 h-px bg-slate-700/80" />
+              <button
+                role="menuitem"
+                type="button"
+                data-context-action="page-setup"
+                className="flex w-full items-center gap-2 rounded px-3 py-2 text-start text-sky-300 hover:bg-slate-700 cursor-pointer"
+                onClick={() => {
+                  setSheetContextMenu(null);
+                  openPageSetup('margins');
+                }}
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>{lang === 'fa' ? 'تنظیمات صفحه...' : 'Page Setup...'}</span>
+              </button>
+            </div>
+          </div>,
+          document.body
+        )}
     </main>
   );
 };

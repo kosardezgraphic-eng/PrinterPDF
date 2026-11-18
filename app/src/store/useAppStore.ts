@@ -10,6 +10,7 @@ import type {
   DuplexMode,
   EffectsSettings,
   LayoutSettings,
+  MarginsMm,
   PageItem,
   PageOverlay,
   PageOverlayText,
@@ -60,6 +61,11 @@ import {
 } from '../engine/pdfService';
 import { clampMarginsToMin, resolvePrinterMinMargins } from '../engine/sheetInteraction';
 import {
+  BUILTIN_MARGIN_PRESETS_MM,
+  DEFAULT_LAST_CUSTOM_MARGINS_MM,
+  type MarginPresetId,
+} from '../engine/marginPresets';
+import {
   SHEET_DEFAULT_PRESET_ID,
   SHEET_DEFAULT_PRESET_SHORTCUT,
   STANDARD_PAPER_SIZES,
@@ -75,7 +81,7 @@ import {
 import { defaultShapeStyle, normalizeShapeStyle, shapeCapabilities } from '../engine/shapes';
 import { isImageFile, measureImage, readFileAsDataUrl } from '../engine/imageImport';
 import { centeredAspectCrop, cropToMm, IDENTITY_TRANSFORM, type Insets } from '../engine/pageGeometry';
-import { computeImpositionSheets, getSheetDimensionsMm, sortCellsByLayer } from '../engine/layoutEngine';
+import { computeImpositionSheets, getSheetDimensionsMm, sortCellsByLayer, stripTrailingEmptyDuplexSides } from '../engine/layoutEngine';
 import { ipcBridge, selectOptimalPrinter } from '../engine/ipcBridge';
 import { adjustScriptRanges, setScriptRange } from '../engine/textFormatting';
 
@@ -302,7 +308,10 @@ interface AppState {
   showSettingsModal: boolean;
   showManualDuplexModal: boolean;
   showSplitModal: boolean;
+  showPageSetupModal: boolean;
+  pageSetupInitialTab: 'margins' | 'paper';
   showOnboardingTour: boolean;
+  lastCustomMarginsMm: MarginsMm | null;
   pendingDuplexPrint: PrintJobRequest | null;
   printProgress: PrintProgressState | null;
 
@@ -365,6 +374,7 @@ interface AppState {
   updateLayout: (patch: Partial<LayoutSettings>, recordUndo?: boolean) => void;
   setNUpMatrix: (rows: number, cols: number, placementMode?: LayoutSettings['placementMode']) => void;
   updateMargins: (patch: Partial<LayoutSettings['marginsMm']>) => void;
+  applyMarginPreset: (presetId: MarginPresetId) => void;
   addRulerGuide: (guide: RulerGuide) => void;
   moveRulerGuide: (id: string, positionMm: number) => void;
   removeRulerGuide: (id: string) => void;
@@ -453,9 +463,11 @@ interface AppState {
       | 'settings'
       | 'manualDuplex'
       | 'split'
+      | 'pageSetup'
       | 'tour',
     open: boolean
   ) => void;
+  openPageSetup: (tab?: 'margins' | 'paper') => void;
   addToast: (toast: Omit<ToastNotification, 'id'>) => void;
   dismissToast: (id: string) => void;
 
@@ -674,7 +686,10 @@ export const useAppStore = create<AppState>((set, get) => {
     showSettingsModal: false,
     showManualDuplexModal: false,
     showSplitModal: false,
+    showPageSetupModal: false,
+    pageSetupInitialTab: 'margins',
     showOnboardingTour: false,
+    lastCustomMarginsMm: null,
     pendingDuplexPrint: null,
     printProgress: null,
 
@@ -1540,6 +1555,9 @@ export const useAppStore = create<AppState>((set, get) => {
 
         return {
           layout: synced.layout,
+          ...(nextPatch.marginsMm && synced.layout.marginMode !== 'printer'
+            ? { lastCustomMarginsMm: synced.layout.marginsMm }
+            : {}),
           ...(nextPrinters !== state.printers ? { printers: nextPrinters } : {}),
           ...(preserveBookletPreview ? {} : { activeSheetIndex: 0 }),
         };
@@ -1620,9 +1638,22 @@ export const useAppStore = create<AppState>((set, get) => {
         const nextPatch = patch.marginsMm
           ? { ...patch, marginsMm: clampMarginsToMin(patch.marginsMm, minMargins) }
           : patch;
+        const marginsChanged =
+          !!nextPatch.marginsMm &&
+          Object.keys(nextPatch.marginsMm).some(
+            (key) =>
+              nextPatch.marginsMm![key as keyof MarginsMm] !==
+              state.layout.marginsMm[key as keyof MarginsMm]
+          );
         return {
-          layout: { ...state.layout, ...nextPatch,
-            ...(nextPatch.marginsMm && Object.keys(nextPatch.marginsMm).some(key => nextPatch.marginsMm![key as keyof typeof nextPatch.marginsMm] !== state.layout.marginsMm[key as keyof typeof state.layout.marginsMm]) ? {marginMode:'custom' as const} : {}) },
+          layout: {
+            ...state.layout,
+            ...nextPatch,
+            ...(marginsChanged ? { marginMode: 'custom' as const } : {}),
+          },
+          ...(marginsChanged && nextPatch.marginsMm
+            ? { lastCustomMarginsMm: nextPatch.marginsMm }
+            : {}),
         };
       });
       pushUndo('تغییر حاشیه و فاصله‌ها', 'Adjust margins and gutters', before, captureSnapshot(get()));
@@ -1646,9 +1677,41 @@ export const useAppStore = create<AppState>((set, get) => {
             marginMode: 'custom',
             marginsMm: nextMargins,
           },
+          lastCustomMarginsMm: nextMargins,
         };
       });
       pushUndo('تغییر حاشیه‌ها', 'Update margins', before, captureSnapshot(get()));
+    },
+
+    applyMarginPreset: (presetId) => {
+      if (presetId === 'hardware') {
+        get().resetMarginsToPrinter();
+        return;
+      }
+      const state = get();
+      const before = captureSnapshot(state);
+      const activePrinter = state.printers.find((p) => p.name === state.selectedPrinterName);
+      const minMargins = resolvePrinterMinMargins(state.printerMargins, activePrinter);
+      const rawMargins =
+        presetId === 'last-custom'
+          ? state.lastCustomMarginsMm ?? DEFAULT_LAST_CUSTOM_MARGINS_MM
+          : BUILTIN_MARGIN_PRESETS_MM[presetId].marginsMm;
+      const nextMargins = clampMarginsToMin(rawMargins, minMargins);
+      set({
+        layout: {
+          ...state.layout,
+          marginMode: 'custom',
+          marginsMm: nextMargins,
+        },
+      });
+      const label =
+        presetId === 'last-custom'
+          ? { fa: 'اعمال آخرین تنظیمات دلخواه حاشیه', en: 'Apply Last Custom Margins' }
+          : {
+              fa: `اعمال پریست حاشیه ${BUILTIN_MARGIN_PRESETS_MM[presetId].titleFa}`,
+              en: `Apply ${BUILTIN_MARGIN_PRESETS_MM[presetId].titleEn} Margins`,
+            };
+      pushUndo(label.fa, label.en, before, captureSnapshot(get()));
     },
 
     refreshPrinterMargins: () => refreshPrinterMargins(),
@@ -1672,7 +1735,11 @@ export const useAppStore = create<AppState>((set, get) => {
     updateEffects: (patch, recordUndo = false) => {
       const before = captureSnapshot(get());
       set((state) => ({
-        effects: { ...state.effects, ...patch },
+        effects: {
+          ...state.effects,
+          ...patch,
+          enabled: patch.enabled !== undefined ? patch.enabled : true,
+        },
       }));
       if (recordUndo) {
         pushUndo('تغییر افکت‌های تصویر', 'Update visual effects', before, captureSnapshot(get()));
@@ -2571,9 +2638,13 @@ export const useAppStore = create<AppState>((set, get) => {
       const runId = ++printRunSequence;
       activePrintRunId = runId;
       activeSpoolerJob = null;
+      const rawEstimatedSheets = computeImpositionSheets(targetPages, printLayout);
+      const effectiveEstimatedDuplex = printLayout.booklet?.enabled
+        ? printLayout.booklet.duplexMode
+        : printLayout.duplexMode;
       const estimatedSheets = Math.max(
         1,
-        computeImpositionSheets(targetPages, printLayout).length
+        stripTrailingEmptyDuplexSides(rawEstimatedSheets, effectiveEstimatedDuplex).length
       );
 
       set({
@@ -3039,7 +3110,11 @@ export const useAppStore = create<AppState>((set, get) => {
       if (modal === 'settings') set({ showSettingsModal: open });
       if (modal === 'manualDuplex') set({ showManualDuplexModal: open });
       if (modal === 'split') set({ showSplitModal: open });
+      if (modal === 'pageSetup') set({ showPageSetupModal: open });
       if (modal === 'tour') set({ showOnboardingTour: open });
+    },
+    openPageSetup: (tab = 'margins') => {
+      set({ pageSetupInitialTab: tab, showPageSetupModal: true });
     },
 
     addToast: (toast) => {
@@ -3127,7 +3202,7 @@ function refreshPrinterMargins() {
               layout: {
                 ...current.layout,
                 marginsMm: current.layout.marginMode === 'printer'
-                  ? { ...safe.marginsMm }
+                  ? { ...(minMargins ?? safe.marginsMm) }
                   : clampMarginsToMin(current.layout.marginsMm, minMargins),
               },
             }

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { RotateCw } from 'lucide-react';
+import { RotateCw, SlidersHorizontal } from 'lucide-react';
 import type { ComputedCellPlacement, PageTransform } from '@shared/models';
 import type { PageEditScope } from '../store/useAppStore';
 import { dragCrop, IDENTITY_TRANSFORM, normalizeAngle, pageCropFractions, resizeRect, resizeProportionally, rotateVector, rotationFromPointer, type Handle, type Rect } from '../engine/pageGeometry';
@@ -49,6 +49,7 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
   const applyPageGeometry = useAppStore(state => state.applyPageGeometry);
   const applyCellTransform = useAppStore(state => state.applyCellTransform);
   const reorderCellLayer = useAppStore(state => state.reorderCellLayer);
+  const openPageSetup = useAppStore(state => state.openPageSetup);
   const crispEnabled = useAppStore(state => state.settings.previewFidelity === 'crisp');
   const page = cell.page!, occurrenceKey = cell.occurrenceKey!;
   const interaction = useRef<Gesture | null>(null);
@@ -144,7 +145,7 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
       else applyPageGeometry(page.id,scope,{kind:'transform',transform});
     }
   };
-  const openMenu = (x:number,y:number) => { onCurrentPage(page.id,true,occurrenceKey); setMenu({x:Math.max(0,Math.min(window.innerWidth-205,x)),y:Math.max(0,Math.min(window.innerHeight-190,y))}); };
+  const openMenu = (x:number,y:number) => { onCurrentPage(page.id,true,occurrenceKey); setMenu({x:Math.max(0,Math.min(window.innerWidth-215,x)),y:Math.max(0,Math.min(window.innerHeight-240,y))}); };
   const consumeTouchClick = (event: React.MouseEvent<HTMLElement>) => {
     const point = suppressTouchClick.current;
     if (!point || Math.hypot(event.clientX - point.x, event.clientY - point.y) > 12) return false;
@@ -261,6 +262,13 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
       <div data-layer-menu role="menu" style={{position:'fixed',left:menu.x,top:menu.y}} className="min-w-48 rounded-lg border border-slate-600 bg-slate-900 p-1 text-sm text-white shadow-xl" onClick={e => e.stopPropagation()}>
         {menuActions.map(action => <button role="menuitem" key={action.id} type="button" className="block w-full rounded px-3 py-2 text-start hover:bg-slate-700"
           onClick={() => {reorderCellLayer(sheetIndex,occurrenceKey,action.id);setMenu(null);}}>{action.label}</button>)}
+        <div className="my-1 h-px bg-slate-700/80" />
+        <button role="menuitem" type="button" data-context-action="page-setup"
+          className="flex w-full items-center gap-2 rounded px-3 py-2 text-start text-sky-300 hover:bg-slate-700"
+          onClick={() => { setMenu(null); openPageSetup('margins'); }}>
+          <SlidersHorizontal className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>{fa ? 'تنظیمات صفحه...' : 'Page Setup...'}</span>
+        </button>
       </div>
     </div>,document.body)}
   </div>;

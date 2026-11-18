@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { MatrixSizeFields } from './MatrixSizeFields';
 import { SettingsPresetMenu } from './SettingsPresets';
+import { MarginPresetsMenu } from './MarginPresetsMenu';
 import { ShapePicker } from './ShapeControlPanel';
 import { useAppStore, type RibbonTabId } from '../store/useAppStore';
 import { resolvePrinterMinMargins } from '../engine/sheetInteraction';
@@ -415,6 +416,7 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
                   {lang === 'fa' ? 'حاشیه، فاصله (Gutter) و مقیاس (D3)' : 'Margins, Gutter & Scale'}
                 </span>
                 <div className="flex items-center gap-1.5">
+                  <MarginPresetsMenu compact />
                   {(['top', 'right', 'bottom', 'left'] as const).map((side) => {
                     const activePrinterObj = printers.find((p) => p.name === selectedPrinterName);
                     const minSide = Math.max(0, resolvePrinterMinMargins(printerMargins, activePrinterObj)?.[side] ?? 0);

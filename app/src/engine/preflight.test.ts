@@ -8,7 +8,7 @@ it('identifies missing sources, blank pages, overflowing cells and effects not e
   const pages = [{ id: 'p', documentId: 'missing', sourcePageNumber: 1, selectedForPrint: true, isBlankPage: true,
     widthMm: 210, heightMm: 297, rotation: 0 } as PageItem];
   const layout = { ...DEFAULT_LAYOUT, marginsMm: { top: 10, bottom: 10, left: 250, right: 10 } };
-  const issues = checkPreflight(pages, [], computeImpositionSheets(pages, layout), { ...DEFAULT_EFFECTS, grayscale: true });
+  const issues = checkPreflight(pages, [], computeImpositionSheets(pages, layout), { ...DEFAULT_EFFECTS, sharpness: 1 });
   expect(issues.map(i => i.code)).toEqual(expect.arrayContaining(['missing-source', 'empty-page', 'out-of-bounds', 'effects-not-exported']));
   expect(checkPreflight([], [], [], DEFAULT_EFFECTS)[0].code).toBe('no-pages');
 });

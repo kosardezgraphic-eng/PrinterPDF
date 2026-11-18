@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PageItem } from '@shared/models';
 import { DEFAULT_LAYOUT, useAppStore } from '../store/useAppStore';
-import { computeImpositionSheets } from './layoutEngine';
+import { computeImpositionSheets, getDuplexFlipAxis, getEffectiveSideMarginsMm } from './layoutEngine';
 import { clampMarginsToMin, measurement, measureEndpoint, moveLayoutGuide, resolvePrinterMinMargins } from './sheetInteraction';
 
 const layout = { ...DEFAULT_LAYOUT, paperSize:'Custom' as const, customWidthMm:200, customHeightMm:300,
@@ -86,5 +86,52 @@ describe('sheet guides and ruler', () => {
     expect(useAppStore.getState().layout.orientation).toBe('portrait');
     useAppStore.getState().undo();
     expect(computeImpositionSheets(useAppStore.getState().pages,useAppStore.getState().layout)[0].cells[0].effectiveRotation).toBe(90);
+  });
+
+  it('mirrors asymmetric margins on Back (even) sheets according to duplex flip axis', () => {
+    const asymmetric = { top: 20, right: 15, bottom: 25, left: 30 };
+    const base = {
+      ...DEFAULT_LAYOUT,
+      paperSize: 'A4' as const,
+      rows: 1,
+      cols: 1,
+      marginsMm: asymmetric,
+    };
+    const pages2: PageItem[] = [
+      { ...page, id: 'p1', sourcePageNumber: 1 },
+      { ...page, id: 'p2', sourcePageNumber: 2 },
+    ];
+
+    // Simplex keeps all sides exact
+    expect(getDuplexFlipAxis({ ...base, duplexMode: 'none' })).toBe('none');
+    expect(getEffectiveSideMarginsMm({ ...base, duplexMode: 'none' }, 'back')).toEqual(asymmetric);
+
+    // Portrait + long-edge => horizontal flip (Left <-> Right swapped on Back)
+    const pLong = { ...base, orientation: 'portrait' as const, duplexMode: 'long-edge' as const };
+    expect(getDuplexFlipAxis(pLong)).toBe('horizontal');
+    const sheetsPLong = computeImpositionSheets(pages2, pLong);
+    expect(sheetsPLong).toHaveLength(2);
+    expect(sheetsPLong[0].side).toBe('front');
+    expect(sheetsPLong[0].marginsMm).toEqual(asymmetric);
+    expect(sheetsPLong[0].cells[0].cellXMm).toBe(30);
+    expect(sheetsPLong[1].side).toBe('back');
+    expect(sheetsPLong[1].marginsMm).toEqual({ top: 20, right: 30, bottom: 25, left: 15 });
+    expect(sheetsPLong[1].cells[0].cellXMm).toBe(15);
+
+    // Landscape + short-edge (including Booklet) => horizontal flip (Left <-> Right swapped on Back)
+    const lShort = { ...base, orientation: 'landscape' as const, duplexMode: 'short-edge' as const };
+    expect(getDuplexFlipAxis(lShort)).toBe('horizontal');
+    expect(getEffectiveSideMarginsMm(lShort, 'back')).toEqual({ top: 20, right: 30, bottom: 25, left: 15 });
+
+    // Portrait + short-edge and Landscape + long-edge => vertical flip (Top <-> Bottom swapped on Back)
+    const pShort = { ...base, orientation: 'portrait' as const, duplexMode: 'short-edge' as const };
+    expect(getDuplexFlipAxis(pShort)).toBe('vertical');
+    const sheetsPShort = computeImpositionSheets(pages2, pShort);
+    expect(sheetsPShort[1].marginsMm).toEqual({ top: 25, right: 15, bottom: 20, left: 30 });
+    expect(sheetsPShort[1].cells[0].cellYMm).toBe(25);
+
+    const lLong = { ...base, orientation: 'landscape' as const, duplexMode: 'long-edge' as const };
+    expect(getDuplexFlipAxis(lLong)).toBe('vertical');
+    expect(getEffectiveSideMarginsMm(lLong, 'back')).toEqual({ top: 25, right: 15, bottom: 20, left: 30 });
   });
 });

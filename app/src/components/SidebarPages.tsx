@@ -15,6 +15,7 @@ import {
   Contrast,
   Scissors,
   Layers,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { t } from '../i18n/translations';
@@ -55,6 +56,7 @@ export const SidebarPages: React.FC = () => {
     makePagesArray,
     insertBlankPagesAfter,
     deletePages,
+    openPageSetup,
     removeDocument,
     toggleDocumentCollapse,
     togglePagesInvertOverride,
@@ -522,7 +524,7 @@ export const SidebarPages: React.FC = () => {
         <div
           data-page-context-menu
           style={{
-            top: Math.max(8, Math.min(window.innerHeight - 330, contextMenu.y)),
+            top: Math.max(8, Math.min(window.innerHeight - 375, contextMenu.y)),
             left: Math.max(8, Math.min(window.innerWidth - 232, contextMenu.x)),
             maxHeight: 'calc(100vh - 16px)',
           }}
@@ -660,6 +662,19 @@ export const SidebarPages: React.FC = () => {
             <span>
               {lang === 'fa' ? `حذف صفحات انتخابی (${contextLabel})` : `Delete the selection (${contextLabel})`}
             </span>
+          </button>
+          <div className="my-1 h-px bg-slate-800" />
+          <button
+            type="button"
+            data-context-action="page-setup"
+            onClick={() => {
+              setContextMenu(null);
+              openPageSetup('margins');
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-sky-300 hover:bg-slate-800 cursor-pointer"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{lang === 'fa' ? 'تنظیمات صفحه...' : 'Page Setup...'}</span>
           </button>
         </div>
       )}

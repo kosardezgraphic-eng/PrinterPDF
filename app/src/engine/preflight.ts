@@ -20,8 +20,7 @@ export function checkPreflight(pages: PageItem[], documents: SourceDocument[], s
     return bounds.x < -0.01 || bounds.y < -0.01 || bounds.x + bounds.width > sheet.widthMm + 0.01 || bounds.y + bounds.height > sheet.heightMm + 0.01;
   })).length;
   if (out) issues.push({ code: 'out-of-bounds', severity: 'warning', count: out });
-  if (effects.enabled && (effects.grayscale || effects.blackAndWhite || effects.blackText || effects.brightness !== 0 ||
-    effects.contrast !== 0 || effects.gamma !== 1 || effects.sharpness !== 0)) {
+  if (effects.enabled && effects.sharpness !== 0) {
     issues.push({ code: 'effects-not-exported', severity: 'warning', count: 0 });
   }
   return issues;

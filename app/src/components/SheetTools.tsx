@@ -1,6 +1,6 @@
 import { useId, useRef, useState, type PointerEvent } from 'react';
 import type { ComputedSheetSide, LayoutSettings, MarginsMm, MeasurementUnit } from '@shared/models';
-import { convertMmToUnit } from '../engine/layoutEngine';
+import { convertMmToUnit, getDuplexFlipAxis, getEffectiveSideMarginsMm } from '../engine/layoutEngine';
 import { clampMarginsToMin, measurement, measureEndpoint, moveLayoutGuide, type Guide, type Point } from '../engine/sheetInteraction';
 
 interface GuideProps {
@@ -14,8 +14,20 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit
   const dragging = useRef<{ pointer: number; x: number; y: number; scaleX: number; scaleY: number; guide: Guide; base: LayoutSettings } | null>(null);
   const [activeGuideLabel, setActiveGuideLabel] = useState<string | null>(null);
   const rectRef = useRef<HTMLDivElement>(null);
+  const effectiveMinMarginsForSide = (source: LayoutSettings): MarginsMm | undefined => {
+    if (!minMargins) return undefined;
+    if (sheet.side !== 'back') return minMargins;
+    const mirrored = getEffectiveSideMarginsMm({ ...source, marginsMm: minMargins }, 'back');
+    return {
+      top: Math.max(minMargins.top, mirrored.top),
+      right: Math.max(minMargins.right, mirrored.right),
+      bottom: Math.max(minMargins.bottom, mirrored.bottom),
+      left: Math.max(minMargins.left, mirrored.left),
+    };
+  };
   const toEffectiveLayout = (source: LayoutSettings): LayoutSettings => {
-    const clampedMargins = clampMarginsToMin(source.marginsMm, minMargins);
+    const sideMin = effectiveMinMarginsForSide(source);
+    const clampedMargins = clampMarginsToMin(getEffectiveSideMarginsMm(source, sheet.side), sideMin);
     if (!source.booklet?.enabled) {
       return { ...source, marginsMm: clampedMargins };
     }
@@ -43,15 +55,38 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit
     const d = dragging.current;
     if (!d || d.pointer !== e.pointerId) return null;
     const baseEffective = toEffectiveLayout(d.base);
+    const sideMin = effectiveMinMarginsForSide(d.base);
     const dxMm = (e.clientX - d.x) * d.scaleX;
     const dyMm = (e.clientY - d.y) * d.scaleY;
-    const moved = moveLayoutGuide(baseEffective, sheet, d.guide, dxMm, dyMm, minMargins);
-    if (!d.base.booklet?.enabled) return moved;
+    const moved = moveLayoutGuide(baseEffective, sheet, d.guide, dxMm, dyMm, sideMin);
+    if (!d.base.booklet?.enabled) {
+      return {
+        ...moved,
+        marginsMm: getEffectiveSideMarginsMm({ ...d.base, marginsMm: moved.marginsMm }, sheet.side),
+      };
+    }
     if (d.guide.type === 'margin') {
       const nextSide = Math.max(0, Math.round(moved.marginsMm[d.guide.side] * 10) / 10);
+      const axis = getDuplexFlipAxis(d.base);
+      const targetSide =
+        sheet.side !== 'back'
+          ? d.guide.side
+          : axis === 'horizontal'
+            ? d.guide.side === 'left'
+              ? 'right'
+              : d.guide.side === 'right'
+                ? 'left'
+                : d.guide.side
+            : axis === 'vertical'
+              ? d.guide.side === 'top'
+                ? 'bottom'
+                : d.guide.side === 'bottom'
+                  ? 'top'
+                  : d.guide.side
+              : d.guide.side;
       return {
         ...d.base,
-        marginsMm: { ...d.base.marginsMm, [d.guide.side]: nextSide },
+        marginsMm: { ...d.base.marginsMm, [targetSide]: nextSide },
       };
     }
     const nextSpine = Math.max(0, Math.min(30, Math.round(moved.horizontalGutterMm * 10) / 10));

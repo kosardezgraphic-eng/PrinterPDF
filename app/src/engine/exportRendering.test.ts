@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createCanvas } from '@napi-rs/canvas';
+import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, PDFStream, decodePDFRawStream, rgb } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PageItem, SourceDocument } from '@shared/models';
@@ -19,9 +19,24 @@ async function exportOne(doc: SourceDocument, rotation: PageItem['rotation']) {
   return exportImposedPdf({ documents: [doc], pages: [page(rotation)], layout, effects: { ...DEFAULT_EFFECTS, enabled:false },
     watermark: { ...getDefaultWatermarkSettings(), enabled:false }, pageNumbering: { ...getDefaultPageNumberSettings(), enabled:false }, userName:'test' });
 }
+class NodeTestCanvasFactory {
+  create(width: number, height: number) {
+    const canvas = createCanvas(Math.max(1, Math.ceil(width)), Math.max(1, Math.ceil(height)));
+    return { canvas, context: canvas.getContext('2d') };
+  }
+  reset(pair: { canvas: ReturnType<typeof createCanvas> }, width: number, height: number) {
+    pair.canvas.width = Math.max(1, Math.ceil(width));
+    pair.canvas.height = Math.max(1, Math.ceil(height));
+  }
+  destroy(pair: { canvas: unknown; context: unknown }) {
+    pair.canvas = null;
+    pair.context = null;
+  }
+}
+
 async function render(bytes: Uint8Array) {
   (globalThis as unknown as { pdfjsWorker: unknown }).pdfjsWorker = await import('pdfjs-dist/legacy/build/pdf.worker.mjs');
-  const task = pdfjs.getDocument({ data: new Uint8Array(bytes) });
+  const task = pdfjs.getDocument({ data: new Uint8Array(bytes), CanvasFactory: NodeTestCanvasFactory as never });
   try {
     const pdf = await task.promise; const pdfPage = await pdf.getPage(1); const viewport = pdfPage.getViewport({scale: 1});
     const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
@@ -386,4 +401,196 @@ describe('real output rendering', () => {
     }finally{vi.unstubAllGlobals();}
   });
 
+class TestOffscreenCanvas {
+  private canvas;
+  constructor(width: number, height: number) { this.canvas = createCanvas(width, height); }
+  get width() { return this.canvas.width; }
+  set width(value: number) { this.canvas.width = value; }
+  get height() { return this.canvas.height; }
+  set height(value: number) { this.canvas.height = value; }
+  getContext() { return this.canvas.getContext('2d'); }
+  async convertToBlob() { return new Blob([new Uint8Array(await this.canvas.encode('png'))], { type: 'image/png' }); }
+}
+
+  it('applies brightness, grayscale, 1-bit B&W threshold, and combined invert to exported images', async () => {
+    // Left half light gray (200,200,200), right half dark red (180,20,20) whose luminance is ~56
+    const srcCanvas = createCanvas(100, 100);
+    const srcCtx = srcCanvas.getContext('2d');
+    srcCtx.fillStyle = 'rgb(200, 200, 200)';
+    srcCtx.fillRect(0, 0, 50, 100);
+    srcCtx.fillStyle = 'rgb(180, 20, 20)';
+    srcCtx.fillRect(50, 0, 50, 100);
+    const pngBytes = new Uint8Array(await srcCanvas.encode('png'));
+    const doc = { id: 'img-doc', fileType: 'image', mimeType: 'image/png', rawBytes: pngBytes } as SourceDocument;
+    const imgPage: PageItem = { ...page(0), documentId: 'img-doc', widthMm: 100 * ptToMm, heightMm: 100 * ptToMm };
+
+    vi.stubGlobal('OffscreenCanvas', TestOffscreenCanvas);
+    vi.stubGlobal('createImageBitmap', async (blob: Blob) => {
+      const img = await loadImage(Buffer.from(await blob.arrayBuffer()));
+      return Object.assign(img, { close: () => {} });
+    });
+
+    try {
+      // 1. Grayscale + brightness boost on dark red
+      const grayBytes = await exportImposedPdf({
+        documents: [doc],
+        pages: [imgPage],
+        layout,
+        effects: { ...DEFAULT_EFFECTS, enabled: true, grayscale: true, brightness: 20 },
+        watermark: { ...getDefaultWatermarkSettings(), enabled: false },
+        pageNumbering: { ...getDefaultPageNumberSettings(), enabled: false },
+        userName: 'test',
+      });
+      const grayImg = await render(grayBytes);
+      const [lr, lg, lb] = pixel(grayImg, 25, 50);
+      const [rr, rg, rb] = pixel(grayImg, 75, 50);
+      expect(lr).toBe(lg);
+      expect(lg).toBe(lb);
+      expect(lr).toBeGreaterThan(240); // 200 + 51 = 251 -> clamped near 255
+      expect(rr).toBe(rg);
+      expect(rg).toBe(rb);
+      expect(rr).toBeGreaterThan(95); // lifted above raw ~56 lum
+
+      // 2. 1-Bit B&W Threshold (threshold: 128) -> left becomes pure white, right becomes pure black
+      const bwBytes = await exportImposedPdf({
+        documents: [doc],
+        pages: [imgPage],
+        layout,
+        effects: { ...DEFAULT_EFFECTS, enabled: true, blackAndWhite: true, threshold: 128 },
+        watermark: { ...getDefaultWatermarkSettings(), enabled: false },
+        pageNumbering: { ...getDefaultPageNumberSettings(), enabled: false },
+        userName: 'test',
+      });
+      const bwImg = await render(bwBytes);
+      expect(pixel(bwImg, 25, 50)).toEqual([255, 255, 255]);
+      expect(pixel(bwImg, 75, 50)).toEqual([0, 0, 0]);
+
+      // 3. Threshold + Invert must not double-invert: left becomes pure black, right becomes pure white
+      const bwInvBytes = await exportImposedPdf({
+        documents: [doc],
+        pages: [imgPage],
+        layout,
+        effects: { ...DEFAULT_EFFECTS, enabled: true, blackAndWhite: true, threshold: 128, invert: true },
+        watermark: { ...getDefaultWatermarkSettings(), enabled: false },
+        pageNumbering: { ...getDefaultPageNumberSettings(), enabled: false },
+        userName: 'test',
+      });
+      const bwInvImg = await render(bwInvBytes);
+      expect(pixel(bwInvImg, 25, 50)).toEqual([0, 0, 0]);
+      expect(pixel(bwInvImg, 75, 50)).toEqual([255, 255, 255]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('applies B&W threshold, contrast, scope, and per-page overrides to PDF pages', async () => {
+    const source = await PDFDocument.create();
+    // Page 1: left half dark green (0, 100, 0 -> lum ~71), right half light yellow (240, 240, 180 -> lum ~235)
+    const p1 = source.addPage([100, 100]);
+    p1.drawRectangle({ x: 0, y: 0, width: 50, height: 100, color: rgb(0, 100 / 255, 0) });
+    p1.drawRectangle({ x: 50, y: 0, width: 50, height: 100, color: rgb(240 / 255, 240 / 255, 180 / 255) });
+    // Page 2: bright red (255, 0, 0)
+    const p2 = source.addPage([100, 100]);
+    p2.drawRectangle({ x: 0, y: 0, width: 100, height: 100, color: rgb(1, 0, 0) });
+
+    const doc = { id: 'd', fileType: 'pdf', rawBytes: await source.save() } as SourceDocument;
+    const pages: PageItem[] = [
+      { ...page(0), id: 'p1', sourcePageNumber: 1, widthMm: 100 * ptToMm, isHighlighted: true },
+      { ...page(0), id: 'p2', sourcePageNumber: 2, widthMm: 100 * ptToMm, isHighlighted: false },
+    ];
+
+    vi.stubGlobal('OffscreenCanvas', TestOffscreenCanvas);
+
+    try {
+      // Global effects scoped to 'selected' (p1 highlighted, p2 not highlighted -> p2 stays pure red)
+      const bytes = await exportImposedPdf({
+        documents: [doc],
+        pages,
+        layout: { ...layout, orientation: 'landscape' as const, cols: 2, rows: 1, customWidthMm: 200 * ptToMm, sheetOrder: 'ltr' },
+        effects: { ...DEFAULT_EFFECTS, enabled: true, scope: 'selected', blackAndWhite: true, threshold: 135 },
+        watermark: { ...getDefaultWatermarkSettings(), enabled: false },
+        pageNumbering: { ...getDefaultPageNumberSettings(), enabled: false },
+        userName: 'test',
+      });
+      const outImg = await render(bytes);
+      expect(pixel(outImg, 25, 50)).toEqual([0, 0, 0]);
+      expect(pixel(outImg, 75, 50)).toEqual([255, 255, 255]);
+      expect(pixel(outImg, 150, 50)).toEqual([255, 0, 0]);
+
+      // Per-page override grayscale on unhighlighted p2 even when global effects are disabled
+      const overrideBytes = await exportImposedPdf({
+        documents: [doc],
+        pages: [
+          { ...pages[0], isHighlighted: false },
+          { ...pages[1], overrides: { grayscale: true } },
+        ],
+        layout: { ...layout, orientation: 'landscape' as const, cols: 2, rows: 1, customWidthMm: 200 * ptToMm, sheetOrder: 'ltr' },
+        effects: { ...DEFAULT_EFFECTS, enabled: false },
+        watermark: { ...getDefaultWatermarkSettings(), enabled: false },
+        pageNumbering: { ...getDefaultPageNumberSettings(), enabled: false },
+        userName: 'test',
+      });
+      const ovImg = await render(overrideBytes);
+      // p1 untouched (dark green)
+      expect(pixel(ovImg, 25, 50)).toEqual([0, 100, 0]);
+      // p2 turned grayscale (~54, 54, 54 from red 255*0.2126)
+      const [pr, pg, pb] = pixel(ovImg, 150, 50);
+      expect(pr).toBe(pg);
+      expect(pg).toBe(pb);
+      expect(pr).toBeGreaterThan(45);
+      expect(pr).toBeLessThan(65);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('omits trailing auto-padded duplex blank pages in export/print while preserving explicit blank pages', async () => {
+    const source = await PDFDocument.create();
+    for (let i = 0; i < 3; i++) {
+      source.addPage([100, 100]).drawRectangle({ x: 0, y: 0, width: 100, height: 100, color: rgb(1, 0, 0) });
+    }
+    const doc = { id: 'd', fileType: 'pdf', rawBytes: await source.save() } as SourceDocument;
+    const threePages = [1, 2, 3].map((n) => ({
+      ...page(0),
+      id: `p${n}`,
+      sourcePageNumber: n,
+      widthMm: 100 * ptToMm,
+      heightMm: 100 * ptToMm,
+    }));
+
+    // 3 pages with duplex long-edge + watermark/pageNumbering must export 3 pages (not 4 with a blank last page)
+    const exported3 = await exportImposedPdf({
+      documents: [doc],
+      pages: threePages,
+      layout: { ...layout, duplexMode: 'long-edge' },
+      effects: { ...DEFAULT_EFFECTS, enabled: false },
+      watermark: { ...getDefaultWatermarkSettings(), enabled: true, text: 'DRAFT' },
+      pageNumbering: { ...getDefaultPageNumberSettings(), enabled: true },
+      userName: 'test',
+    });
+    expect((await PDFDocument.load(exported3)).getPageCount()).toBe(3);
+
+    // Explicit user-added blank page as the 4th page must be preserved
+    const explicitBlank: PageItem = {
+      ...page(0),
+      id: 'blank-4',
+      documentId: 'blank',
+      sourcePageNumber: 0,
+      isBlankPage: true,
+      widthMm: 100 * ptToMm,
+      heightMm: 100 * ptToMm,
+    };
+    const exported4 = await exportImposedPdf({
+      documents: [doc],
+      pages: [...threePages, explicitBlank],
+      layout: { ...layout, duplexMode: 'long-edge' },
+      effects: { ...DEFAULT_EFFECTS, enabled: false },
+      watermark: { ...getDefaultWatermarkSettings(), enabled: false },
+      pageNumbering: { ...getDefaultPageNumberSettings(), enabled: false },
+      userName: 'test',
+    });
+    expect((await PDFDocument.load(exported4)).getPageCount()).toBe(4);
+  });
+
 });
+

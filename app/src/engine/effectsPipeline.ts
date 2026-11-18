@@ -43,6 +43,60 @@ export function shouldApplyEffectsToPage(
   };
 }
 
+export interface ResolvedPageEffects {
+  applyGlobal: boolean;
+  effectiveInvert: boolean;
+  effectiveGrayscale: boolean;
+  effectiveBlackAndWhite: boolean;
+  brightness: number;
+  contrast: number;
+  gamma: number;
+  blackText: boolean;
+  threshold: number;
+  sharpness: number;
+  hasPixelEffects: boolean;
+}
+
+export function resolvePageEffects(
+  page: PageItem,
+  effects: EffectsSettings
+): ResolvedPageEffects {
+  const {
+    applyGlobal,
+    effectiveInvert,
+    effectiveGrayscale,
+    effectiveBlackAndWhite,
+  } = shouldApplyEffectsToPage(page, effects);
+
+  const brightness = applyGlobal ? effects.brightness : 0;
+  const contrast = applyGlobal ? effects.contrast : 0;
+  const gamma = applyGlobal && effects.gamma > 0 ? effects.gamma : 1;
+  const blackText = applyGlobal && effects.blackText;
+  const sharpness = applyGlobal ? effects.sharpness : 0;
+
+  const hasPixelEffects =
+    effectiveGrayscale ||
+    effectiveBlackAndWhite ||
+    brightness !== 0 ||
+    contrast !== 0 ||
+    Math.abs(gamma - 1) > 0.001 ||
+    blackText;
+
+  return {
+    applyGlobal,
+    effectiveInvert,
+    effectiveGrayscale,
+    effectiveBlackAndWhite,
+    brightness,
+    contrast,
+    gamma,
+    blackText,
+    threshold: effects.threshold,
+    sharpness,
+    hasPixelEffects,
+  };
+}
+
 /**
  * Generates GPU-accelerated CSS filter string for 60fps Live Preview (E1/E2)
  */
@@ -106,23 +160,32 @@ export function buildCssFilterForPage(
 export function applyEffectsToRgbaBuffer(
   rgba: Uint8ClampedArray,
   effects: EffectsSettings,
-  pageOverrides?: PageItem['overrides']
+  pageOverrides?: PageItem['overrides'],
+  scopeMatch = true
 ): Uint8ClampedArray {
   const out = new Uint8ClampedArray(rgba.length);
+  const globalActive = effects.enabled && scopeMatch;
 
-  const invert = pageOverrides?.invert ?? (effects.enabled && effects.invert);
+  const invert =
+    pageOverrides?.invert !== undefined
+      ? pageOverrides.invert
+      : globalActive && effects.invert;
   const grayscale =
-    pageOverrides?.grayscale ??
-    (effects.enabled && (effects.grayscale || effects.blackAndWhite));
+    pageOverrides?.grayscale !== undefined
+      ? pageOverrides.grayscale
+      : globalActive && (effects.grayscale || effects.blackAndWhite);
   const bwThreshold =
-    pageOverrides?.threshold ?? (effects.enabled && effects.blackAndWhite);
+    pageOverrides?.threshold !== undefined
+      ? pageOverrides.threshold
+      : globalActive && effects.blackAndWhite;
 
-  const brightnessOffset = effects.enabled ? (effects.brightness / 100) * 255 : 0;
-  const contrastFactor = effects.enabled
+  const brightnessOffset = globalActive ? (effects.brightness / 100) * 255 : 0;
+  const contrastFactor = globalActive
     ? (259 * (effects.contrast + 255)) / (255 * (259 - effects.contrast))
     : 1;
   const invGamma =
-    effects.enabled && effects.gamma > 0 ? 1 / effects.gamma : 1;
+    globalActive && effects.gamma > 0 ? 1 / effects.gamma : 1;
+  const applyBlackText = globalActive && effects.blackText;
 
   for (let i = 0; i < rgba.length; i += 4) {
     let r = rgba[i];
@@ -130,17 +193,17 @@ export function applyEffectsToRgbaBuffer(
     let b = rgba[i + 2];
     const a = rgba[i + 3];
 
-    if (effects.enabled) {
+    if (globalActive) {
       // Step 1: Brightness & Contrast
-      r = contrastFactor * (r + brightnessOffset - 128) + 128;
-      g = contrastFactor * (g + brightnessOffset - 128) + 128;
-      b = contrastFactor * (b + brightnessOffset - 128) + 128;
+      r = Math.max(0, Math.min(255, contrastFactor * (r + brightnessOffset - 128) + 128));
+      g = Math.max(0, Math.min(255, contrastFactor * (g + brightnessOffset - 128) + 128));
+      b = Math.max(0, Math.min(255, contrastFactor * (b + brightnessOffset - 128) + 128));
 
       // Step 2: Gamma correction
       if (invGamma !== 1) {
-        r = 255 * Math.pow(Math.max(0, Math.min(255, r)) / 255, invGamma);
-        g = 255 * Math.pow(Math.max(0, Math.min(255, g)) / 255, invGamma);
-        b = 255 * Math.pow(Math.max(0, Math.min(255, b)) / 255, invGamma);
+        r = 255 * Math.pow(r / 255, invGamma);
+        g = 255 * Math.pow(g / 255, invGamma);
+        b = 255 * Math.pow(b / 255, invGamma);
       }
     }
 
@@ -153,7 +216,7 @@ export function applyEffectsToRgbaBuffer(
     }
 
     // Step 4: Force near-black text to pure black
-    if (effects.enabled && effects.blackText) {
+    if (applyBlackText) {
       if (r < 75 && g < 75 && b < 75) {
         r = 0;
         g = 0;
