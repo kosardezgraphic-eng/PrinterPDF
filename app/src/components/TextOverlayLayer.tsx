@@ -308,7 +308,7 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
   e.preventDefault();e.stopPropagation();activate();select(item.id);
   if(eraseTool==='picker'){void pickColour(e.currentTarget,e.clientX,e.clientY);return;}
   const at=erasePoint(e.currentTarget,e.clientX,e.clientY);
-  const shape=beginEraseShape(eraseTool==='region'?'region':'brush',at,eraseBrushMm/2,eraseColor);
+  const shape=beginEraseShape(eraseTool==='region'?'region':'brush',at,eraseBrushMm/2,eraseTool==='brush'?eraseColor:null);
   erase.current={pointer:e.pointerId,anchor:at,shape};setLiveErase(shape);setErasePending(null);
   moveRing(e.currentTarget,e.clientX,e.clientY);
   e.currentTarget.setPointerCapture(e.pointerId);
