@@ -55,7 +55,7 @@ export const CrossMarginWidget: React.FC<MarginWidgetProps> = ({
 
   return (
     <section data-cross-margin-widget className="flex min-w-0 flex-col gap-2 rounded-lg border border-slate-700 bg-slate-950/40 p-2">
-      <div className="mx-auto grid w-full max-w-[13rem] grid-cols-3 items-center gap-1">
+      <div dir="ltr" className="mx-auto grid w-full max-w-[13rem] grid-cols-3 items-center gap-1">
         <span />
         {field('top')}
         <span />
