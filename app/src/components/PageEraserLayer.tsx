@@ -48,8 +48,8 @@ export function PageEraserLayer({ page, width, height, pxPerMm }: { page: PageIt
   useEffect(() => {
     const imageLayer = surface.current?.previousElementSibling as HTMLElement | null;
     if (!imageLayer) return;
-    imageLayer.style.maskImage = mask ?? '';
-    imageLayer.style.webkitMaskImage = mask ?? '';
+    imageLayer.style.setProperty('mask-image', mask ?? '');
+    imageLayer.style.setProperty('-webkit-mask-image', mask ?? '');
   }, [mask]);
 
   if (tool === 'off') return null;
