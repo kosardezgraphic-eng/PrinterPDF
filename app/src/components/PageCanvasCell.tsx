@@ -8,6 +8,8 @@ import { PageContentImage, pageImageStyle } from './PageContentImage';
 import { CrispPageCanvas, useCrispPageFrame } from './CrispPageCanvas';
 import { useSmartGuides } from './SmartGuidesOverlay';
 import { useAppStore } from '../store/useAppStore';
+import { PageEraserLayer } from './PageEraserLayer';
+import { eraseMaskCss } from '../engine/imageErase';
 
 export type CanvasTool = 'move' | 'crop' | 'layout' | 'measure';
 const HANDLES: { id: Handle; left: string; top: string; cursor: string }[] = [
@@ -52,6 +54,7 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
   const reorderCellLayer = useAppStore(state => state.reorderCellLayer);
   const openPageSetup = useAppStore(state => state.openPageSetup);
   const crispEnabled = useAppStore(state => state.settings.previewFidelity === 'crisp');
+  const eraseTool = useAppStore(state => state.eraseTool);
   const smartGuides = useSmartGuides();
   const smartGuidesRef = useRef(smartGuides);
   smartGuidesRef.current = smartGuides;
@@ -225,6 +228,7 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
     }, 600);
   };
   const crisp = useCrispPageFrame({ page, enabled: crispEnabled, width:display.width, height:display.height, hostRef: contentRef });
+  const pageEraseMask = eraseMaskCss(page.erase, { width: display.width, height: display.height, widthMm: page.widthMm, heightMm: page.heightMm });
   const pointerEvents = { onPointerMove:move, onPointerUp:(e: React.PointerEvent<HTMLElement>) => finishPress(e), onPointerCancel:(e: React.PointerEvent<HTMLElement>) => finishPress(e,true), onLostPointerCapture:(e: React.PointerEvent<HTMLElement>) => finishPress(e,true) };
   const fa = language === 'fa';
   const menuActions = [
@@ -262,7 +266,9 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
           only while the cell is on screen — see `CrispPageCanvas`. */}
       {crispEnabled && <CrispPageCanvas page={page} effects={effects}
         width={display.width} height={display.height} frame={crisp.frame} onStaleFrame={crisp.askAgain}
-        style={pageImageStyle(page, cell.effectiveRotation, display.width, display.height)} />}
+        style={{ ...pageImageStyle(page, cell.effectiveRotation, display.width, display.height), ...(pageEraseMask ? { maskImage: pageEraseMask, WebkitMaskImage: pageEraseMask } : {}) }} />}
+      {page.erase?.length ? <div aria-hidden="true" className="pointer-events-none absolute inset-0" style={{ backgroundImage: undefined }} /> : null}
+      {eraseTool !== 'off' && !readOnly && <PageEraserLayer page={page} width={display.width} height={display.height} />}
     </div>
     {canEdit && <div style={{ left:tool === 'crop' ? cropFrame.x : display.x, top:tool === 'crop' ? cropFrame.y : display.y,
       width:tool === 'crop' ? cropFrame.width : display.width, height:tool === 'crop' ? cropFrame.height : display.height,
