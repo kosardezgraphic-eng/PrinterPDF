@@ -58,7 +58,6 @@ export const ToolRail: React.FC = () => {
               size="md"
               tooltipSide="inline-end"
               onClick={() => {
-                const isDrawerTab = tab.id === 'batch' || tab.id === 'printers';
                 const drawerAlreadyOpen = workspaceDrawer === tab.id
                   || (workspaceDrawer === null && activeRibbonTab === tab.id);
                 setActiveRibbonTab(tab.id);
