@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { createCanvas } from '@napi-rs/canvas';
 import type { EraseShape } from '@shared/models';
-import { applyEraseToContext, colorFromPixels, invertPixelsInContext } from './imageErase';
+import { applyEraseToContext, colorFromPixels, eraseMaskSvg, invertPixelsInContext } from './imageErase';
 
 const box = { width: 200, height: 100, widthMm: 100, heightMm: 50 };         // two pixels per millimetre
 
@@ -30,6 +30,30 @@ function filled() {
   ctx.fillRect(0, 0, 200, 100);
   return { canvas, ctx };
 }
+
+describe('SVG mask used by the live page preview', () => {
+  it('defines a page-sized opaque mask with only the selected rectangle cut out', () => {
+    const svg = eraseMaskSvg(
+      [{ mode: 'region', x: 25, y: 20, width: 30, height: 40 }],
+      box
+    );
+    expect(svg).toBeDefined();
+    expect(svg).toContain('width="200" height="100" viewBox="0 0 200 100"');
+    expect(svg).toContain('<defs><mask id="e"');
+    expect(svg).toContain('maskUnits="userSpaceOnUse"');
+    expect(svg).toContain('<rect x="0" y="0" width="200" height="100" fill="#fff"/>');
+    expect(svg).toContain('<g fill="#000"><rect x="50" y="20" width="60" height="40"/>');
+    expect(svg).toContain('mask="url(#e)"');
+  });
+
+  it('keeps the mask extent equal to the page instead of falling back to SVG 300×150 defaults', () => {
+    const svg = eraseMaskSvg(
+      [{ mode: 'brush', radiusMm: 3, points: [{ x: 50, y: 50 }] }],
+      { width: 840, height: 1188, widthMm: 210, heightMm: 297 }
+    );
+    expect(svg).toContain('width="840" height="1188" viewBox="0 0 840 1188"');
+  });
+});
 
 describe('punching the holes into the export raster', () => {
   it('removes the pixels inside a marquee and leaves the rest opaque', () => {
