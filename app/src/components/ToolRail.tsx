@@ -46,7 +46,7 @@ export const ToolRail: React.FC = () => {
       aria-label={tr.shell.toolRail}
       data-tool-rail
     >
-      <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto overflow-x-hidden">
+      <div className="flex min-h-0 w-full flex-col items-center gap-1">
         {tabs.map((tab) => (
           <div key={tab.id} className="relative">
             <ToolButton
