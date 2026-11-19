@@ -81,7 +81,6 @@ export const Ribbon: React.FC<RibbonProps> = ({
     smartGuidesEnabled,
     loupeEnabled,
     transparentMode,
-    zoomPercent,
     setActiveRibbonTab,
     setRibbonCollapsed,
     importFiles,
@@ -122,7 +121,6 @@ export const Ribbon: React.FC<RibbonProps> = ({
     setSmartGuidesEnabled,
     setLoupeEnabled,
     setTransparentMode,
-    setZoomPercent,
   } = useAppStore();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1139,22 +1137,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
                 <span>{tr.preview.transparentMode}</span>
               </label>
 
-              <div className="flex items-center gap-1">
-                {[75, 100, 125, 150].map((z) => (
-                  <button
-                    key={z}
-                    type="button"
-                    onClick={() => setZoomPercent(z)}
-                    className={`rounded-lg px-2 py-1 text-xs cursor-pointer ${
-                      zoomPercent === z
-                        ? 'bg-sky-600 text-white'
-                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                    }`}
-                  >
-                    {z}%
-                  </button>
-                ))}
-              </div>
+
             </div>
           )}
         </div>

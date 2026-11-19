@@ -155,7 +155,7 @@ export const QuickBar: React.FC = () => {
     : [300, 600];
 
   return (
-    <header className="relative z-40 flex h-13 shrink-0 items-center justify-between gap-2 border-b border-slate-800 bg-slate-900/95 px-2.5 select-none">
+    <header className="relative z-40 flex h-11 shrink-0 items-center justify-between gap-2 border-b border-slate-800 bg-slate-900/95 px-2.5 select-none">
       {/* Start: Brand + Quick Print Hardware Cluster + Save PDF + Counter + Undo/Redo */}
       <div className="flex items-center gap-1.5 min-w-0">
         <div className="hidden 2xl:flex items-center gap-2 rounded-xl bg-gradient-to-l from-sky-600/20 to-indigo-600/20 border border-sky-500/30 px-2.5 py-1 shrink-0">
@@ -622,8 +622,9 @@ export const QuickBar: React.FC = () => {
 
         {/* Counter & Cost Dashboard (B1/B2) */}
         <button
+          data-counter-trigger
           type="button"
-          onClick={() => setModalState('counter', true)}
+          onClick={() => setModalState('counter', true)
           className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/90 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:border-sky-500/50 hover:bg-slate-800 transition whitespace-nowrap shrink-0 cursor-pointer"
         >
           <Calculator className="h-4 w-4 text-amber-400 shrink-0" />
