@@ -267,7 +267,7 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
           width={display.width} height={display.height} frame={crisp.frame} onStaleFrame={crisp.askAgain}
           style={pageImageStyle(page, cell.effectiveRotation, display.width, display.height)} />}
       </div>
-      {eraseTool !== 'off' && !readOnly && <PageEraserLayer page={page} width={display.width} height={display.height} />}
+      {eraseTool !== 'off' && !readOnly && <PageEraserLayer page={page} width={display.width} height={display.height} pxPerMm={pxPerMm} />}
     </div>
     {canEdit && <div style={{ left:tool === 'crop' ? cropFrame.x : display.x, top:tool === 'crop' ? cropFrame.y : display.y,
       width:tool === 'crop' ? cropFrame.width : display.width, height:tool === 'crop' ? cropFrame.height : display.height,
