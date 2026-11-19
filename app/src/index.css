@@ -5,7 +5,22 @@
     --psp-bg-primary: #020617;
     --psp-bg-surface: #0f172a;
     --psp-bg-elevated: #1e293b;
+    --psp-bg-canvas: #0b1220;
+    --psp-bg-panel: #0f172a;
+    --psp-bg-panel-raised: #1e293b;
+    --psp-border-subtle: rgb(148 163 184 / 18%);
+    --psp-border-strong: rgb(148 163 184 / 30%);
+    --psp-text-primary: #f8fafc;
+    --psp-text-muted: #94a3b8;
     --psp-accent: #0284c7;
+    --psp-focus-ring: #38bdf8;
+    --psp-radius-sm: 0.375rem;
+    --psp-radius-md: 0.5rem;
+    --psp-radius-lg: 0.75rem;
+    --psp-tool-rail-size: 3rem;
+    --psp-sidebar-size: 15rem;
+    --psp-tool-panel-size: 19rem;
+    --psp-tooltip-delay: 400ms;
     --psp-font-fa: "Vazirmatn", "IRANSans", "Tahoma", system-ui, -apple-system, sans-serif;
     --psp-font-en: "Inter", system-ui, -apple-system, sans-serif;
   }
@@ -17,6 +32,101 @@
   html[dir="ltr"] body {
     font-family: var(--psp-font-en);
   }
+}
+
+
+/* Application shell: fixed chrome rows and a single minmax workspace row. */
+.psp-app-shell {
+  display: grid;
+  grid-template-rows: max-content max-content minmax(0, 1fr) max-content;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--psp-bg-primary);
+  color: var(--psp-text-primary);
+}
+
+.psp-app-shell__topbar,
+.psp-app-shell__navigation,
+.psp-app-shell__workspace,
+.psp-app-shell__status {
+  min-width: 0;
+}
+
+.psp-app-shell__workspace {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.psp-app-shell__status {
+  min-height: 0;
+}
+
+.psp-app-shell__layers {
+  display: contents;
+}
+
+/* Shared, non-portaled tooltip. Its delay is intentionally long enough to avoid hover noise. */
+.psp-tooltip {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.psp-tooltip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 1000;
+  inset-inline-start: 50%;
+  inset-block-end: calc(100% + 0.5rem);
+  max-width: min(18rem, calc(100vw - 2rem));
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--psp-border-strong);
+  border-radius: var(--psp-radius-sm);
+  background: #0f172a;
+  color: #f8fafc;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 28%);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-50%);
+  transition: opacity 120ms ease, visibility 0s linear;
+}
+
+.psp-tooltip:hover::after,
+.psp-tooltip:focus-within::after {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: var(--psp-tooltip-delay), var(--psp-tooltip-delay);
+}
+
+.psp-tooltip--bottom::after {
+  inset-block-start: calc(100% + 0.5rem);
+  inset-block-end: auto;
+}
+
+.psp-tooltip--inline-start::after {
+  inset-inline-start: auto;
+  inset-inline-end: calc(100% + 0.5rem);
+  inset-block-start: 50%;
+  inset-block-end: auto;
+  transform: translateY(-50%);
+}
+
+.psp-tooltip--inline-end::after {
+  inset-inline-start: calc(100% + 0.5rem);
+  inset-block-start: 50%;
+  inset-block-end: auto;
+  transform: translateY(-50%);
 }
 
 .no-scrollbar::-webkit-scrollbar {

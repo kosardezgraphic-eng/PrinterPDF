@@ -28,6 +28,12 @@ export const TRANSLATIONS = {
       printers: 'مدیریت پرینترها',
       view: 'نمایش و خط‌کش',
     },
+    shell: {
+      topbar: 'نوار ابزار سریع',
+      navigation: 'ناوبری ابزارها',
+      workspace: 'فضای کار و پیش‌نمایش',
+      status: 'وضعیت برنامه',
+    },
     sidebar: {
       pagesTab: 'صفحات اسناد',
       bookmarksTab: 'فهرست و بوک‌مارک‌ها',
@@ -104,6 +110,12 @@ export const TRANSLATIONS = {
       batch: 'Batch Print',
       printers: 'Printers & Queue',
       view: 'View',
+    },
+    shell: {
+      topbar: 'Quick access toolbar',
+      navigation: 'Tool navigation',
+      workspace: 'Workspace and preview',
+      status: 'Application status',
     },
     sidebar: {
       pagesTab: 'Pages',
