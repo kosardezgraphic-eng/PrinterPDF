@@ -23,7 +23,8 @@ export function PageEraserLayer({ page, width, height }: { page: PageItem; width
   const surface = useRef<HTMLDivElement>(null);
   const source = useMemo(() => page.erase ?? [], [page.erase]);
   const preview = drag?.shape ?? pending ?? undefined;
-  const visibleShapes = preview ? [...source, preview] : source;
+  // A region is only a selection until Delete is pressed; do not mask its contents early.
+  const visibleShapes = drag ? [...source, drag.shape] : source;
   const box = { width, height, widthMm: Math.max(1, page.widthMm), heightMm: Math.max(1, page.heightMm) };
   const mask = eraseMaskCss(visibleShapes, box);
   const paint = erasePaintCss(visibleShapes, box);
