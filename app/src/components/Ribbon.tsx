@@ -717,14 +717,14 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
               <div className="flex items-center gap-1 border-e border-slate-800 pe-3" data-erase-tools>
                 <button type="button" data-erase-tool="brush" aria-pressed={eraseTool === 'brush'}
                   onClick={() => setEraseTool(eraseTool === 'brush' ? 'off' : 'brush')}
-                  title={lang === 'fa' ? 'با قلم‌مو روی تصویر بکشید تا بخشی از آن پاک شود' : 'Drag a brush over a picture to erase part of it'}
+                  title={lang === 'fa' ? 'با قلم‌مو روی صفحه PDF یا تصویر بکشید تا همان قسمت پاک شود' : 'Drag a brush over a PDF page or picture to erase that area'}
                   className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 font-bold ${eraseTool === 'brush' ? 'bg-rose-600 text-white' : 'border border-slate-700 bg-slate-800 text-slate-200 hover:border-rose-500/50'}`}>
                   <Eraser className="h-4 w-4" aria-hidden="true" />
                   <span>{lang === 'fa' ? 'پاک‌کن: قلم‌مو' : 'Eraser: brush'}</span>
                 </button>
                 <button type="button" data-erase-tool="region" aria-pressed={eraseTool === 'region'}
                   onClick={() => setEraseTool(eraseTool === 'region' ? 'off' : 'region')}
-                  title={lang === 'fa' ? 'یک کادر روی تصویر بکشید؛ داخل کادر پاک می‌شود' : 'Drag a rectangle on a picture; inside it is erased'}
+                  title={lang === 'fa' ? 'روی صفحه PDF یا تصویر کادر بکشید؛ با Delete داخل آن پاک می‌شود' : 'Drag a rectangle on a PDF page or picture, then press Delete'}
                   className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 font-bold ${eraseTool === 'region' ? 'bg-rose-600 text-white' : 'border border-slate-700 bg-slate-800 text-slate-200 hover:border-rose-500/50'}`}>
                   <SquareDashedMousePointer className="h-4 w-4" aria-hidden="true" />
                   <span>{lang === 'fa' ? 'پاک‌کن: ناحیه' : 'Eraser: region'}</span>
@@ -733,7 +733,7 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
                     with that colour. That is the shortest path from "this exact grey" to "paint over there". */}
                 <button type="button" data-erase-tool="picker" aria-pressed={eraseTool === 'picker'}
                   onClick={() => setEraseTool(eraseTool === 'picker' ? 'off' : 'picker')}
-                  title={lang === 'fa' ? 'روی تصویر کلیک کنید تا رنگ همان نقطه قلم‌مو شود' : 'Click on a picture to make the colour under the pointer the brush colour'}
+                  title={lang === 'fa' ? 'روی صفحه PDF یا تصویر کلیک کنید تا رنگ همان نقطه قلم‌مو شود' : 'Click a PDF page or picture to pick its colour for the brush'}
                   className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 font-bold ${eraseTool === 'picker' ? 'bg-amber-500 text-slate-950' : 'border border-slate-700 bg-slate-800 text-slate-200 hover:border-amber-400/60'}`}>
                   <Pipette className="h-4 w-4" aria-hidden="true" />
                   <span>{lang === 'fa' ? 'قطره‌چکان' : 'Eyedropper'}</span>
