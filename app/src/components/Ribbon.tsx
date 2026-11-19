@@ -186,7 +186,8 @@ export const Ribbon: React.FC<RibbonProps> = ({
       />
 
       {!panelMode && (
-        {/* Ribbon Tab Header Strip */}
+        <>
+          {/* Ribbon Tab Header Strip */}
         <div className="flex items-center justify-between border-b border-slate-800/80 px-3 pt-1">
           <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
             {tabs.map((tab) => {
@@ -237,6 +238,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
           </button>
         </div>
   
+        </>
         )}
       {/* Ribbon Body */}
       {!ribbonCollapsed && (
