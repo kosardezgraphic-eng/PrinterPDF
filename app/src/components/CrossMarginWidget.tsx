@@ -37,7 +37,7 @@ export const CrossMarginWidget: React.FC<MarginWidgetProps> = ({
       key={side}
       data-margin-side={side}
       className="flex min-w-0 flex-col items-center gap-0.5 text-[9px] text-slate-400"
-      title={fa ? `حاشیه ${labels[side]}؛ حداقل ${minimums[side]} میلی‌متر` : `${labels[side]} margin; printer minimum ${minimums[side]} mm`}
+      title={`${side} margin (mm)`}
     >
       <span>{labels[side]}</span>
       <input
@@ -45,7 +45,7 @@ export const CrossMarginWidget: React.FC<MarginWidgetProps> = ({
         min={minimums[side]}
         max={200}
         step={step}
-        aria-label={fa ? `حاشیه ${labels[side]}` : `${labels[side]} margin`}
+        aria-label={fa ? `مقدار حاشیه ${labels[side]}` : `${labels[side]} margin value`}
         value={Math.max(minimums[side], margins[side])}
         onChange={event => onMarginChange(side, Number(event.target.value) || 0)}
         className="w-full min-w-0 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-center text-[10px] font-mono text-white tabular-nums"

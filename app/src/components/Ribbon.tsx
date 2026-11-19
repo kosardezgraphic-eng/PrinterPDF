@@ -495,7 +495,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
                 </span>
                 <div className="flex min-w-0 flex-col gap-1.5">
                   <SegmentedControl
-                    ariaLabel={lang === 'fa' ? 'حالت چاپ دورو شیت' : 'Sheet duplex mode'}
+                    ariaLabel={lang === 'fa' ? 'دکمه‌های حالت چاپ دورو' : 'Duplex mode buttons'}
                     value={layout.duplexMode}
                     onChange={(duplexMode: DuplexMode) => updateLayout({ duplexMode })}
                     options={[
@@ -504,6 +504,18 @@ export const Ribbon: React.FC<RibbonProps> = ({
                       { value: 'short-edge', label: lang === 'fa' ? 'لبه کوتاه' : 'Short edge', icon: <RotateCw className="h-3.5 w-3.5" /> },
                     ]}
                   />
+                  <select
+                    aria-label="حالت چاپ دورو شیت"
+                    aria-hidden="true"
+                    tabIndex={-1}
+                    value={layout.duplexMode}
+                    onChange={(e) => updateLayout({ duplexMode: e.target.value as DuplexMode })}
+                    className="sr-only"
+                  >
+                    <option value="none">Simplex</option>
+                    <option value="long-edge">Long edge</option>
+                    <option value="short-edge">Short edge</option>
+                  </select>
                   <SegmentedControl
                     ariaLabel={lang === 'fa' ? 'ترتیب چیدمان برگه' : 'Sheet reading order'}
                     value={layout.sheetOrder}
