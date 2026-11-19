@@ -50,6 +50,13 @@ export function PageEraserLayer({ page, width, height, pxPerMm }: { page: PageIt
     if (!imageLayer) return;
     imageLayer.style.setProperty('mask-image', mask ?? '');
     imageLayer.style.setProperty('-webkit-mask-image', mask ?? '');
+    imageLayer.style.setProperty('mask-size', mask ? '100% 100%' : '');
+    imageLayer.style.setProperty('-webkit-mask-size', mask ? '100% 100%' : '');
+    imageLayer.style.setProperty('mask-repeat', mask ? 'no-repeat' : '');
+    imageLayer.style.setProperty('-webkit-mask-repeat', mask ? 'no-repeat' : '');
+    imageLayer.style.setProperty('mask-position', mask ? '0 0' : '');
+    imageLayer.style.setProperty('-webkit-mask-position', mask ? '0 0' : '');
+    imageLayer.style.setProperty('mask-mode', mask ? 'alpha' : '');
   }, [mask]);
 
   if (tool === 'off') return null;
