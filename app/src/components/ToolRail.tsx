@@ -63,7 +63,7 @@ export const ToolRail: React.FC = () => {
                   || (workspaceDrawer === null && activeRibbonTab === tab.id);
                 setActiveRibbonTab(tab.id);
                 if (ribbonCollapsed) setRibbonCollapsed(false);
-                if (isDrawerTab) {
+                if (tab.id === 'batch' || tab.id === 'printers') {
                   setWorkspaceDrawer(drawerAlreadyOpen ? 'closed' : tab.id);
                 } else {
                   setWorkspaceDrawer(null);

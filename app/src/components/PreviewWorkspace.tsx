@@ -1542,8 +1542,6 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 ? 'در صورت بروز خطا در یک فایل، صف به‌صورت خودکار به فایل بعدی ادامه می‌دهد'
                 : 'Fault-isolated batch execution with automatic retry'}
             </span>
-          </div>
-
             <button
               type="button"
               aria-label={lang === 'fa' ? 'بستن پنل صف دسته‌ای' : 'Close batch queue drawer'}
@@ -1553,6 +1551,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
             >
               {lang === 'fa' ? 'بستن' : 'Close'}
             </button>
+          </div>
+
           <div className="overflow-x-auto rounded-xl border border-slate-800">
             <table className="w-full text-start text-xs text-slate-200">
               <thead className="bg-slate-950/80 text-[11px] text-slate-400">
