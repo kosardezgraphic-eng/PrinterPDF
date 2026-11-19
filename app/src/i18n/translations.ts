@@ -33,6 +33,10 @@ export const TRANSLATIONS = {
       navigation: 'ناوبری ابزارها',
       workspace: 'فضای کار و پیش‌نمایش',
       status: 'وضعیت برنامه',
+      toolRail: 'نوار ابزار',
+      toolPanel: 'پنل ابزارها',
+      collapseToolPanel: 'جمع کردن پنل ابزارها',
+      expandToolPanel: 'باز کردن پنل ابزارها',
     },
     sidebar: {
       pagesTab: 'صفحات اسناد',
@@ -116,6 +120,10 @@ export const TRANSLATIONS = {
       navigation: 'Tool navigation',
       workspace: 'Workspace and preview',
       status: 'Application status',
+      toolRail: 'Tool rail',
+      toolPanel: 'Tool panel',
+      collapseToolPanel: 'Collapse tool panel',
+      expandToolPanel: 'Expand tool panel',
     },
     sidebar: {
       pagesTab: 'Pages',

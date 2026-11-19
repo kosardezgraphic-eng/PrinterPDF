@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { AppShell } from '../components/AppShell';
 import { ToolButton } from '../components/ToolButton';
+import { ToolRail } from '../components/ToolRail';
 
 const labels = {
   topbar: 'Quick access toolbar',
@@ -83,5 +84,16 @@ describe('ToolButton UI', () => {
 
     expect(markup).toContain('whitespace-nowrap');
     expect(markup).toContain('Print now');
+  });
+});
+
+describe('ToolRail UI', () => {
+  it('renders all nine canonical ribbon groups as accessible icon-first controls', () => {
+    const markup = renderToStaticMarkup(React.createElement(ToolRail));
+
+    expect(markup).toContain('data-tool-rail');
+    expect((markup.match(/data-tool-button/g) ?? []).length).toBe(9);
+    expect(markup).toContain('aria-label="چیدمان صفحه (Layout)"');
+    expect(markup).toContain('aria-pressed="true"');
   });
 });

@@ -4,7 +4,8 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { AppShell } from './components/AppShell';
 import { t } from './i18n/translations';
 import { QuickBar } from './components/QuickBar';
-import { Ribbon } from './components/Ribbon';
+import { ToolRail } from './components/ToolRail';
+import { ToolPanel } from './components/ToolPanel';
 import { SidebarPages } from './components/SidebarPages';
 import { PreviewWorkspace } from './components/PreviewWorkspace';
 import { StatusBar } from './components/StatusBar';
@@ -304,16 +305,15 @@ export const App: React.FC = () => {
         theme={settings.theme}
         labels={t(settings.language).shell}
         topbar={<QuickBar />}
-        navigation={
-          <Ribbon
-            onOpenWatermarkPanel={() => setWatermarkPanelOpen(true)}
-            onOpenBookletPanel={() => setBookletPanelOpen(true)}
-          />
-        }
+        navigation={<ToolRail />}
         workspace={
           <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
             <SidebarPages />
             <PreviewWorkspace onCursorMoveMm={setCursorPos} />
+            <ToolPanel
+              onOpenWatermarkPanel={() => setWatermarkPanelOpen(true)}
+              onOpenBookletPanel={() => setBookletPanelOpen(true)}
+            />
             {selectedOverlayId && overlays.some(o => o.id === selectedOverlayId && o.kind === 'text') && <TextControlPanel />}
             {selectedOverlayId && overlays.some(o => o.id === selectedOverlayId && o.kind === 'numbering') && <NumberingControlPanel />}
             {selectedOverlayId && overlays.some(o => o.id === selectedOverlayId && o.kind === 'image') && <ImageControlPanel />}
