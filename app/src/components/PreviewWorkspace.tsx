@@ -91,6 +91,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     loupeEnabled,
     transparentMode,
     activeRibbonTab,
+    workspaceDrawer,
+    setWorkspaceDrawer,
     printers,
     selectedPrinterName,
     printerMargins,
@@ -121,6 +123,14 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     removeBatchJob,
     openPageSetup,
   } = useAppStore();
+
+  const activeWorkspaceDrawer = workspaceDrawer === 'closed'
+    ? null
+    : workspaceDrawer ?? (
+        activeRibbonTab === 'batch' || activeRibbonTab === 'printers'
+          ? activeRibbonTab
+          : null
+      );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -1516,8 +1526,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
       </div>
 
       {/* Contextual Bottom Dock for Batch Queue (H1-H2) */}
-      {activeRibbonTab === 'batch' && (
-        <div className="h-64 shrink-0 border-t border-slate-800 bg-slate-900/95 p-4 overflow-y-auto">
+      {activeWorkspaceDrawer === 'batch' && (
+        <section data-workspace-drawer="batch" className="psp-workspace-drawer absolute inset-x-0 bottom-0 z-40 max-h-[40%] overflow-y-auto border-t border-slate-700 bg-slate-900/95 p-4">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Layers className="h-4 w-4 text-sky-400" />
@@ -1534,6 +1544,15 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
             </span>
           </div>
 
+            <button
+              type="button"
+              aria-label={lang === 'fa' ? 'بستن پنل صف دسته‌ای' : 'Close batch queue drawer'}
+              title={lang === 'fa' ? 'بستن پنل' : 'Close panel'}
+              onClick={() => setWorkspaceDrawer('closed')}
+              className="shrink-0 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700"
+            >
+              {lang === 'fa' ? 'بستن' : 'Close'}
+            </button>
           <div className="overflow-x-auto rounded-xl border border-slate-800">
             <table className="w-full text-start text-xs text-slate-200">
               <thead className="bg-slate-950/80 text-[11px] text-slate-400">
@@ -1614,11 +1633,11 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
               </tbody>
             </table>
           </div>
-        </div>
+        </section>
       )}
 
       {/* Contextual Bottom Dock for Windows Printers, Hardware Capabilities & Spooler Queue Manager (I1-I3) */}
-      {activeRibbonTab === 'printers' && (() => {
+      {activeWorkspaceDrawer === 'printers' && (() => {
         const activePrinter = printers.find((p) => p.name === selectedPrinterName) ?? printers[0];
         const caps = activePrinter?.capabilities;
         const prof = activePrinter?.activeProfile;
@@ -1637,7 +1656,21 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
         })();
 
         return (
-        <div className="h-80 shrink-0 border-t border-slate-800 bg-slate-900/95 p-4 overflow-y-auto">
+        <section data-workspace-drawer="printers" className="psp-workspace-drawer absolute inset-x-0 bottom-0 z-40 max-h-[40%] overflow-y-auto border-t border-slate-700 bg-slate-900/95 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h3 className="min-w-0 truncate text-sm font-bold text-white">
+              {lang === 'fa' ? 'مدیریت پرینترها، سخت‌افزار و صف چاپ' : 'Printers, Hardware & Spooler Queue'}
+            </h3>
+            <button
+              type="button"
+              aria-label={lang === 'fa' ? 'بستن پنل پرینترها' : 'Close printers drawer'}
+              title={lang === 'fa' ? 'بستن پنل' : 'Close panel'}
+              onClick={() => setWorkspaceDrawer('closed')}
+              className="shrink-0 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700"
+            >
+              {lang === 'fa' ? 'بستن' : 'Close'}
+            </button>
+          </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
             {/* I1 & I2: Windows Printers & Live Status */}
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
@@ -2181,7 +2214,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
               </div>
             </div>
           </div>
-        </div>
+        </section>
         );
       })()}
 

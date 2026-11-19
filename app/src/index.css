@@ -108,6 +108,11 @@
   overscroll-behavior: contain;
 }
 
+.psp-workspace-drawer {
+  box-shadow: 0 -0.75rem 2rem rgb(0 0 0 / 32%);
+  overscroll-behavior: contain;
+}
+
 .psp-tool-panel-ribbon__content > div {
   max-width: 100%;
   min-width: 0;
