@@ -624,7 +624,7 @@ export const QuickBar: React.FC = () => {
         <button
           data-counter-trigger
           type="button"
-          onClick={() => setModalState('counter', true)
+          onClick={() => setModalState('counter', true)}
           className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/90 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:border-sky-500/50 hover:bg-slate-800 transition whitespace-nowrap shrink-0 cursor-pointer"
         >
           <Calculator className="h-4 w-4 text-amber-400 shrink-0" />
