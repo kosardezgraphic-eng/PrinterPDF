@@ -87,7 +87,7 @@ export function PageEraserLayer({ page, width, height, pxPerMm }: { page: PageIt
     }
   };
 
-  return <div ref={surface} data-page-eraser={page.id} className="absolute inset-0 z-30"
+  return <div ref={surface} data-page-eraser={page.id} className="absolute inset-0 z-[5]"
     style={{ pointerEvents: 'auto', touchAction: 'none', cursor: tool === 'picker' ? 'crosshair' : tool === 'region' ? 'crosshair' : 'none' }}
     onPointerDown={event => {
       event.preventDefault(); event.stopPropagation();
