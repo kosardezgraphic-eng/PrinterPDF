@@ -349,6 +349,13 @@ describe('picture panel',()=>{
   // With nothing waiting, the same keys go back to the app: the second one would have deleted the layer.
   act(()=>expect(useAppStore.getState().spendEraseKey('Delete')).toBe(false));
  });
+ it('keeps the region eraser destructive even when the brush has a paint colour',()=>{
+  armErase('region');
+  act(()=>useAppStore.getState().setEraseColor('#102030'));
+  pointer(node(),'pointerdown',9,4.5);pointer(node(),'pointermove',45,22.5);pointer(node(),'pointerup',45,22.5);
+  act(()=>expect(useAppStore.getState().spendEraseKey('Delete')).toBe(true));
+  expect(picture().erase).toEqual([{mode:'region',x:10,y:10,width:40,height:40}]);
+ });
  it('applies a waiting marquee from the panel, for a hand that stays on the mouse',()=>{
   armErase('region');
   pointer(node(),'pointerdown',9,4.5);pointer(node(),'pointermove',45,22.5);pointer(node(),'pointerup',45,22.5);
