@@ -2,7 +2,6 @@ import type { CSSProperties } from 'react';
 import type { EffectsSettings, PageItem, PageRotation } from '@shared/models';
 import { buildCssFilterForPage } from '../engine/effectsPipeline';
 import { pageCropFractions, rotateInsets } from '../engine/pageGeometry';
-import { eraseMaskCss } from '../engine/imageErase';
 
 /** Identical crop and rotation mapping for the canvas and its sidebar preview. */
 export function pageImageStyle(page: PageItem, rotation: PageRotation, width: number, height: number): CSSProperties {
@@ -26,8 +25,7 @@ export function PageContentImage({ page, effects, rotation, width, height }: {
   if (width <= 0 || height <= 0) return null;
   if (page.isBlankPage && page.sourcePageNumber === 0) return <div aria-hidden="true" className="absolute inset-0 bg-white" style={{ filter:buildCssFilterForPage(page, effects) }} />;
   if (!page.thumbnailDataUrl) return null;
-  const eraseMask = eraseMaskCss(page.erase, { width, height, widthMm: page.widthMm, heightMm: page.heightMm });
   return <img draggable={false} src={page.thumbnailDataUrl} alt="" aria-hidden="true"
-    style={{ ...pageImageStyle(page, rotation, width, height), filter: buildCssFilterForPage(page, effects), ...(eraseMask ? { maskImage: eraseMask, WebkitMaskImage: eraseMask } : {}) }}
+    style={{ ...pageImageStyle(page, rotation, width, height), filter: buildCssFilterForPage(page, effects) }}
     className="max-w-none select-none pointer-events-none" />;
 }
