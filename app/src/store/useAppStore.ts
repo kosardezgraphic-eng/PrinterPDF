@@ -99,6 +99,8 @@ export type RibbonTabId =
   | 'printers'
   | 'view';
 
+export type WorkspaceDrawerState = 'batch' | 'printers' | 'closed' | null;
+
 export type PageEditScope = 'current' | 'selected' | 'all';
 
 export type PreviewViewMode = 'single' | 'double' | 'grid' | 'continuous';
@@ -313,6 +315,7 @@ interface AppState {
   // UI & Workspace State
   activeRibbonTab: RibbonTabId;
   ribbonCollapsed: boolean;
+  workspaceDrawer: WorkspaceDrawerState;
   sidebarTab: 'pages' | 'bookmarks';
   activeSheetIndex: number;
   sidebarReveal: { pageId: string; occurrenceKey?: string } | null;
@@ -502,6 +505,7 @@ interface AppState {
   // UI Helpers
   setActiveRibbonTab: (tab: RibbonTabId) => void;
   setRibbonCollapsed: (collapsed: boolean) => void;
+  setWorkspaceDrawer: (drawer: WorkspaceDrawerState) => void;
   setSidebarTab: (tab: 'pages' | 'bookmarks') => void;
   setActiveSheetIndex: (idx: number) => void;
   setZoomPercent: (zoom: number) => void;
@@ -728,6 +732,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     activeRibbonTab: 'layout',
     ribbonCollapsed: false,
+    workspaceDrawer: null,
     sidebarTab: 'pages',
     activeSheetIndex: 0,
     sidebarReveal: null,
@@ -3198,6 +3203,7 @@ export const useAppStore = create<AppState>((set, get) => {
       set((s) => ({
         batchQueue: [...s.batchQueue, newItem],
         activeRibbonTab: 'batch',
+        workspaceDrawer: null,
       }));
       state.addToast({
         type: 'success',
@@ -3254,8 +3260,9 @@ export const useAppStore = create<AppState>((set, get) => {
       void get().runBatchQueue();
     },
 
-    setActiveRibbonTab: (tab) => set({ activeRibbonTab: tab }),
+    setActiveRibbonTab: (tab) => set({ activeRibbonTab: tab, workspaceDrawer: null }),
     setRibbonCollapsed: (collapsed) => set({ ribbonCollapsed: collapsed }),
+    setWorkspaceDrawer: (drawer) => set({ workspaceDrawer: drawer }),
     setSidebarTab: (tab) => set({ sidebarTab: tab }),
     setActiveSheetIndex: (idx) => set({ activeSheetIndex: Math.max(0, idx) }),
     setZoomPercent: (zoom) =>

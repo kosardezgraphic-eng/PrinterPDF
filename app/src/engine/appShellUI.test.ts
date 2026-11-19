@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { AppShell } from '../components/AppShell';
 import { ToolButton } from '../components/ToolButton';
 import { ToolRail } from '../components/ToolRail';
+import { useAppStore } from '../store/useAppStore';
 
 const labels = {
   topbar: 'Quick access toolbar',
@@ -95,5 +96,19 @@ describe('ToolRail UI', () => {
     expect((markup.match(/data-tool-button/g) ?? []).length).toBe(9);
     expect(markup).toContain('aria-label="چیدمان صفحه (Layout)"');
     expect(markup).toContain('aria-pressed="true"');
+  });
+});
+
+describe('workspace drawer state', () => {
+  it('keeps Batch and Printers drawers mutually exclusive and allows explicit close', () => {
+    const store = useAppStore.getState();
+    store.setWorkspaceDrawer('batch');
+    expect(useAppStore.getState().workspaceDrawer).toBe('batch');
+    useAppStore.getState().setWorkspaceDrawer('printers');
+    expect(useAppStore.getState().workspaceDrawer).toBe('printers');
+    useAppStore.getState().setWorkspaceDrawer('closed');
+    expect(useAppStore.getState().workspaceDrawer).toBe('closed');
+    useAppStore.getState().setActiveRibbonTab('layout');
+    expect(useAppStore.getState().workspaceDrawer).toBeNull();
   });
 });

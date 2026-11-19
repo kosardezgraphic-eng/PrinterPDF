@@ -23,8 +23,10 @@ export const ToolRail: React.FC = () => {
     settings,
     batchQueue,
     effects,
+    workspaceDrawer,
     setActiveRibbonTab,
     setRibbonCollapsed,
+    setWorkspaceDrawer,
   } = useAppStore();
 
   const tr = t(settings.language);
@@ -56,8 +58,15 @@ export const ToolRail: React.FC = () => {
               size="md"
               tooltipSide="inline-end"
               onClick={() => {
+                const drawerAlreadyOpen = workspaceDrawer === tab.id
+                  || (workspaceDrawer === null && activeRibbonTab === tab.id);
                 setActiveRibbonTab(tab.id);
                 if (ribbonCollapsed) setRibbonCollapsed(false);
+                if (tab.id === 'batch' || tab.id === 'printers') {
+                  setWorkspaceDrawer(drawerAlreadyOpen ? 'closed' : tab.id);
+                } else {
+                  setWorkspaceDrawer(null);
+                }
               }}
               className="h-9 w-9"
             />
