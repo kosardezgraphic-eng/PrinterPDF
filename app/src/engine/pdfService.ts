@@ -982,6 +982,27 @@ export async function exportImposedPdf(params: {
         throw new Error(`Missing or unsupported source for ${cell.page.documentName}; re-import the original file`);
       }
 
+      // Page-level eraser marks are painted as vector shapes over the imported page. This keeps
+      // untouched PDF text and paths vector; only the small areas deliberately covered by the eraser
+      // become filled geometry. Coordinates are percentages of the visible, oriented page rectangle.
+      for (const mark of cell.page.erase ?? []) {
+        const hex = mark.color && /^#[0-9a-f]{6}$/i.test(mark.color) ? mark.color.slice(1) : 'ffffff';
+        const fill = rgb(parseInt(hex.slice(0, 2), 16) / 255, parseInt(hex.slice(2, 4), 16) / 255, parseInt(hex.slice(4, 6), 16) / 255);
+        if (mark.mode === 'region') {
+          const x = contentXPt + mark.x / 100 * contentWPt;
+          const y = contentYPt + (100 - mark.y - mark.height) / 100 * contentHPt;
+          outPage.drawRectangle({ x, y, width: mark.width / 100 * contentWPt, height: mark.height / 100 * contentHPt, color: fill });
+        } else {
+          const rx = mark.radiusMm / Math.max(1, cell.page.widthMm) * contentWPt;
+          const ry = mark.radiusMm / Math.max(1, cell.page.heightMm) * contentHPt;
+          for (const point of mark.points) {
+            const cx = contentXPt + point.x / 100 * contentWPt;
+            const cy = contentYPt + (100 - point.y) / 100 * contentHPt;
+            outPage.drawEllipse({ x: cx, y: cy, xScale: Math.max(0.1, rx), yScale: Math.max(0.1, ry), color: fill });
+          }
+        }
+      }
+
       outPage.pushOperators(popGraphicsState());
 
       // Draw optional cell border
