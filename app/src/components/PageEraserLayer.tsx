@@ -20,10 +20,10 @@ export function PageEraserLayer({ page, width, height }: { page: PageItem; width
   const [drag, setDrag] = useState<DragState | null>(null);
   const [pending, setPending] = useState<EraseShape | null>(null);
   const [cursor, setCursor] = useState<Point | null>(null);
-  const surface = useRef<HTMLDivElement>(null);
   const source = useMemo(() => page.erase ?? [], [page.erase]);
   const preview = drag?.shape ?? pending ?? undefined;
   const visibleShapes = preview ? [...source, preview] : source;
+  const box = { width, height, widthMm: Math.max(1, page.widthMm), heightMm: Math.max(1, page.heightMm) };
   const paint = erasePaintCss(visibleShapes, box);
   const region = preview?.mode === 'region' ? preview : null;
   const scaleX = width / Math.max(1, page.widthMm);
@@ -79,7 +79,7 @@ export function PageEraserLayer({ page, width, height }: { page: PageItem; width
     }
   };
 
-  return <div ref={surface} data-page-eraser={page.id} className="absolute inset-0 z-30"
+  return <div data-page-eraser={page.id} className="absolute inset-0 z-30"
     style={{ pointerEvents: 'auto', touchAction: 'none', cursor: tool === 'picker' ? 'crosshair' : tool === 'region' ? 'crosshair' : 'none' }}
     onPointerDown={event => {
       event.preventDefault(); event.stopPropagation();
@@ -121,6 +121,5 @@ export function PageEraserLayer({ page, width, height }: { page: PageItem; width
     {pending && <div data-erase-pending="true" className="absolute inset-x-2 top-2 rounded bg-slate-950/90 px-2 py-1 text-center text-xs text-white shadow">
       {page && (useAppStore.getState().settings.language === 'fa' ? 'ناحیه انتخاب شد؛ برای اعمال پاک‌کردن Delete را بزنید و برای لغو Escape را.' : 'Region selected — press Delete to erase or Escape to cancel.')}
     </div>}
-    <style>{`[data-page-eraser="${page.id}"] ~ * { pointer-events: none; }`}</style>
   </div>;
 }
