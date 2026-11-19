@@ -10,7 +10,7 @@ type DragState = { pointerId: number; anchor: Point; shape: EraseShape };
  * Interactive eraser surface for the actual imported page. Marks remain vector geometry on PageItem,
  * so they can be undone and are exported with the page rather than being a transient screen overlay.
  */
-export function PageEraserLayer({ page, width, height }: { page: PageItem; width: number; height: number }) {
+export function PageEraserLayer({ page, width, height, pxPerMm }: { page: PageItem; width: number; height: number; pxPerMm: number }) {
   const tool = useAppStore(s => s.eraseTool);
   const brushMm = useAppStore(s => s.eraseBrushMm);
   const color = useAppStore(s => s.eraseColor);
@@ -25,12 +25,11 @@ export function PageEraserLayer({ page, width, height }: { page: PageItem; width
   const preview = drag?.shape ?? pending ?? undefined;
   // A region is only a selection until Delete is pressed; do not mask its contents early.
   const visibleShapes = drag ? [...source, drag.shape] : source;
-  const box = { width, height, widthMm: Math.max(1, page.widthMm), heightMm: Math.max(1, page.heightMm) };
+  const box = { width, height, widthMm: width / Math.max(0.01, pxPerMm), heightMm: height / Math.max(0.01, pxPerMm) };
   const mask = eraseMaskCss(visibleShapes, box);
   const paint = erasePaintCss(visibleShapes, box);
   const region = preview?.mode === 'region' ? preview : null;
-  const scaleX = width / Math.max(1, page.widthMm);
-  const scaleY = height / Math.max(1, page.heightMm);
+  const brushPixels = brushMm * pxPerMm;
 
   useEffect(() => {
     if (!pending) return;
@@ -124,7 +123,7 @@ export function PageEraserLayer({ page, width, height }: { page: PageItem; width
     {region && <div aria-hidden="true" className="pointer-events-none absolute border-2 border-dashed border-sky-500 bg-sky-400/15"
       style={{ left: region.x + '%', top: region.y + '%', width: region.width + '%', height: region.height + '%' }} />}
     {cursor && tool === 'brush' && <div aria-hidden="true" className="pointer-events-none absolute rounded-full border border-slate-900 bg-white/10 shadow-[0_0_0_1px_white]"
-      style={{ width: Math.max(2, brushMm * scaleX), height: Math.max(2, brushMm * scaleY), left: cursor.x + '%', top: cursor.y + '%', transform: 'translate(-50%,-50%)' }} />}
+      style={{ width: Math.max(2, brushPixels), height: Math.max(2, brushPixels), left: cursor.x + '%', top: cursor.y + '%', transform: 'translate(-50%,-50%)' }} />}
     {pending && <div data-erase-pending="true" className="absolute inset-x-2 top-2 rounded bg-slate-950/90 px-2 py-1 text-center text-xs text-white shadow">
       {page && (useAppStore.getState().settings.language === 'fa' ? 'ناحیه انتخاب شد؛ برای اعمال پاک‌کردن Delete را بزنید و برای لغو Escape را.' : 'Region selected — press Delete to erase or Escape to cancel.')}
     </div>}
