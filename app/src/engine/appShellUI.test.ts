@@ -93,7 +93,7 @@ describe('ToolRail UI', () => {
 
     expect(markup).toContain('data-tool-rail');
     expect((markup.match(/data-tool-button/g) ?? []).length).toBe(9);
-    expect(markup).toContain('aria-label="Page Layout"');
+    expect(markup).toContain('aria-label="چیدمان صفحه (Layout)"');
     expect(markup).toContain('aria-pressed="true"');
   });
 });
