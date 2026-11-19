@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { EraseShape, PageItem } from '@shared/models';
 import { useAppStore } from '../store/useAppStore';
-import { beginEraseShape, commitEraseShape, colorFromPixels, eraseMaskCss, erasePaintCss, growEraseShape, eraseShapeIsMeaningful } from '../engine/imageErase';
+import { beginEraseShape, commitEraseShape, colorFromPixels, erasePaintCss, growEraseShape, eraseShapeIsMeaningful } from '../engine/imageErase';
 
 type Point = { x: number; y: number };
 type DragState = { pointerId: number; anchor: Point; shape: EraseShape };
@@ -24,8 +24,6 @@ export function PageEraserLayer({ page, width, height }: { page: PageItem; width
   const source = useMemo(() => page.erase ?? [], [page.erase]);
   const preview = drag?.shape ?? pending ?? undefined;
   const visibleShapes = preview ? [...source, preview] : source;
-  const box = { width, height, widthMm: Math.max(1, page.widthMm), heightMm: Math.max(1, page.heightMm) };
-  const mask = eraseMaskCss(visibleShapes, box);
   const paint = erasePaintCss(visibleShapes, box);
   const region = preview?.mode === 'region' ? preview : null;
   const scaleX = width / Math.max(1, page.widthMm);
@@ -124,6 +122,5 @@ export function PageEraserLayer({ page, width, height }: { page: PageItem; width
       {page && (useAppStore.getState().settings.language === 'fa' ? 'ناحیه انتخاب شد؛ برای اعمال پاک‌کردن Delete را بزنید و برای لغو Escape را.' : 'Region selected — press Delete to erase or Escape to cancel.')}
     </div>}
     <style>{`[data-page-eraser="${page.id}"] ~ * { pointer-events: none; }`}</style>
-    <div className="pointer-events-none absolute inset-0" style={{ maskImage: mask, WebkitMaskImage: mask }} />
   </div>;
 }
