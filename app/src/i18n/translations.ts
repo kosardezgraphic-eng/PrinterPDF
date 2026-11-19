@@ -37,6 +37,13 @@ export const TRANSLATIONS = {
       toolPanel: 'پنل ابزارها',
       collapseToolPanel: 'جمع کردن پنل ابزارها',
       expandToolPanel: 'باز کردن پنل ابزارها',
+      propertiesDock: {
+        title: 'خصوصیات و تنظیمات',
+        showToolsReturn: 'باز کردن خصوصیات شیء انتخاب‌شده',
+        showTools: 'ابزارها',
+        close: 'بستن پنل خصوصیات',
+        tabs: { text: 'متن', numbering: 'شماره‌گذاری', image: 'تصویر', shape: 'شکل', watermark: 'واترمارک', booklet: 'بوکلت' },
+      },
     },
     sidebar: {
       pagesTab: 'صفحات اسناد',
@@ -124,6 +131,13 @@ export const TRANSLATIONS = {
       toolPanel: 'Tool panel',
       collapseToolPanel: 'Collapse tool panel',
       expandToolPanel: 'Expand tool panel',
+      propertiesDock: {
+        title: 'Properties',
+        showToolsReturn: 'Open properties for selected object',
+        showTools: 'Tools',
+        close: 'Close properties panel',
+        tabs: { text: 'Text', numbering: 'Numbering', image: 'Image', shape: 'Shape', watermark: 'Watermark', booklet: 'Booklet' },
+      },
     },
     sidebar: {
       pagesTab: 'Pages',

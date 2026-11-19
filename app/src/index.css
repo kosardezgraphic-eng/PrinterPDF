@@ -103,6 +103,26 @@
   min-height: 0;
 }
 
+.psp-properties-dock {
+  inline-size: var(--psp-tool-panel-size);
+  flex: 0 0 var(--psp-tool-panel-size);
+  min-inline-size: 0;
+  min-block-size: 0;
+}
+
+.psp-properties-dock [data-text-control-panel],
+.psp-properties-dock [data-shape-control-panel],
+.psp-properties-dock [data-watermark-control-panel],
+.psp-properties-dock [data-booklet-control-panel] {
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+  block-size: 100%;
+  flex-shrink: 1;
+  border-inline-start: 0;
+}
+
 .psp-tool-panel-ribbon__content {
   align-content: start;
   overscroll-behavior: contain;

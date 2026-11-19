@@ -6,6 +6,7 @@ import { ToolButton } from '../components/ToolButton';
 import { ToolRail } from '../components/ToolRail';
 import { QuickBar } from '../components/QuickBar';
 import { StatusBar } from '../components/StatusBar';
+import { PropertiesDock, type PropertiesDockLabels, type PropertiesPanelId } from '../components/PropertiesDock';
 import { useAppStore } from '../store/useAppStore';
 
 const labels = {
@@ -127,5 +128,42 @@ describe('topbar and status bar roles', () => {
     expect(statusMarkup).not.toContain('data-counter-trigger');
     expect(statusMarkup).not.toContain('type="range"');
     expect(statusMarkup).not.toContain('Zoom Slider');
+  });
+});
+
+describe('shared properties dock UI', () => {
+  it('provides one dock for all six property groups and a return-to-tools action', () => {
+    const labels: PropertiesDockLabels = {
+      title: 'Properties',
+      showTools: 'Tools',
+      showToolsReturn: 'Open properties',
+      close: 'Close properties',
+      tabs: {
+        text: 'Text',
+        numbering: 'Numbering',
+        image: 'Image',
+        shape: 'Shape',
+        watermark: 'Watermark',
+        booklet: 'Booklet',
+      },
+    };
+    const panels: PropertiesPanelId[] = ['text', 'numbering', 'image', 'shape', 'watermark', 'booklet'];
+    const markup = renderToStaticMarkup(
+      React.createElement(PropertiesDock, {
+        activePanel: 'text',
+        onSelectPanel: () => {},
+        onShowTools: () => {},
+        onClose: () => {},
+        labels,
+        children: React.createElement('div', null, 'property-editor'),
+      }),
+    );
+
+    expect(markup).toContain('data-properties-dock');
+    expect(markup).toContain('aria-label="Properties"');
+    expect(markup).toContain('property-editor');
+    for (const panel of panels) expect(markup).toContain(`data-tooltip="${labels.tabs[panel]}"`);
+    expect((markup.match(/data-tool-button/g) ?? []).length).toBe(8);
+    expect(markup).toContain('aria-pressed="true"');
   });
 });
