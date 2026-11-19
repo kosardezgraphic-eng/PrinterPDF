@@ -178,7 +178,9 @@ function partsMarkup(parts: EraseParts): string {
 
 function svgShell(body: string, box: ErasePaintBox): string {
   const w = num(Math.max(0.001, box.width)), h = num(Math.max(0.001, box.height));
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${body}</svg>`;
+  // CSS mask-image needs a real intrinsic size. A viewBox-only SVG defaults to 300×150 and can
+  // tile or stretch incorrectly over a page, which may make the entire page appear transparent.
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${body}</svg>`;
 }
 
 /**
@@ -192,10 +194,14 @@ export function eraseMaskSvg(shapes: EraseShape[] | undefined, box: ErasePaintBo
   const clean = sanitizeEraseShapes(shapes ?? []);
   const parts = eraseParts(clean.filter(shape => !eraseShapeIsPaint(shape)), box);
   if (!parts.holes.length && !parts.rects.length) return undefined;
+  const width = num(Math.max(0.001, box.width));
+  const height = num(Math.max(0.001, box.height));
+  // Keep the mask definition inside <defs>; the outer white surface remains opaque everywhere
+  // except the exact brush/region geometry cut out by the luminance mask.
   return svgShell(
-    `<mask id="e" maskUnits="userSpaceOnUse" x="0" y="0" width="${num(Math.max(0.001, box.width))}" height="${num(Math.max(0.001, box.height))}">`
-    + `<rect width="${num(Math.max(0.001, box.width))}" height="${num(Math.max(0.001, box.height))}" fill="#fff"/><g fill="#000">${partsMarkup(parts)}</g></mask>`
-    + `<rect width="${num(Math.max(0.001, box.width))}" height="${num(Math.max(0.001, box.height))}" fill="#fff" mask="url(#e)"/></svg>`,
+    `<defs><mask id="e" maskUnits="userSpaceOnUse" mask-type="luminance" x="0" y="0" width="${width}" height="${height}">`
+    + `<rect x="0" y="0" width="${width}" height="${height}" fill="#fff"/><g fill="#000">${partsMarkup(parts)}</g></mask></defs>`
+    + `<rect x="0" y="0" width="${width}" height="${height}" fill="#fff" mask="url(#e)"/>`,
     box
   );
 }
