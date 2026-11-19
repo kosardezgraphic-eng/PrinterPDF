@@ -228,7 +228,7 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
     }, 600);
   };
   const crisp = useCrispPageFrame({ page, enabled: crispEnabled, width:display.width, height:display.height, hostRef: contentRef });
-  const pageEraseMask = eraseMaskCss(page.erase, { width: display.width, height: display.height, widthMm: page.widthMm, heightMm: page.heightMm });
+  const pageEraseMask = eraseMaskCss(page.erase, { width: display.width, height: display.height, widthMm: display.width / Math.max(0.01, pxPerMm), heightMm: display.height / Math.max(0.01, pxPerMm) });
   const pointerEvents = { onPointerMove:move, onPointerUp:(e: React.PointerEvent<HTMLElement>) => finishPress(e), onPointerCancel:(e: React.PointerEvent<HTMLElement>) => finishPress(e,true), onLostPointerCapture:(e: React.PointerEvent<HTMLElement>) => finishPress(e,true) };
   const fa = language === 'fa';
   const menuActions = [
