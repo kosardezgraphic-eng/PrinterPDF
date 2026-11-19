@@ -260,7 +260,12 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
       onPointerDown={e => { if (readOnly) return; startTouchHold(e); if (tool === 'move') begin(e,'move'); }} {...pointerEvents}
       style={{ left:display.x, top:display.y, width:display.width, height:display.height, transform:`rotate(${angle}deg)`, clipPath:inset, pointerEvents:readOnly ? 'none' : 'auto', touchAction:canEdit ? 'none' : 'auto', WebkitTouchCallout:'none', userSelect:'none', cursor:canEdit && tool === 'move' ? 'move' : 'pointer' }}
       className={`pointer-events-auto absolute overflow-hidden ${(tool === 'move' ? isActive && page.isHighlighted : page.isHighlighted) ? 'ring-2 ring-inset ring-sky-500' : ''}`}>
-      <div className="absolute inset-0" style={pageEraseMask ? { maskImage: pageEraseMask, WebkitMaskImage: pageEraseMask } : undefined}>
+      <div className="absolute inset-0" style={pageEraseMask ? {
+        maskImage: pageEraseMask, WebkitMaskImage: pageEraseMask,
+        maskSize: '100% 100%', WebkitMaskSize: '100% 100%',
+        maskRepeat: 'no-repeat', WebkitMaskRepeat: 'no-repeat',
+        maskPosition: '0 0', WebkitMaskPosition: '0 0', maskMode: 'alpha',
+      } : undefined}>
         <PageContentImage page={page} effects={effects} rotation={cell.effectiveRotation} width={display.width} height={display.height} />
         {/* The crisp layer shares the same page mask, so erasures remain visible at every preview fidelity. */}
         {crispEnabled && <CrispPageCanvas page={page} effects={effects}
