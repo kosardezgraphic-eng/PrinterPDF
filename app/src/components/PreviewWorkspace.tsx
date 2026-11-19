@@ -19,6 +19,8 @@ import {
   PanelsTopLeft,
   Ruler,
   Maximize2,
+  ZoomIn,
+  ZoomOut,
   SlidersHorizontal,
   Zap,
   Magnet,
@@ -1351,6 +1353,38 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
             <button type="button" aria-label={lang === 'fa' ? 'جاگیری کامل' : 'Fit page'} title={lang === 'fa' ? 'جاگیری کامل' : 'Fit page'} onClick={fitPage} className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-slate-100 hover:bg-slate-700">
               <Maximize2 className="h-4 w-4" aria-hidden="true" />
             </button>
+            <div data-zoom-toolbar className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-1.5 py-1">
+              <button
+                type="button"
+                aria-label={lang === 'fa' ? 'کوچک‌نمایی' : 'Zoom out'}
+                title={lang === 'fa' ? 'کوچک‌نمایی' : 'Zoom out'}
+                onClick={() => setZoomPercent(Math.max(5, zoomPercent - 15))}
+                className="rounded p-0.5 text-slate-300 hover:bg-slate-700"
+              >
+                <ZoomOut className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+              <input
+                aria-label={lang === 'fa' ? 'درصد بزرگ‌نمایی' : 'Zoom percentage'}
+                type="range"
+                min={5}
+                max={400}
+                value={zoomPercent}
+                onChange={(e) => setZoomPercent(Number(e.target.value))}
+                className="w-16 accent-sky-500"
+              />
+              <button
+                type="button"
+                aria-label={lang === 'fa' ? 'بزرگ‌نمایی' : 'Zoom in'}
+                title={lang === 'fa' ? 'بزرگ‌نمایی' : 'Zoom in'}
+                onClick={() => setZoomPercent(Math.min(400, zoomPercent + 15))}
+                className="rounded p-0.5 text-slate-300 hover:bg-slate-700"
+              >
+                <ZoomIn className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+              <span className="min-w-9 text-end font-mono text-[10px] font-bold text-sky-400">
+                {zoomPercent}%
+              </span>
+            </div>
           </div>
         </div>
       )}

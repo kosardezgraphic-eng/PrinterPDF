@@ -1,12 +1,5 @@
 import React from 'react';
-import {
-  ZoomIn,
-  ZoomOut,
-  Contrast,
-  Calculator,
-  FileSpreadsheet,
-  Calendar,
-} from 'lucide-react';
+import { Contrast, Calendar } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { t } from '../i18n/translations';
 import { computeCounterSummary } from '../engine/counterEngine';
@@ -31,9 +24,6 @@ export const StatusBar: React.FC<StatusBarProps> = ({ cursorPos }) => {
     printers,
     selectedPrinterName,
     activeSheetIndex,
-    zoomPercent,
-    setZoomPercent,
-    setModalState,
   } = useAppStore();
 
   const lang = settings.language;
@@ -46,7 +36,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({ cursorPos }) => {
   const currentPageNum = highlightedIdx >= 0 ? highlightedIdx + 1 : 1;
 
   return (
-    <footer className="flex h-8 shrink-0 items-center justify-between border-t border-slate-800 bg-slate-900 px-3 text-[11px] text-slate-300 select-none">
+    <footer data-status-bar-info className="flex h-7 shrink-0 items-center justify-between border-t border-slate-800 bg-slate-900 px-3 text-[11px] text-slate-300 select-none">
       {/* Start: Page x/y, Sheet x of y, Paper Size, Cursor */}
       <div className="flex items-center gap-3 overflow-x-auto no-scrollbar">
         <div className="flex items-center gap-1">
@@ -108,67 +98,14 @@ export const StatusBar: React.FC<StatusBarProps> = ({ cursorPos }) => {
         )}
       </div>
 
-      {/* End: Live Counter Summary + Calendar + Zoom Slider */}
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => setModalState('counter', true)}
-          className="hidden md:flex items-center gap-2 rounded-md bg-slate-800/90 px-2.5 py-0.5 text-[11px] hover:bg-slate-700 cursor-pointer"
-        >
-          <Calculator className="h-3 w-3 text-amber-400" />
-          <span>
-            {lang === 'fa'
-              ? `${formatLocalizedNumber(summary.totalFiles, lang)} فایل • ${formatLocalizedNumber(
-                  summary.selectedPages,
-                  lang
-                )} صفحه فعال • ${formatLocalizedNumber(
-                  summary.totalPhysicalSheets,
-                  lang
-                )} برگ کاغذ (${formatLocalizedNumber(
-                  summary.estimatedCostRials,
-                  lang
-                )} ریال)`
-              : `${summary.totalFiles} files • ${summary.selectedPages} pages • ${summary.totalPhysicalSheets} physical sheets`}
-          </span>
-        </button>
-
-        <div className="hidden xl:flex items-center gap-1 text-[10px] text-slate-400">
+      {/* Date information only; counters live in QuickBar and zoom lives above the canvas. */}
+      <div className="hidden xl:flex items-center gap-1 text-[10px] text-slate-400">
           <Calendar className="h-3 w-3 text-sky-400" />
           <span>
             {settings.calendar === 'shamsi'
               ? formatShamsiDate(new Date(), lang === 'fa')
               : formatGregorianDate(new Date())}
           </span>
-        </div>
-
-        {/* Zoom Slider */}
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setZoomPercent(zoomPercent - 15)}
-            className="rounded p-0.5 text-slate-400 hover:bg-slate-800 hover:text-white cursor-pointer"
-          >
-            <ZoomOut className="h-3.5 w-3.5" />
-          </button>
-          <input
-            type="range"
-            min={5}
-            max={400}
-            value={zoomPercent}
-            onChange={(e) => setZoomPercent(Number(e.target.value))}
-            className="w-20 accent-sky-500 cursor-pointer"
-          />
-          <button
-            type="button"
-            onClick={() => setZoomPercent(zoomPercent + 15)}
-            className="rounded p-0.5 text-slate-400 hover:bg-slate-800 hover:text-white cursor-pointer"
-          >
-            <ZoomIn className="h-3.5 w-3.5" />
-          </button>
-          <span className="w-10 text-end font-mono text-[10px] font-bold text-sky-400">
-            {zoomPercent}%
-          </span>
-        </div>
       </div>
     </footer>
   );

@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { AppShell } from '../components/AppShell';
 import { ToolButton } from '../components/ToolButton';
 import { ToolRail } from '../components/ToolRail';
+import { QuickBar } from '../components/QuickBar';
+import { StatusBar } from '../components/StatusBar';
 import { useAppStore } from '../store/useAppStore';
 
 const labels = {
@@ -110,5 +112,20 @@ describe('workspace drawer state', () => {
     expect(useAppStore.getState().workspaceDrawer).toBe('closed');
     useAppStore.getState().setActiveRibbonTab('layout');
     expect(useAppStore.getState().workspaceDrawer).toBeNull();
+  });
+});
+
+describe('topbar and status bar roles', () => {
+  it('keeps the Counter trigger in QuickBar and leaves StatusBar informational', () => {
+    const quickBarMarkup = renderToStaticMarkup(React.createElement(QuickBar));
+    const statusMarkup = renderToStaticMarkup(
+      React.createElement(StatusBar, { cursorPos: null }),
+    );
+
+    expect((quickBarMarkup.match(/data-counter-trigger/g) ?? []).length).toBe(1);
+    expect(statusMarkup).toContain('data-status-bar-info');
+    expect(statusMarkup).not.toContain('data-counter-trigger');
+    expect(statusMarkup).not.toContain('type="range"');
+    expect(statusMarkup).not.toContain('Zoom Slider');
   });
 });
