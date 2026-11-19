@@ -16,7 +16,9 @@ import { useAppStore, type RibbonTabId } from '../store/useAppStore';
 import { t } from '../i18n/translations';
 import { ToolButton } from './ToolButton';
 
-export const ToolRail: React.FC = () => {
+interface ToolRailProps { onNavigate?: () => void; }
+
+export const ToolRail: React.FC<ToolRailProps> = ({ onNavigate }) => {
   const {
     activeRibbonTab,
     ribbonCollapsed,
@@ -58,6 +60,7 @@ export const ToolRail: React.FC = () => {
               size="md"
               tooltipSide="inline-end"
               onClick={() => {
+                onNavigate?.();
                 const drawerAlreadyOpen = workspaceDrawer === tab.id
                   || (workspaceDrawer === null && activeRibbonTab === tab.id);
                 setActiveRibbonTab(tab.id);

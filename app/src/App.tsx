@@ -5,6 +5,7 @@ import { AppShell } from './components/AppShell';
 import { t } from './i18n/translations';
 import { QuickBar } from './components/QuickBar';
 import { ToolRail } from './components/ToolRail';
+import { PropertiesDock, type PropertiesPanelId } from './components/PropertiesDock';
 import { ToolPanel } from './components/ToolPanel';
 import { SidebarPages } from './components/SidebarPages';
 import { PreviewWorkspace } from './components/PreviewWorkspace';
@@ -39,6 +40,7 @@ export const App: React.FC = () => {
     duplicatePages,
     deletePages,
     removeOverlay,
+    selectOverlay,
     selectAllForPrint,
     setZoomPercent,
     setModalState,
@@ -49,8 +51,8 @@ export const App: React.FC = () => {
   } = useAppStore();
 
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
-  const [watermarkPanelOpen, setWatermarkPanelOpen] = useState(false);
-  const [bookletPanelOpen, setBookletPanelOpen] = useState(false);
+  const [propertiesDockOpen, setPropertiesDockOpen] = useState(false);
+  const [activePropertyPanel, setActivePropertyPanel] = useState<PropertiesPanelId | null>(null);
 
   useEffect(() => {
     void initializeWorkspace();
@@ -84,29 +86,29 @@ export const App: React.FC = () => {
     return stop;
   }, [importFiles, addToast, settings.language]);
 
-  // Close only the watermark settings panel when the user clicks outside it.
-  // The watermark's enabled state is independent and remains unchanged.
+  // Selecting an editable overlay opens the one shared properties dock.
   useEffect(() => {
-    if (!watermarkPanelOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.closest('[data-watermark-control-panel],[data-watermark-panel-trigger]')) return;
-      setWatermarkPanelOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [watermarkPanelOpen]);
+    if (!selectedOverlayId) return;
+    const selected = overlays.find(item => item.id === selectedOverlayId);
+    if (!selected) return;
+    if (selected.kind === 'text' || selected.kind === 'numbering' || selected.kind === 'image' || selected.kind === 'shape') {
+      setActivePropertyPanel(selected.kind);
+      setPropertiesDockOpen(true);
+    }
+  }, [selectedOverlayId, overlays]);
 
+  // Watermark and booklet still dismiss on outside click; the whole shared dock is treated as inside.
   useEffect(() => {
-    if (!bookletPanelOpen) return;
+    if (!propertiesDockOpen || (activePropertyPanel !== 'watermark' && activePropertyPanel !== 'booklet')) return;
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target?.closest('[data-booklet-control-panel],[data-booklet-panel-trigger]')) return;
-      setBookletPanelOpen(false);
+      if (target?.closest('[data-properties-dock],[data-watermark-panel-trigger],[data-booklet-panel-trigger]')) return;
+      setPropertiesDockOpen(false);
+      setActivePropertyPanel(null);
     };
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [bookletPanelOpen]);
+  }, [propertiesDockOpen, activePropertyPanel]);
 
   // Synchronize HTML dir (RTL/LTR) and lang
   useEffect(() => {
@@ -299,27 +301,88 @@ export const App: React.FC = () => {
     importFiles,
   ]);
 
+  const selectedOverlay = selectedOverlayId
+    ? overlays.find(item => item.id === selectedOverlayId)
+    : undefined;
+  const overlayPropertyKinds: PropertiesPanelId[] = ['text', 'numbering', 'image', 'shape'];
+  const activeOverlayProperty = selectedOverlay && overlayPropertyKinds.includes(selectedOverlay.kind as PropertiesPanelId)
+    ? selectedOverlay.kind as PropertiesPanelId
+    : null;
+  const resolvedPropertyPanel = activePropertyPanel ?? activeOverlayProperty;
+
+  const openWatermarkProperties = () => {
+    selectOverlay(null);
+    setActivePropertyPanel('watermark');
+    setPropertiesDockOpen(true);
+  };
+  const openBookletProperties = () => {
+    selectOverlay(null);
+    setActivePropertyPanel('booklet');
+    setPropertiesDockOpen(true);
+  };
+  const openSelectedProperties = () => {
+    setActivePropertyPanel(activeOverlayProperty ?? 'text');
+    setPropertiesDockOpen(true);
+  };
+  const closePropertiesDock = () => {
+    setPropertiesDockOpen(false);
+    setActivePropertyPanel(null);
+    selectOverlay(null);
+  };
+  const showToolPanel = () => {
+    setPropertiesDockOpen(false);
+    setActivePropertyPanel(null);
+  };
+  const selectPropertiesPanel = (panel: PropertiesPanelId) => {
+    setActivePropertyPanel(panel);
+    setPropertiesDockOpen(true);
+    if (panel === 'watermark' || panel === 'booklet') {
+      selectOverlay(null);
+    } else {
+      const target = overlays.find(item => item.kind === panel);
+      if (target) selectOverlay(target.id);
+    }
+  };
+
   return (
     <ErrorBoundary>
       <AppShell
         theme={settings.theme}
         labels={t(settings.language).shell}
         topbar={<QuickBar />}
-        navigation={<ToolRail />}
+        navigation={
+          <ToolRail onNavigate={() => {
+            setPropertiesDockOpen(false);
+            setActivePropertyPanel(null);
+          }} />
+        }
         workspace={
           <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
             <SidebarPages />
             <PreviewWorkspace onCursorMoveMm={setCursorPos} />
-            <ToolPanel
-              onOpenWatermarkPanel={() => setWatermarkPanelOpen(true)}
-              onOpenBookletPanel={() => setBookletPanelOpen(true)}
-            />
-            {selectedOverlayId && overlays.some(o => o.id === selectedOverlayId && o.kind === 'text') && <TextControlPanel />}
-            {selectedOverlayId && overlays.some(o => o.id === selectedOverlayId && o.kind === 'numbering') && <NumberingControlPanel />}
-            {selectedOverlayId && overlays.some(o => o.id === selectedOverlayId && o.kind === 'image') && <ImageControlPanel />}
-            {selectedOverlayId && overlays.some(o => o.id === selectedOverlayId && o.kind === 'shape') && <ShapeControlPanel />}
-            {watermarkPanelOpen && <WatermarkControlPanel onClose={() => setWatermarkPanelOpen(false)} />}
-            {bookletPanelOpen && <BookletControlPanel onClose={() => setBookletPanelOpen(false)} />}
+            {propertiesDockOpen && resolvedPropertyPanel ? (
+              <PropertiesDock
+                activePanel={resolvedPropertyPanel}
+                onSelectPanel={selectPropertiesPanel}
+                onShowTools={showToolPanel}
+                onClose={closePropertiesDock}
+                labels={t(settings.language).shell.propertiesDock}
+              >
+                {resolvedPropertyPanel === 'text' && <TextControlPanel />}
+                {resolvedPropertyPanel === 'numbering' && <NumberingControlPanel />}
+                {resolvedPropertyPanel === 'image' && <ImageControlPanel />}
+                {resolvedPropertyPanel === 'shape' && <ShapeControlPanel />}
+                {resolvedPropertyPanel === 'watermark' && <WatermarkControlPanel onClose={closePropertiesDock} />}
+                {resolvedPropertyPanel === 'booklet' && <BookletControlPanel onClose={closePropertiesDock} />}
+              </PropertiesDock>
+            ) : (
+              <ToolPanel
+                onOpenWatermarkPanel={openWatermarkProperties}
+                onOpenBookletPanel={openBookletProperties}
+                onOpenProperties={openSelectedProperties}
+                hasSelectedOverlay={!!selectedOverlayId}
+              />
+            )}
           </div>
         }
         statusBar={<StatusBar cursorPos={cursorPos} />}

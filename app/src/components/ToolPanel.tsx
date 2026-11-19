@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, SlidersHorizontal } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { t } from '../i18n/translations';
 import { ToolButton } from './ToolButton';
@@ -8,11 +8,15 @@ import { Ribbon } from './Ribbon';
 interface ToolPanelProps {
   onOpenWatermarkPanel: () => void;
   onOpenBookletPanel: () => void;
+  onOpenProperties: () => void;
+  hasSelectedOverlay: boolean;
 }
 
 export const ToolPanel: React.FC<ToolPanelProps> = ({
   onOpenWatermarkPanel,
   onOpenBookletPanel,
+  onOpenProperties,
+  hasSelectedOverlay,
 }) => {
   const { activeRibbonTab, ribbonCollapsed, settings, setRibbonCollapsed } = useAppStore();
   const tr = t(settings.language);
@@ -30,6 +34,14 @@ export const ToolPanel: React.FC<ToolPanelProps> = ({
             <h2 className="min-w-0 truncate text-xs font-bold text-slate-100">
               {tr.ribbonTabs[activeRibbonTab]}
             </h2>
+            {hasSelectedOverlay && (
+              <ToolButton
+                icon={<SlidersHorizontal className="h-3.5 w-3.5" />}
+                label={tr.shell.propertiesDock.showToolsReturn}
+                size="sm"
+                onClick={onOpenProperties}
+              />
+            )}
             <ToolButton
               icon={<ChevronLeft className="h-4 w-4 rtl:rotate-180" />}
               label={tr.shell.collapseToolPanel}
