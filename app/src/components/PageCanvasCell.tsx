@@ -267,7 +267,6 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
       {crispEnabled && <CrispPageCanvas page={page} effects={effects}
         width={display.width} height={display.height} frame={crisp.frame} onStaleFrame={crisp.askAgain}
         style={{ ...pageImageStyle(page, cell.effectiveRotation, display.width, display.height), ...(pageEraseMask ? { maskImage: pageEraseMask, WebkitMaskImage: pageEraseMask } : {}) }} />}
-      {page.erase?.length ? <div aria-hidden="true" className="pointer-events-none absolute inset-0" style={{ backgroundImage: undefined }} /> : null}
       {eraseTool !== 'off' && !readOnly && <PageEraserLayer page={page} width={display.width} height={display.height} />}
     </div>
     {canEdit && <div style={{ left:tool === 'crop' ? cropFrame.x : display.x, top:tool === 'crop' ? cropFrame.y : display.y,
