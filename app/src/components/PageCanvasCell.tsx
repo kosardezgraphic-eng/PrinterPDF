@@ -260,13 +260,13 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
       onPointerDown={e => { if (readOnly) return; startTouchHold(e); if (tool === 'move') begin(e,'move'); }} {...pointerEvents}
       style={{ left:display.x, top:display.y, width:display.width, height:display.height, transform:`rotate(${angle}deg)`, clipPath:inset, pointerEvents:readOnly ? 'none' : 'auto', touchAction:canEdit ? 'none' : 'auto', WebkitTouchCallout:'none', userSelect:'none', cursor:canEdit && tool === 'move' ? 'move' : 'pointer' }}
       className={`pointer-events-auto absolute overflow-hidden ${(tool === 'move' ? isActive && page.isHighlighted : page.isHighlighted) ? 'ring-2 ring-inset ring-sky-500' : ''}`}>
-      <PageContentImage page={page} effects={effects} rotation={cell.effectiveRotation} width={display.width} height={display.height} />
-      {/* The bitmap made at import is a thumbnail; on a zoomed sheet it turns a hairline into a smear.
-          The crisp layer paints the same page re-rendered at the size of this cell, on top of it, and
-          only while the cell is on screen — see `CrispPageCanvas`. */}
-      {crispEnabled && <CrispPageCanvas page={page} effects={effects}
-        width={display.width} height={display.height} frame={crisp.frame} onStaleFrame={crisp.askAgain}
-        style={{ ...pageImageStyle(page, cell.effectiveRotation, display.width, display.height), ...(pageEraseMask ? { maskImage: pageEraseMask, WebkitMaskImage: pageEraseMask } : {}) }} />}
+      <div className="absolute inset-0" style={pageEraseMask ? { maskImage: pageEraseMask, WebkitMaskImage: pageEraseMask } : undefined}>
+        <PageContentImage page={page} effects={effects} rotation={cell.effectiveRotation} width={display.width} height={display.height} />
+        {/* The crisp layer shares the same page mask, so erasures remain visible at every preview fidelity. */}
+        {crispEnabled && <CrispPageCanvas page={page} effects={effects}
+          width={display.width} height={display.height} frame={crisp.frame} onStaleFrame={crisp.askAgain}
+          style={pageImageStyle(page, cell.effectiveRotation, display.width, display.height)} />}
+      </div>
       {eraseTool !== 'off' && !readOnly && <PageEraserLayer page={page} width={display.width} height={display.height} />}
     </div>
     {canEdit && <div style={{ left:tool === 'crop' ? cropFrame.x : display.x, top:tool === 'crop' ? cropFrame.y : display.y,
