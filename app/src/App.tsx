@@ -95,7 +95,7 @@ export const App: React.FC = () => {
       setActivePropertyPanel(selected.kind);
       setPropertiesDockOpen(true);
     }
-  }, [selectedOverlayId, overlays]);
+  }, [selectedOverlayId]);
 
   // Watermark and booklet still dismiss on outside click; the whole shared dock is treated as inside.
   useEffect(() => {
