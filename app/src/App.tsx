@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useAppStore } from './store/useAppStore';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { AppShell } from './components/AppShell';
+import { t } from './i18n/translations';
 import { QuickBar } from './components/QuickBar';
 import { Ribbon } from './components/Ribbon';
 import { SidebarPages } from './components/SidebarPages';
@@ -298,26 +300,31 @@ export const App: React.FC = () => {
 
   return (
     <ErrorBoundary>
-      <div
-        className={`flex h-screen w-screen flex-col overflow-hidden ${
-          settings.theme === 'light' ? 'theme-light invert hue-rotate-180' : ''
-        }`}
-      >
-        <QuickBar />
-        <Ribbon onOpenWatermarkPanel={() => setWatermarkPanelOpen(true)} onOpenBookletPanel={() => setBookletPanelOpen(true)} />
-        <div className="flex flex-1 overflow-hidden">
-          <SidebarPages />
-          <PreviewWorkspace onCursorMoveMm={setCursorPos} />
-          {selectedOverlayId && overlays.some(o=>o.id===selectedOverlayId && o.kind==='text') && <TextControlPanel />}
-          {selectedOverlayId && overlays.some(o=>o.id===selectedOverlayId && o.kind==='numbering') && <NumberingControlPanel />}
-          {selectedOverlayId && overlays.some(o=>o.id===selectedOverlayId && o.kind==='image') && <ImageControlPanel />}
-          {selectedOverlayId && overlays.some(o=>o.id===selectedOverlayId && o.kind==='shape') && <ShapeControlPanel />}
-          {watermarkPanelOpen && <WatermarkControlPanel onClose={() => setWatermarkPanelOpen(false)} />}
-          {bookletPanelOpen && <BookletControlPanel onClose={() => setBookletPanelOpen(false)} />}
-        </div>
-        <StatusBar cursorPos={cursorPos} />
-        <ModalsAndToasts />
-      </div>
+      <AppShell
+        theme={settings.theme}
+        labels={t(settings.language).shell}
+        topbar={<QuickBar />}
+        navigation={
+          <Ribbon
+            onOpenWatermarkPanel={() => setWatermarkPanelOpen(true)}
+            onOpenBookletPanel={() => setBookletPanelOpen(true)}
+          />
+        }
+        workspace={
+          <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+            <SidebarPages />
+            <PreviewWorkspace onCursorMoveMm={setCursorPos} />
+            {selectedOverlayId && overlays.some(o => o.id === selectedOverlayId && o.kind === 'text') && <TextControlPanel />}
+            {selectedOverlayId && overlays.some(o => o.id === selectedOverlayId && o.kind === 'numbering') && <NumberingControlPanel />}
+            {selectedOverlayId && overlays.some(o => o.id === selectedOverlayId && o.kind === 'image') && <ImageControlPanel />}
+            {selectedOverlayId && overlays.some(o => o.id === selectedOverlayId && o.kind === 'shape') && <ShapeControlPanel />}
+            {watermarkPanelOpen && <WatermarkControlPanel onClose={() => setWatermarkPanelOpen(false)} />}
+            {bookletPanelOpen && <BookletControlPanel onClose={() => setBookletPanelOpen(false)} />}
+          </div>
+        }
+        statusBar={<StatusBar cursorPos={cursorPos} />}
+        overlays={<ModalsAndToasts />}
+      />
     </ErrorBoundary>
   );
 };
