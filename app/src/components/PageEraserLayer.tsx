@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { EraseShape, PageItem } from '@shared/models';
 import { useAppStore } from '../store/useAppStore';
-import { beginEraseShape, commitEraseShape, colorFromPixels, erasePaintCss, growEraseShape, eraseShapeIsMeaningful } from '../engine/imageErase';
+import { beginEraseShape, commitEraseShape, colorFromPixels, eraseMaskCss, erasePaintCss, growEraseShape, eraseShapeIsMeaningful } from '../engine/imageErase';
 
 type Point = { x: number; y: number };
 type DragState = { pointerId: number; anchor: Point; shape: EraseShape };
@@ -20,10 +20,12 @@ export function PageEraserLayer({ page, width, height }: { page: PageItem; width
   const [drag, setDrag] = useState<DragState | null>(null);
   const [pending, setPending] = useState<EraseShape | null>(null);
   const [cursor, setCursor] = useState<Point | null>(null);
+  const surface = useRef<HTMLDivElement>(null);
   const source = useMemo(() => page.erase ?? [], [page.erase]);
   const preview = drag?.shape ?? pending ?? undefined;
   const visibleShapes = preview ? [...source, preview] : source;
   const box = { width, height, widthMm: Math.max(1, page.widthMm), heightMm: Math.max(1, page.heightMm) };
+  const mask = eraseMaskCss(visibleShapes, box);
   const paint = erasePaintCss(visibleShapes, box);
   const region = preview?.mode === 'region' ? preview : null;
   const scaleX = width / Math.max(1, page.widthMm);
@@ -43,6 +45,12 @@ export function PageEraserLayer({ page, width, height }: { page: PageItem; width
   }, [pending, page.id, setPageErase, source]);
 
   useEffect(() => { setDrag(null); setPending(null); setCursor(null); }, [page.id, tool]);
+  useEffect(() => {
+    const imageLayer = surface.current?.previousElementSibling as HTMLElement | null;
+    if (!imageLayer) return;
+    imageLayer.style.maskImage = mask ?? '';
+    imageLayer.style.webkitMaskImage = mask ?? '';
+  }, [mask]);
 
   if (tool === 'off') return null;
 
@@ -79,7 +87,7 @@ export function PageEraserLayer({ page, width, height }: { page: PageItem; width
     }
   };
 
-  return <div data-page-eraser={page.id} className="absolute inset-0 z-30"
+  return <div ref={surface} data-page-eraser={page.id} className="absolute inset-0 z-30"
     style={{ pointerEvents: 'auto', touchAction: 'none', cursor: tool === 'picker' ? 'crosshair' : tool === 'region' ? 'crosshair' : 'none' }}
     onPointerDown={event => {
       event.preventDefault(); event.stopPropagation();
