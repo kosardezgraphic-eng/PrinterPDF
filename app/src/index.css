@@ -68,7 +68,7 @@
   flex: 0 0 var(--psp-tool-rail-size);
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .psp-tool-rail {
