@@ -7,6 +7,8 @@ import { ToolRail } from '../components/ToolRail';
 import { QuickBar } from '../components/QuickBar';
 import { StatusBar } from '../components/StatusBar';
 import { PropertiesDock, type PropertiesDockLabels, type PropertiesPanelId } from '../components/PropertiesDock';
+import { SegmentedControl } from '../components/SegmentedControl';
+import { CrossMarginWidget } from '../components/CrossMarginWidget';
 import { useAppStore } from '../store/useAppStore';
 
 const labels = {
@@ -165,5 +167,50 @@ describe('shared properties dock UI', () => {
     for (const panel of panels) expect(markup).toContain(`data-tooltip="${labels.tabs[panel]}"`);
     expect((markup.match(/data-tool-button/g) ?? []).length).toBe(8);
     expect(markup).toContain('aria-pressed="true"');
+  });
+});
+
+describe('compact layout controls', () => {
+  it('renders segmented options with one active state and accessible group semantics', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(SegmentedControl, {
+        ariaLabel: 'Paper orientation',
+        value: 'portrait',
+        options: [
+          { value: 'portrait', label: 'Portrait' },
+          { value: 'landscape', label: 'Landscape' },
+        ],
+        onChange: () => {},
+      }),
+    );
+
+    expect(markup).toContain('role="group"');
+    expect(markup).toContain('aria-label="Paper orientation"');
+    expect(markup).toContain('data-segment-option="portrait"');
+    expect(markup).toContain('aria-pressed="true"');
+    expect(markup).toContain('aria-pressed="false"');
+  });
+
+  it('renders four margins and disables vertical gutter while booklet mode is active', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(CrossMarginWidget, {
+        language: 'en',
+        margins: { top: 5, right: 5, bottom: 5, left: 5 },
+        minimums: { top: 3, right: 3, bottom: 3, left: 3 },
+        step: 0.5,
+        horizontalGutterMm: 12,
+        verticalGutterMm: 0,
+        bookletEnabled: true,
+        onMarginChange: () => {},
+        onGutterChange: () => {},
+      }),
+    );
+
+    expect(markup).toContain('data-cross-margin-widget');
+    expect((markup.match(/data-margin-side=/g) ?? []).length).toBe(4);
+    expect(markup).toContain('data-gutter-axis="horizontal"');
+    expect(markup).toContain('data-gutter-axis="vertical"');
+    expect(markup).toContain('disabled=""');
+    expect(markup).toContain('aria-label="Right margin value"');
   });
 });

@@ -123,6 +123,19 @@
   border-inline-start: 0;
 }
 
+.psp-segmented-control {
+  max-inline-size: 100%;
+}
+
+.psp-segmented-control [data-segment-option] {
+  min-inline-size: 0;
+}
+
+[data-cross-margin-widget] input:focus-visible {
+  outline: 2px solid var(--psp-focus-ring);
+  outline-offset: 1px;
+}
+
 .psp-tool-panel-ribbon__content {
   align-content: start;
   overscroll-behavior: contain;
