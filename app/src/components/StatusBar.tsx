@@ -106,7 +106,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({ cursorPos }) => {
               ? formatShamsiDate(new Date(), lang === 'fa')
               : formatGregorianDate(new Date())}
           </span>
-        </div
+      </div>
     </footer>
   );
 };
