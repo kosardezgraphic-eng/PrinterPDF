@@ -993,8 +993,8 @@ export async function exportImposedPdf(params: {
           const y = contentYPt + (100 - mark.y - mark.height) / 100 * contentHPt;
           outPage.drawRectangle({ x, y, width: mark.width / 100 * contentWPt, height: mark.height / 100 * contentHPt, color: fill });
         } else {
-          const rx = mark.radiusMm / Math.max(1, cell.page.widthMm) * contentWPt;
-          const ry = mark.radiusMm / Math.max(1, cell.page.heightMm) * contentHPt;
+          const rx = mark.radiusMm * MM_TO_PT;
+          const ry = mark.radiusMm * MM_TO_PT;
           for (const point of mark.points) {
             const cx = contentXPt + point.x / 100 * contentWPt;
             const cy = contentYPt + (100 - point.y) / 100 * contentHPt;
