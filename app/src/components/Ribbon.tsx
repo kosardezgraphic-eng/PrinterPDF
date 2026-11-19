@@ -34,6 +34,8 @@ import {
   Pipette,
 } from 'lucide-react';
 import { MatrixSizeFields } from './MatrixSizeFields';
+import { SegmentedControl } from './SegmentedControl';
+import { CrossMarginWidget } from './CrossMarginWidget';
 import { SettingsPresetMenu } from './SettingsPresets';
 import { MarginPresetsMenu } from './MarginPresetsMenu';
 import { ShapePicker } from './ShapeControlPanel';
@@ -128,6 +130,9 @@ export const Ribbon: React.FC<RibbonProps> = ({
   const tr = t(lang);
   const selectedPrinter = printers.find((printer) => printer.name === selectedPrinterName);
   const sheetDims = getSheetDimensionsMm(layout);
+  const marginMinimums = resolvePrinterMinMargins(printerMargins, selectedPrinter) ?? {
+    top: 0, right: 0, bottom: 0, left: 0,
+  };
   const driverPaperOptions = selectedPrinter?.capabilities.paperOptions?.length
     ? selectedPrinter.capabilities.paperOptions
     : (selectedPrinter?.capabilities.supportedPapers?.length
@@ -301,42 +306,29 @@ export const Ribbon: React.FC<RibbonProps> = ({
             <>
               <MatrixSizeFields rows={layout.rows} cols={layout.cols} language={lang} onChange={setNUpMatrix} />
 
-              {/* Group D2: Placement Mode (Sequential vs Step & Repeat) + Unique Scale */}
-              <div className="flex flex-col gap-1 border-e border-slate-800 pe-3">
+              {/* Group D2: Compact placement controls */}
+              <div className="flex min-w-0 flex-col gap-2 border-e border-slate-800 pe-3">
                 <span className="text-[10px] font-semibold text-slate-400">
-                  {lang === 'fa' ? 'حالت چیدمان خانه‌ها (D2)' : 'Cell Placement Mode'}
+                  {lang === 'fa' ? 'حالت چیدمان خانه‌ها' : 'Cell placement'}
                 </span>
-                <div className="flex items-center gap-1.5">
-                  <select
-                    value={layout.placementMode}
-                    onChange={(e) =>
-                      updateLayout({
-                        placementMode: e.target.value as 'sequential' | 'step-and-repeat',
-                      })
-                    }
-                    className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-100"
-                  >
-                    <option value="sequential">
-                      {lang === 'fa'
-                        ? 'هر صفحه در یک خانه (Sequential)'
-                        : 'Each page in one cell'}
-                    </option>
-                    <option value="step-and-repeat">
-                      {lang === 'fa'
-                        ? 'تکرار یک صفحه در همه خانه‌ها (Step & Repeat)'
-                        : 'Repeat page across all cells (Step & Repeat)'}
-                    </option>
-                  </select>
-                  <label className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-slate-200 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={layout.uniqueScale}
-                      onChange={(e) => updateLayout({ uniqueScale: e.target.checked })}
-                      className="accent-sky-500"
-                    />
-                    <span>{lang === 'fa' ? 'مقیاس یکسان (Unique Scale)' : 'Unique Scale'}</span>
-                  </label>
-                </div>
+                <SegmentedControl
+                  ariaLabel={lang === 'fa' ? 'حالت چیدمان خانه‌ها' : 'Cell placement mode'}
+                  value={layout.placementMode}
+                  onChange={(placementMode) => updateLayout({ placementMode })}
+                  options={[
+                    { value: 'sequential', label: lang === 'fa' ? 'ترتیبی' : 'Sequential', icon: <FileStack className="h-3.5 w-3.5" /> },
+                    { value: 'step-and-repeat', label: lang === 'fa' ? 'تکرار' : 'Repeat', icon: <Copy className="h-3.5 w-3.5" /> },
+                  ]}
+                />
+                <label className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-[10px] text-slate-200 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={layout.uniqueScale}
+                    onChange={(e) => updateLayout({ uniqueScale: e.target.checked })}
+                    className="accent-sky-500"
+                  />
+                  <span>{lang === 'fa' ? 'مقیاس مستقل برای هر خانه' : 'Unique scale per cell'}</span>
+                </label>
               </div>
 
               {/* Group D4: Paper Size & Orientation */}
@@ -419,130 +411,114 @@ export const Ribbon: React.FC<RibbonProps> = ({
                         className="w-16 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-xs text-white tabular-nums" />
                     </label>
                   ))}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const nextOrientation: PageOrientation =
-                        layout.orientation === 'portrait' ? 'landscape' : 'portrait';
+
+                  <SegmentedControl
+                    ariaLabel={lang === 'fa' ? 'جهت کاغذ' : 'Paper orientation'}
+                    value={layout.orientation}
+                    onChange={(nextOrientation: PageOrientation) => {
                       updateLayout({ orientation: nextOrientation });
                       if (selectedPrinter) {
                         void updatePrinterProfile(selectedPrinter.name, { orientation: nextOrientation });
                       }
                     }}
-                    className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700 cursor-pointer whitespace-nowrap shrink-0"
-                  >
-                    {layout.orientation === 'portrait'
-                      ? lang === 'fa'
-                        ? 'عمودی (Portrait)'
-                        : 'Portrait'
-                      : lang === 'fa'
-                        ? 'افقی (Landscape)'
-                        : 'Landscape'}
-                  </button>
+                    options={[
+                      { value: 'portrait', label: lang === 'fa' ? 'عمودی' : 'Portrait', icon: <FileStack className="h-3.5 w-3.5" /> },
+                      { value: 'landscape', label: lang === 'fa' ? 'افقی' : 'Landscape', icon: <RotateCw className="h-3.5 w-3.5" /> },
+                    ]}
+                  />
                 </div>
               </div>
 
-              {/* Group D3: Margins, Gutters & Scale */}
-              <div className="flex flex-col gap-1 border-e border-slate-800 pe-3">
-                <span className="text-[10px] font-semibold text-slate-400">
-                  {lang === 'fa' ? 'حاشیه، فاصله (Gutter) و مقیاس (D3)' : 'Margins, Gutter & Scale'}
-                </span>
-                <div className="flex items-center gap-1.5">
+              {/* Group D3: Cross margins, gutters and scale */}
+              <div className="flex min-w-0 flex-col gap-2 border-e border-slate-800 pe-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-semibold text-slate-400">
+                    {lang === 'fa' ? 'حاشیه و فاصله‌ها' : 'Margins & gutters'}
+                  </span>
                   <MarginPresetsMenu compact />
-                  {(['top', 'right', 'bottom', 'left'] as const).map((side) => {
-                    const activePrinterObj = printers.find((p) => p.name === selectedPrinterName);
-                    const minSide = Math.max(0, resolvePrinterMinMargins(printerMargins, activePrinterObj)?.[side] ?? 0);
-                    return (
-                      <label key={side} className="flex items-center gap-1 text-slate-300" title={lang === 'fa' ? `حاشیه ${ { top: 'بالا', right: 'راست', bottom: 'پایین', left: 'چپ' }[side] } (mm)${minSide > 0 ? ` — حداقل پرینتر: ${minSide} mm` : ''}` : `${side} margin (mm)${minSide > 0 ? ` (min ${minSide} mm)` : ''}`}>
-                        <span>{lang === 'fa' ? { top: 'بالا', right: 'راست', bottom: 'پایین', left: 'چپ' }[side] : side}</span>
-                        <input type="number" min={minSide} max={Math.max(minSide, 200)} step={layout.booklet?.enabled ? 0.5 : 1}
-                          value={Math.max(minSide, layout.marginsMm[side])}
-                          onChange={(e) => updateMargins({ [side]: Math.max(minSide, Math.min(200, Number(e.target.value) || 0)) })}
-                          className="w-12 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-center text-xs text-white" />
-                      </label>
-                    );
-                  })}
-                  {(['horizontalGutterMm', 'verticalGutterMm'] as const).map((field) => (
-                    <label key={field} className="flex items-center gap-1 text-slate-300">
-                      <span>{field === 'horizontalGutterMm' ? (lang === 'fa' ? 'افقی' : 'Gap X') : (lang === 'fa' ? 'عمودی' : 'Gap Y')}</span>
-                      <input type="number" min={0} max={layout.booklet?.enabled && field === 'horizontalGutterMm' ? 30 : 200}
-                        step={layout.booklet?.enabled && field === 'horizontalGutterMm' ? 0.5 : 1}
-                        disabled={!!layout.booklet?.enabled && field === 'verticalGutterMm'}
-                        value={layout.booklet?.enabled ? (field === 'horizontalGutterMm' ? layout.booklet.spineWidthMm : 0) : layout[field]}
-                        onChange={(e) => {
-                          const val = Math.max(0, Math.min(200, Number(e.target.value) || 0));
-                          if (layout.booklet?.enabled && field === 'horizontalGutterMm') {
-                            updateLayout({ booklet: { ...layout.booklet, spineWidthMm: Math.min(30, val) } });
-                          } else {
-                            updateLayout({ [field]: val });
-                          }
-                        }}
-                        className="w-12 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-center text-xs text-white disabled:opacity-40" />
-                    </label>
-                  ))}
-                  <select
-                    value={layout.scaleMode}
-                    onChange={(e) =>
-                      updateLayout({ scaleMode: e.target.value as ScaleMode })
+                </div>
+                <CrossMarginWidget
+                  language={lang}
+                  margins={layout.marginsMm}
+                  minimums={marginMinimums}
+                  step={layout.booklet?.enabled ? 0.5 : 1}
+                  horizontalGutterMm={layout.booklet?.enabled ? layout.booklet.spineWidthMm : layout.horizontalGutterMm}
+                  verticalGutterMm={layout.booklet?.enabled ? 0 : layout.verticalGutterMm}
+                  bookletEnabled={!!layout.booklet?.enabled}
+                  onMarginChange={(side, value) => {
+                    updateMargins({ [side]: Math.max(marginMinimums[side], Math.min(200, value)) });
+                  }}
+                  onGutterChange={(field, value) => {
+                    if (layout.booklet?.enabled && field === 'horizontalGutterMm') {
+                      updateLayout({ booklet: { ...layout.booklet, spineWidthMm: Math.min(30, value) } });
+                    } else {
+                      updateLayout({ [field]: value });
                     }
-                    className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-100"
-                  >
-                    <option value="fit">{lang === 'fa' ? 'Fit (جاگذاری کامل)' : 'Fit'}</option>
-                    <option value="fill">{lang === 'fa' ? 'Fill (پر کردن کادر)' : 'Fill'}</option>
-                    <option value="original">{lang === 'fa' ? '100% واقعی' : 'Original 100%'}</option>
-                    <option value="custom">{lang === 'fa' ? 'درصد دلخواه' : 'Custom %'}</option>
-                  </select>
+                  }}
+                />
+                <div className="flex min-w-0 flex-col gap-1">
+                  <span className="text-[10px] font-semibold text-slate-400">
+                    {lang === 'fa' ? 'مقیاس محتوا' : 'Content scale'}
+                  </span>
+                  <SegmentedControl
+                    ariaLabel={lang === 'fa' ? 'حالت مقیاس محتوا' : 'Content scale mode'}
+                    value={layout.scaleMode}
+                    onChange={(scaleMode: ScaleMode) => updateLayout({ scaleMode })}
+                    options={[
+                      { value: 'fit', label: lang === 'fa' ? 'جاگیری' : 'Fit', icon: <Maximize2 className="h-3.5 w-3.5" /> },
+                      { value: 'fill', label: lang === 'fa' ? 'پرکردن' : 'Fill', icon: <LayoutGrid className="h-3.5 w-3.5" /> },
+                      { value: 'original', label: '100%' },
+                      { value: 'custom', label: lang === 'fa' ? 'دلخواه' : 'Custom' },
+                    ]}
+                  />
                   {layout.scaleMode === 'custom' && (
-                    <label className="text-slate-300">%
-                      <input type="number" min={10} max={400} value={layout.customScalePercent}
+                    <label className="flex items-center gap-2 text-[10px] text-slate-300">
+                      <span>%</span>
+                      <input
+                        type="number"
+                        min={10}
+                        max={400}
+                        aria-label={lang === 'fa' ? 'درصد مقیاس دلخواه' : 'Custom scale percentage'}
+                        value={layout.customScalePercent}
                         onChange={(e) => updateLayout({ customScalePercent: Math.max(10, Math.min(400, Number(e.target.value) || 10)) })}
-                        className="w-14 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-xs text-white" />
+                        className="w-16 rounded border border-slate-700 bg-slate-800 px-1.5 py-1 text-xs text-white"
+                      />
                     </label>
                   )}
                 </div>
               </div>
 
-              {/* Group D5: Duplex & Sheet Reading Order */}
-              <div className="flex flex-col gap-1">
+              {/* Group D5: Duplex & sheet order */}
+              <div className="flex min-w-0 flex-col gap-2">
                 <span className="text-[10px] font-semibold text-slate-400">
-                  {lang === 'fa' ? 'چاپ دورو (Duplex) و ترتیب چیدمان (D5)' : 'Duplex & Reading Order'}
+                  {lang === 'fa' ? 'چاپ دورو و ترتیب چیدمان' : 'Duplex & sheet order'}
                 </span>
-                <div className="flex items-center gap-1.5">
-                  <select
-                    aria-label={lang === 'fa' ? 'حالت چاپ دورو شیت' : 'Sheet Duplex Mode'}
+                <div className="flex min-w-0 flex-col gap-1.5">
+                  <SegmentedControl
+                    ariaLabel={lang === 'fa' ? 'حالت چاپ دورو شیت' : 'Sheet duplex mode'}
                     value={layout.duplexMode}
-                    onChange={(e) => {
-                      const nextDuplex = e.target.value as DuplexMode;
-                      updateLayout({ duplexMode: nextDuplex });
-                    }}
-                    className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-100"
-                  >
-                    <option value="none">{lang === 'fa' ? 'تک‌رو (Simplex)' : 'Simplex (1-Sided)'}</option>
-                    <option value="long-edge">
-                      {lang === 'fa' ? 'دورو - لبه بلند (Long Edge)' : 'Duplex Long-Edge'}
-                    </option>
-                    <option value="short-edge">
-                      {lang === 'fa' ? 'دورو - لبه کوتاه (Short Edge)' : 'Duplex Short-Edge'}
-                    </option>
-                  </select>
-
-                  <select
+                    onChange={(duplexMode: DuplexMode) => updateLayout({ duplexMode })}
+                    options={[
+                      { value: 'none', label: lang === 'fa' ? 'تک‌رو' : 'Simplex' },
+                      { value: 'long-edge', label: lang === 'fa' ? 'لبه بلند' : 'Long edge', icon: <FlipHorizontal2 className="h-3.5 w-3.5" /> },
+                      { value: 'short-edge', label: lang === 'fa' ? 'لبه کوتاه' : 'Short edge', icon: <RotateCw className="h-3.5 w-3.5" /> },
+                    ]}
+                  />
+                  <SegmentedControl
+                    ariaLabel={lang === 'fa' ? 'ترتیب چیدمان برگه' : 'Sheet reading order'}
                     value={layout.sheetOrder}
-                    onChange={(e) =>
-                      updateLayout({ sheetOrder: e.target.value as SheetOrderMode })
-                    }
-                    className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-100"
-                  >
-                    <option value="rtl">{lang === 'fa' ? 'راست‌به‌چپ (فارسی)' : 'Right-to-Left'}</option>
-                    <option value="ltr">{lang === 'fa' ? 'چپ‌به‌راست (LTR)' : 'Left-to-Right'}</option>
-                    <option value="column">{lang === 'fa' ? 'ستونی (Column)' : 'Column-wise'}</option>
-                    <option value="spiral">{lang === 'fa' ? 'مارپیچی (Spiral)' : 'Spiral'}</option>
-                  </select>
-
+                    onChange={(sheetOrder: SheetOrderMode) => updateLayout({ sheetOrder })}
+                    options={[
+                      { value: 'rtl', label: lang === 'fa' ? 'راست‌به‌چپ' : 'RTL' },
+                      { value: 'ltr', label: lang === 'fa' ? 'چپ‌به‌راست' : 'LTR' },
+                      { value: 'column', label: lang === 'fa' ? 'ستونی' : 'Column', icon: <LayoutGrid className="h-3.5 w-3.5" /> },
+                      { value: 'spiral', label: lang === 'fa' ? 'مارپیچی' : 'Spiral', icon: <RefreshCw className="h-3.5 w-3.5" /> },
+                    ]}
+                  />
                   <button
                     type="button"
                     onClick={() => setModalState('manualDuplex', true)}
-                    className="flex items-center gap-1 rounded-lg border border-indigo-500/40 bg-indigo-500/15 px-2.5 py-1.5 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/25 cursor-pointer"
+                    className="flex items-center justify-center gap-1 rounded-lg border border-indigo-500/40 bg-indigo-500/15 px-2.5 py-1.5 text-[10px] font-semibold text-indigo-300 hover:bg-indigo-500/25 cursor-pointer"
                   >
                     <FlipHorizontal2 className="h-3.5 w-3.5" />
                     <span>{lang === 'fa' ? 'راهنمای ۳بعدی دوروی دستی' : '3D Manual Duplex'}</span>
@@ -641,54 +617,41 @@ export const Ribbon: React.FC<RibbonProps> = ({
                 </label>
               </div>
 
-              {/* E2: Brightness, Contrast, Gamma */}
-              <div className="flex items-center gap-3 border-e border-slate-800 pe-4">
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-[10px] text-slate-400">
-                    {lang === 'fa' ? `روشنایی (${effects.brightness})` : `Brightness (${effects.brightness})`}
-                  </span>
+              {/* E2: compact icon-led brightness, contrast and gamma sliders */}
+              <div data-icon-effect-sliders className="flex min-w-0 flex-col gap-2 border-e border-slate-800 pe-3">
+                <label className="flex min-w-0 items-center gap-2 text-[10px] text-slate-300">
+                  <SunMedium className="h-4 w-4 shrink-0 text-amber-300" aria-hidden="true" />
+                  <span className="w-16 shrink-0">{lang === 'fa' ? 'روشنایی' : 'Brightness'}</span>
                   <input
-                    type="range"
-                    min={-60}
-                    max={60}
-                    value={effects.brightness}
-                    onChange={(e) =>
-                      updateEffects({ brightness: Number(e.target.value) })
-                    }
-                    className="w-24 accent-sky-500"
+                    aria-label={lang === 'fa' ? 'روشنایی' : 'Brightness'}
+                    type="range" min={-60} max={60} value={effects.brightness}
+                    onChange={(e) => updateEffects({ brightness: Number(e.target.value) })}
+                    className="min-w-0 flex-1 accent-sky-500"
                   />
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-[10px] text-slate-400">
-                    {lang === 'fa' ? `کنتراست (${effects.contrast})` : `Contrast (${effects.contrast})`}
-                  </span>
+                  <output className="w-8 shrink-0 text-end font-mono tabular-nums text-sky-300">{effects.brightness}</output>
+                </label>
+                <label className="flex min-w-0 items-center gap-2 text-[10px] text-slate-300">
+                  <Contrast className="h-4 w-4 shrink-0 text-violet-300" aria-hidden="true" />
+                  <span className="w-16 shrink-0">{lang === 'fa' ? 'کنتراست' : 'Contrast'}</span>
                   <input
-                    type="range"
-                    min={-60}
-                    max={80}
-                    value={effects.contrast}
-                    onChange={(e) =>
-                      updateEffects({ contrast: Number(e.target.value) })
-                    }
-                    className="w-24 accent-sky-500"
+                    aria-label={lang === 'fa' ? 'کنتراست' : 'Contrast'}
+                    type="range" min={-60} max={80} value={effects.contrast}
+                    onChange={(e) => updateEffects({ contrast: Number(e.target.value) })}
+                    className="min-w-0 flex-1 accent-sky-500"
                   />
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-[10px] text-slate-400">
-                    {lang === 'fa' ? `گاما (${effects.gamma.toFixed(1)})` : `Gamma (${effects.gamma.toFixed(1)})`}
-                  </span>
+                  <output className="w-8 shrink-0 text-end font-mono tabular-nums text-sky-300">{effects.contrast}</output>
+                </label>
+                <label className="flex min-w-0 items-center gap-2 text-[10px] text-slate-300">
+                  <Droplets className="h-4 w-4 shrink-0 text-cyan-300" aria-hidden="true" />
+                  <span className="w-16 shrink-0">{lang === 'fa' ? 'گاما' : 'Gamma'}</span>
                   <input
-                    type="range"
-                    min={0.4}
-                    max={2.4}
-                    step={0.1}
-                    value={effects.gamma}
-                    onChange={(e) =>
-                      updateEffects({ gamma: Number(e.target.value) })
-                    }
-                    className="w-20 accent-sky-500"
+                    aria-label={lang === 'fa' ? 'گاما' : 'Gamma'}
+                    type="range" min={0.4} max={2.4} step={0.1} value={effects.gamma}
+                    onChange={(e) => updateEffects({ gamma: Number(e.target.value) })}
+                    className="min-w-0 flex-1 accent-sky-500"
                   />
-                </div>
+                  <output className="w-8 shrink-0 text-end font-mono tabular-nums text-sky-300">{effects.gamma.toFixed(1)}</output>
+                </label>
               </div>
 
               {/* Scope & Reset */}
