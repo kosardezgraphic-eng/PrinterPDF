@@ -431,6 +431,8 @@ interface AppState {
    * the restore: the file's bytes were never touched, so clearing the list gives the picture back whole.
    */
   setOverlayErase: (overlayId: string, shapes: EraseShape[]) => void;
+  /** Commit reversible eraser marks directly to a source PDF/image page. */
+  setPageErase: (pageId: string, shapes: EraseShape[]) => void;
   /**
    * Flip the picture's own colours, once per selected overlay. It is a toggle, never a rewrite: the second
    * press is the way back, whatever the selection looked like before.
@@ -1978,6 +1980,17 @@ export const useAppStore = create<AppState>((set, get) => {
     setEraseBrushMm: (diameterMm) => {
       if (!Number.isFinite(diameterMm)) return;
       set({ eraseBrushMm: Math.max(0.2, Math.min(500, Math.abs(diameterMm))) });
+    },
+    setPageErase: (pageId, shapes) => {
+      const state = get();
+      const target = state.pages.find(page => page.id === pageId);
+      if (!target) return;
+      const clean = sanitizeEraseShapes(shapes);
+      if (JSON.stringify(target.erase ?? []) === JSON.stringify(clean)) return;
+      const before = captureSnapshot(state);
+      set({ pages: state.pages.map(page => page.id === pageId ? { ...page, erase: clean.length ? clean : undefined } : page) });
+      pushUndo(clean.length ? 'پاک کردن بخشی از صفحه' : 'بازگرداندن صفحه',
+        clean.length ? 'Erase part of page' : 'Restore page', before, captureSnapshot(get()));
     },
     setOverlayErase: (overlayId, shapes) => {
       const state=get();
