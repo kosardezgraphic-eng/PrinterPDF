@@ -98,6 +98,23 @@ export function resolvePageEffects(
 }
 
 /**
+ * What this page's inversion would be **without** its own override — the value "inherit" means for this one
+ * switch. The scope rule is repeated here instead of routed through `shouldApplyEffectsToPage` because the
+ * store needs the counterfactual: "would dropping this override change anything?"
+ */
+export function inheritedInvert(page: PageItem, effects: EffectsSettings): boolean {
+  const scopeMatch =
+    effects.enabled &&
+    (effects.scope === 'all' || (effects.scope === 'selected' && page.isHighlighted));
+  return Boolean(scopeMatch && effects.invert);
+}
+
+/** The inversion the operator actually sees: the page's own override when it has one, else the document. */
+export function effectiveInvert(page: PageItem, effects: EffectsSettings): boolean {
+  return page.overrides?.invert ?? inheritedInvert(page, effects);
+}
+
+/**
  * Generates GPU-accelerated CSS filter string for 60fps Live Preview (E1/E2)
  */
 export function buildCssFilterForPage(

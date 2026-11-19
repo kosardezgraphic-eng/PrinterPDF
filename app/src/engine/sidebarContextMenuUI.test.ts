@@ -97,15 +97,18 @@ describe('right-click on the thumbnails',()=>{
   expect(order[4]).toMatch(/^blank-/);                                            // and after c
   expect(state().pages.filter(page2=>page2.isBlankPage).map(page2=>page2.documentId)).toEqual(['d1','d1']);
  });
- it('sets the invert override on the selection and clears it on the second go',()=>{
+ // The second press is the way back, not a second inversion — and "back" means the page's own previous
+ // state, which was *no opinion at all*. A stored `false` would look the same on screen today and then quietly
+ // exclude those pages from any document-wide invert turned on tomorrow.
+ it('sets the invert override on the selection and gives the inheritance back on the second go',()=>{
   rightClick('b');choose('invert-colour');
   expect([byId('a')!.overrides?.invert,byId('b')!.overrides?.invert,byId('c')!.overrides?.invert,byId('d')!.overrides?.invert])
     .toEqual([undefined,true,true,undefined]);
   rightClick('b');choose('invert-colour');
-  expect([byId('b')!.overrides?.invert,byId('c')!.overrides?.invert]).toEqual([false,false]);
+  expect([byId('b')!.overrides?.invert,byId('c')!.overrides?.invert]).toEqual([undefined,undefined]);
   rightClick('a');choose('invert-colour');                                        // a single page still works
   expect(byId('a')!.overrides?.invert).toBe(true);
-  expect(byId('b')!.overrides?.invert).toBe(false);
+  expect(byId('b')!.overrides?.invert).toBeUndefined();
  });
  it('deletes the selection',()=>{
   rightClick('c');choose('delete');

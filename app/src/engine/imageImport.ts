@@ -1,4 +1,5 @@
 import { planPictureEmbedding } from './imageFormat';
+import { applyEraseToContext, invertPixelsInContext } from './imageErase';
 const IMAGE_NAME=/\.(jpe?g|png|webp|gif|bmp|tiff?|svg)$/i;
 /** Files that may become an on-page picture overlay rather than a new document. */
 export function isImageFile(file:File):boolean{
@@ -59,7 +60,13 @@ export function measureImage(src:string):Promise<NaturalSize>{
   });
 }
 /** Draws a picture into the same box the preview shows, so flips and letterboxing match exactly. */
-export async function rasterizeOverlayImage(src:string,boxWidthPx:number,boxHeightPx:number,options:{fit?:'fill'|'contain';naturalWidth?:number;naturalHeight?:number;flipHorizontal?:boolean;flipVertical?:boolean;drawRect?:{x:number;y:number;width:number;height:number}}):Promise<string>{
+export async function rasterizeOverlayImage(src:string,boxWidthPx:number,boxHeightPx:number,options:{fit?:'fill'|'contain';naturalWidth?:number;naturalHeight?:number;flipHorizontal?:boolean;flipVertical?:boolean;drawRect?:{x:number;y:number;width:number;height:number};
+  /** The picture's own colour inversion, negated over the drawn rectangle only — a letterbox stays transparent. */
+  invert?:boolean;
+  /** The eraser's gestures, punched out with `destination-out` after the picture is drawn. */
+  erase?:import('@shared/models').EraseShape[];
+  /** Millimetre size of the drawn rectangle, so a brush radius in mm can be turned into pixels. */
+  eraseWidthMm?:number;eraseHeightMm?:number;}):Promise<string>{
   if (typeof document === 'undefined') throw new Error('Picture overlays need a Canvas 2D renderer');
   const width=Math.max(1,Math.round(boxWidthPx)),height=Math.max(1,Math.round(boxHeightPx));
   const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
@@ -72,6 +79,17 @@ export async function rasterizeOverlayImage(src:string,boxWidthPx:number,boxHeig
   ctx.scale(options.flipHorizontal?-1:1,options.flipVertical?-1:1);
   ctx.drawImage(image,rect.x-width/2,rect.y-height/2,rect.width,rect.height);
   ctx.restore();
+  // The two flags the model holds and the paper has to see, in the order the operator expects: the colours
+  // first, then the holes — an erased pixel must not come back inverted.
+  const painted={x:rect.x,y:rect.y,width:rect.width,height:rect.height};
+  if(options.invert) invertPixelsInContext(ctx,painted);
+  if(options.erase && options.erase.length){
+    if(!(options.eraseWidthMm && options.eraseWidthMm>0) || !(options.eraseHeightMm && options.eraseHeightMm>0))
+      throw new Error('An eraser brush needs the millimetre size of the picture it erases');
+    ctx.save();ctx.translate(painted.x,painted.y);
+    applyEraseToContext(ctx,options.erase,{width:painted.width,height:painted.height,widthMm:options.eraseWidthMm,heightMm:options.eraseHeightMm});
+    ctx.restore();
+  }
   return canvas.toDataURL('image/png');
 }
 function loadImage(src:string):Promise<HTMLImageElement>{

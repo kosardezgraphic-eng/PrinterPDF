@@ -20,6 +20,7 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import { t } from '../i18n/translations';
 import { computeImpositionSheets } from '../engine/layoutEngine';
+import { effectiveInvert } from '../engine/effectsPipeline';
 import { PageThumbnail } from './PageThumbnail';
 import type { ComputedCellPlacement, PageItem, SourceDocument } from '@shared/models';
 import { formatLocalizedNumber } from '../i18n/shamsi';
@@ -152,6 +153,14 @@ export const SidebarPages: React.FC = () => {
   const contextLabel = lang === 'fa'
     ? `${formatLocalizedNumber(contextTargets.length, lang)} صفحه`
     : `${contextTargets.length} page${contextTargets.length === 1 ? '' : 's'}`;
+  // The menu item says what the next press will do, because the press is a round trip: the label flips to
+  // "undo" while the target pages are inverted — whether that inversion comes from their own override or from
+  // the document switch — and back again after it.
+  const invertArmed = (() => {
+    const set = new Set(contextTargets);
+    const targets = pages.filter((page) => set.has(page.id));
+    return targets.length > 0 && targets.every((page) => effectiveInvert(page, effects));
+  })();
   const scopeNote = contextTargets.length > 1
     ? (lang === 'fa' ? `روی ${contextLabel} انتخاب‌شده اعمال می‌شود` : `Applies to the ${contextLabel} selected`)
     : (lang === 'fa' ? 'فقط روی همین صفحه' : 'Only this page');
@@ -629,9 +638,13 @@ export const SidebarPages: React.FC = () => {
           >
             <Contrast className="h-3.5 w-3.5 text-fuchsia-400" />
             <span>
-              {lang === 'fa'
-                ? `معکوس رنگ صفحات (${contextLabel})`
-                : `Invert colour (${contextLabel})`}
+              {invertArmed
+                ? lang === 'fa'
+                  ? `لغو معکوس رنگ صفحات (${contextLabel})`
+                  : `Undo the inverted colour (${contextLabel})`
+                : lang === 'fa'
+                  ? `معکوس رنگ صفحات (${contextLabel})`
+                  : `Invert colour (${contextLabel})`}
             </span>
           </button>
           <button

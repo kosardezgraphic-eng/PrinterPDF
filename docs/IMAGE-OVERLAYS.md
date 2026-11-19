@@ -111,6 +111,83 @@ Preview and export share one geometry engine (`overlayPlacements`), so the box, 
 
 So placement count is nearly free, and only *distinct* pictures are paid for; RSS rose about 170 MB during the first export and fell back afterwards. What is genuinely heavy is the state itself: a `PageOverlayImage.src` is a base64 data URL, so every picture costs ~1.37× its file size in memory, again for each undo snapshot, and once more in the `.psp` file. Downscale artwork before building a project that has to stay open all day.
 
+## Erasing part of a picture, and inverting its colours
+
+**Insert → Eraser** has three tools, and the two painting ones work on whichever picture the pointer lands on
+(which becomes the selected layer as the gesture starts, so the panel below is the panel for what you are
+working on). While a marquee waits for `Delete`, that key belongs to the eraser rather than to the app: the
+selected layer is not removed and the highlighted pages survive the press.
+
+- **Brush** — the arrow is replaced by the brush itself: a ring at the diameter the field says, in
+  millimetres, following the pointer (`data-brush-cursor`). Whatever the button is *held down* over is worked
+  on, so a stroke may leave the picture, cross the sheet and come back — points outside the picture are
+  clamped by `sanitizeEraseShapes()` rather than dropped, so the line keeps going to the edge it left.
+- **Region** — drag a rectangle and it is *selected*, not applied: a marching outline waits, and `Delete`
+  spends it on the picture (`Esc`, a second marquee, or switching tools throws it away). The panel shows the
+  same commit as an **Apply** button, for a hand that stays on the mouse. Dragging back across the point where
+  the press started flips the rectangle to the other side, like every other marquee in the app.
+- **Eyedropper** — click on a picture and the colour around that point becomes the brush colour, and the
+  brush is armed for the next stroke. It reads the artwork's own pixels (`colorFromPixels()` on a canvas the
+  size of the decoded file) over **the brush's own footprint** — a square of `2·Ø·(file px / box mm)` pixels,
+  clamped to 33 — and averages it, skipping transparent pixels. That is what "the colour of this area" means
+  in practice: a click on a JPEG logo or an anti-aliased edge picks a stable patch colour instead of one noise
+  pixel, and a hairline brush narrows the window to a single pixel. A picture displayed inverted hands back the
+  colour you *see* (the negation is applied to the average, which is the same number because both are linear).
+  A spot with no alpha has no colour: the tool says so instead of quietly picking white.
+
+**A colour turns the brush from a hole into a patch of paint.** `eraseColor` in the store is either `null`
+(remove the pixels, show the page through the picture) or a `#rrggbb` (lay that colour down), and both the
+Insert tab and the picture panel expose the picker and a **No colour / Hole** button. The colour is stored on
+the gesture itself (`EraseShape.color`), so a picture can carry a hole here and a patch of grey there, and a
+project file that arrives from elsewhere has every colour run through `sanitizeEraseColor()` — anything that
+is not `#rgb`/`#rrggbb` loses its colour and stays an erase.
+
+Pressing the lit tool button again turns the eraser off and hands the pointer back to moving the picture;
+`Escape` mid-drag abandons the stroke. Arming any tool also switches the sheet itself to **Select / move /
+resize**, because the overlay layer only accepts the pointer in that tool — a brush that painted nothing while
+the sheet was in crop mode would read as a dead button. The panel also offers **Undo one stroke** and
+**Restore picture**, so the eraser can be walked back gesture by gesture without reaching for `Ctrl+Z`.
+
+What is stored is the gesture, never new pixels. `PageOverlayImage.erase` is a list of `EraseShape`s —
+percentages of the rectangle the picture paints, plus a millimetre radius and an optional colour for a brush —
+and the original `src` is untouched. Three renderers derive pixels from that list, all of them through the same
+`eraseShapeParts()`:
+
+| Where | What happens |
+| --- | --- |
+| Preview (`TextOverlayLayer.tsx`) | two layers on the fit rectangle: a CSS luminance **mask** for the holes (`eraseMaskCss()`) and, above the picture, an SVG **paint** layer for the coloured gestures (`erasePaintCss()`), each stroke masked by the holes drawn after it |
+| Export raster (`rasterizeOverlayImage()`) | the list is walked in order on the same rectangle — `source-over` for a colour, `destination-out` for a hole — so the history decides what covers what |
+| Exported PDF (`pdfService.ts`) | an erased, painted or inverted picture cannot be a raw byte embed, so it takes the Canvas route a mirror already takes, and the erase list *including its colours* is part of the bitmap cache key |
+
+Because the mask is cut on the *fit* rectangle, a hole stays on the artwork when the box is resized, when
+`contain` letterboxes it, or when the picture is mirrored (the pointer position is un-mirrored on the way in,
+so the hole lands under the cursor and then follows the flip). The paint layer is placed on that same rectangle
+and inside the same `transform`, so a coloured patch follows the artwork exactly where a hole would.
+
+Coloured gestures are ordered, not merged: the preview lays them above the picture in the order they were made,
+each one masked by the holes drawn after it, and `applyEraseToContext()` walks the same list with
+`source-over` for a colour and `destination-out` for a hole. Both renderers therefore agree that a hole after a
+patch removes it and a patch after a hole closes it — which is why the export bitmap cache key
+(`eraseSignature()`) carries the colour: two pictures that differ only in what they were painted with must not
+share one raster.
+
+The brush cursor and the eyedropper are the two pieces of this a browser has to do rather than the model: while
+the brush is armed the frame is drawn with `cursor: none` and a ring (`data-brush-cursor`) is moved to the
+pointer at `Ø × pxPerMm`, so the ring and the tip are the same number by construction. The eyedropper copies
+the `<img>` into a canvas the natural size of the file, takes the box the brush will cover around the point the
+pointer sits at, and averages it; where no `CanvasRenderingContext2D` exists (a hardened WebView, or `jsdom` in
+the test runner) it says so in a toast and leaves the colour alone instead of inventing white.
+
+**Invert picture colours** (`PageOverlayImage.invert`) is a flag rendered as `filter: invert(1)` in the preview
+and as a pixel negation of the drawn rectangle in the export raster — alpha is preserved, so an erased corner
+stays a hole instead of becoming a black square. It is deliberately not a rewrite of the file: pressing the
+button again is the way back, and a picture that was inverted twice does not exist in this model.
+
+Both fields travel in the project file (`overlays` is saved as it is) and in every undo snapshot. A file that
+arrives from elsewhere is passed through `sanitizeEraseShapes()`: percentages are clamped to a sane band, a
+brush keeps at most `ERASE_POINT_LIMIT` points, there are at most `ERASE_SHAPE_LIMIT` gestures, and an entry
+no renderer could draw is dropped rather than guessed at.
+
 ## Files that arrive from the desktop
 
 Dropping a file on a sheet is a browser drag in both shells: the `File` objects a drop provides are read directly, and that path is unchanged in Electron.
