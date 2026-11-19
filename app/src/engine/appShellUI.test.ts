@@ -211,6 +211,6 @@ describe('compact layout controls', () => {
     expect(markup).toContain('data-gutter-axis="horizontal"');
     expect(markup).toContain('data-gutter-axis="vertical"');
     expect(markup).toContain('disabled=""');
-    expect(markup).toContain('aria-label="Right margin"');
+    expect(markup).toContain('aria-label="Right margin value"');
   });
 });
