@@ -327,3 +327,4 @@ export const App: React.FC = () => {
       />
     </ErrorBoundary>
   );
+};
