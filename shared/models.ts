@@ -109,6 +109,8 @@ export interface PageItem {
   previewAccentColor?: string;
   /** Optional per-page overrides (e.g. single page invert) */
   overrides?: PagePerPageOverrides;
+  /** Reversible brush and marquee marks applied to the page content itself. */
+  erase?: EraseShape[];
 }
 
 export interface BookmarkItem {
