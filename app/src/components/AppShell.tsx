@@ -37,10 +37,10 @@ export const AppShell: React.FC<AppShellProps> = ({
     <header className="psp-app-shell__topbar" aria-label={labels.topbar}>
       {topbar}
     </header>
-    <nav className="psp-app-shell__navigation" aria-label={labels.navigation}>
-      {navigation}
-    </nav>
     <main className="psp-app-shell__workspace" aria-label={labels.workspace}>
+      <nav className="psp-app-shell__navigation" aria-label={labels.navigation}>
+        {navigation}
+      </nav>
       {workspace}
     </main>
     <div className="psp-app-shell__status" role="region" aria-label={labels.status}>

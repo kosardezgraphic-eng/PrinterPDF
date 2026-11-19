@@ -50,7 +50,17 @@ import {
   type SheetOrderMode,
 } from '@shared/models';
 
-export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletPanel: () => void }> = ({ onOpenWatermarkPanel, onOpenBookletPanel }) => {
+interface RibbonProps {
+  onOpenWatermarkPanel: () => void;
+  onOpenBookletPanel: () => void;
+  panelMode?: boolean;
+}
+
+export const Ribbon: React.FC<RibbonProps> = ({
+  onOpenWatermarkPanel,
+  onOpenBookletPanel,
+  panelMode = false,
+}) => {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const {
     activeRibbonTab,
@@ -157,7 +167,10 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
   ];
 
   return (
-    <section className="shrink-0 border-b border-slate-800 bg-slate-900/90 select-none">
+    <section className={panelMode
+      ? "psp-tool-panel-ribbon flex h-full min-h-0 min-w-0 flex-col bg-slate-900/90 select-none"
+      : "shrink-0 border-b border-slate-800 bg-slate-900/90 select-none"
+    }>
       {/* Hidden File Input */}
       <input
         ref={fileInputRef}
@@ -172,60 +185,65 @@ export const Ribbon: React.FC<{ onOpenWatermarkPanel: () => void; onOpenBookletP
         }}
       />
 
-      {/* Ribbon Tab Header Strip */}
-      <div className="flex items-center justify-between border-b border-slate-800/80 px-3 pt-1">
-        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-          {tabs.map((tab) => {
-            const active = activeRibbonTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                aria-label={tab.label}
-                title={tab.label}
-                aria-pressed={active}
-                onClick={() => {
-                  setActiveRibbonTab(tab.id);
-                  if (ribbonCollapsed) setRibbonCollapsed(false);
-                }}
-                className={`flex items-center gap-1.5 rounded-t-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
-                  active
-                    ? 'bg-slate-800 text-sky-400 border-t-2 border-sky-500'
-                    : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
-                }`}
-              >
-                {tab.icon}
-                <span className="sr-only">{tab.label}</span>
-                {tab.id === 'effects' && effects.invert && (
-                  <span className="h-2 w-2 rounded-full bg-fuchsia-400" />
-                )}
-                {tab.id === 'batch' && (
-                  <span className="rounded-full bg-sky-500/20 px-1.5 text-[10px] text-sky-300">
-                    {batchQueue.length}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+      {!panelMode && (
+        {/* Ribbon Tab Header Strip */}
+        <div className="flex items-center justify-between border-b border-slate-800/80 px-3 pt-1">
+          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+            {tabs.map((tab) => {
+              const active = activeRibbonTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  aria-label={tab.label}
+                  title={tab.label}
+                  aria-pressed={active}
+                  onClick={() => {
+                    setActiveRibbonTab(tab.id);
+                    if (ribbonCollapsed) setRibbonCollapsed(false);
+                  }}
+                  className={`flex items-center gap-1.5 rounded-t-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                    active
+                      ? 'bg-slate-800 text-sky-400 border-t-2 border-sky-500'
+                      : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+                  }`}
+                >
+                  {tab.icon}
+                  <span className="sr-only">{tab.label}</span>
+                  {tab.id === 'effects' && effects.invert && (
+                    <span className="h-2 w-2 rounded-full bg-fuchsia-400" />
+                  )}
+                  {tab.id === 'batch' && (
+                    <span className="rounded-full bg-sky-500/20 px-1.5 text-[10px] text-sky-300">
+                      {batchQueue.length}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+  
+          <button
+            type="button"
+            onClick={() => setRibbonCollapsed(!ribbonCollapsed)}
+            title={lang === 'fa' ? 'جمع‌کردن / بازکردن ریبون ابزارها' : 'Collapse / Expand Ribbon'}
+            className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-200 cursor-pointer"
+          >
+            {ribbonCollapsed ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronUp className="h-4 w-4" />
+            )}
+          </button>
         </div>
-
-        <button
-          type="button"
-          onClick={() => setRibbonCollapsed(!ribbonCollapsed)}
-          title={lang === 'fa' ? 'جمع‌کردن / بازکردن ریبون ابزارها' : 'Collapse / Expand Ribbon'}
-          className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-200 cursor-pointer"
-        >
-          {ribbonCollapsed ? (
-            <ChevronDown className="h-4 w-4" />
-          ) : (
-            <ChevronUp className="h-4 w-4" />
-          )}
-        </button>
-      </div>
-
+  
+        )}
       {/* Ribbon Body */}
       {!ribbonCollapsed && (
-        <div className="flex min-h-[82px] items-center gap-4 overflow-x-auto px-4 py-2.5 text-xs">
+        <div className={panelMode
+          ? "psp-tool-panel-ribbon__content flex min-h-0 flex-1 flex-col items-stretch gap-3 overflow-y-auto overflow-x-hidden px-3 py-3 text-xs"
+          : "flex min-h-[82px] items-center gap-4 overflow-x-auto px-4 py-2.5 text-xs"
+        }>
           {/* 1. FILE TAB */}
           {activeRibbonTab === 'file' && (
             <>
