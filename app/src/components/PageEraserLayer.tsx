@@ -100,15 +100,13 @@ export function PageEraserLayer({ page, width, height }: { page: PageItem; width
         : current);
     }}
     onPointerUp={event => {
-      setDrag(current => {
-        if (!current || current.pointerId !== event.pointerId) return current;
-        if (current.shape.mode === 'region') {
-          if (eraseShapeIsMeaningful(current.shape)) setPending(current.shape);
-        } else if (eraseShapeIsMeaningful(current.shape)) {
-          setPageErase(page.id, commitEraseShape(source, current.shape));
-        }
-        return null;
-      });
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      if (drag.shape.mode === 'region') {
+        if (eraseShapeIsMeaningful(drag.shape)) setPending(drag.shape);
+      } else if (eraseShapeIsMeaningful(drag.shape)) {
+        setPageErase(page.id, commitEraseShape(source, drag.shape));
+      }
+      setDrag(null);
     }}
     onPointerCancel={() => setDrag(null)}
     onPointerLeave={() => { if (!drag) setCursor(null); }}>
