@@ -50,6 +50,20 @@ export function imageDropPlacement(sheet:ComputedSheetSide,point:{xMm:number;yMm
   const position=placeImageInBox(point,box,size);
   return {target:'sheet',sheetIndex:sheet.sideIndex,...position,...size};
 }
+/**
+ * A placement that covers the **whole output sheet**, which is what a picture means on a grid.
+ *
+ * A sheet of 2×4 tickets is one printed side, so a corner logo belongs to the side once — not once per ticket.
+ * The size is a centred band that keeps the file's ratio and never swallows the sheet, which leaves the operator
+ * with a picture they can see and drag rather than a full-bleed surprise; the panel's width/height fields take it
+ * anywhere from there, bleed included.
+ */
+export function sheetImagePlacement(sheet:ComputedSheetSide,natural:{width:number;height:number}):ImageDropPlacement{
+  const box:BoxMm={x:0,y:0,width:sheet.widthMm,height:sheet.heightMm};
+  const size=sizeImageToFit(natural.width,natural.height,box,45);
+  const position=placeImageInBox({xMm:box.width/2,yMm:box.height/2},box,size);
+  return {target:'sheet',sheetIndex:sheet.sideIndex,...position,...size};
+}
 export const newOverlayId=()=>globalThis.crypto?.randomUUID?.()??`image-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 /** Defaults for a freshly dropped picture: locked ratio, full opacity, centre of the box. */
 export function imageOverlayFromPlacement(id:string,src:string,name:string,natural:{width:number;height:number},placement:ImageDropPlacement):PageOverlayImage{

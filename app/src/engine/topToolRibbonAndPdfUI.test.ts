@@ -113,12 +113,18 @@ describe('TopToolRibbon & ToolPanel routing', () => {
     expect(useAppStore.getState().eraseTool).toBe('brush');
     expect(container.querySelector('[data-eraser-control-panel]')).not.toBeNull();
 
-    for (const tool of ['effects', 'crop', 'pdf', 'batch', 'printers', 'view', 'file'] as const) {
+    // 'file' is deliberately absent: the ribbon used to carry a File tool tile that opened the same document
+    // buttons that sit in the row above it, so it was removed rather than fixed.
+    for (const tool of ['effects', 'crop', 'pdf', 'batch', 'printers', 'view', 'margins'] as const) {
       const ribbonKey = tool;
       clickTool(`[data-ribbon-tool="${ribbonKey}"]`);
       expect(useAppStore.getState().activeInspectorTool).toBe(tool);
       expect(container.querySelector('[data-tool-panel]')?.getAttribute('data-active-inspector')).toBe(tool);
     }
+    expect(container.querySelector('[data-ribbon-tool="file"]')).toBeNull();
+    // The other half of that tile's row is real work rather than a second copy of the document buttons.
+    expect(container.querySelector('[data-ribbon-quick="save-project"]')).not.toBeNull();
+    expect(container.querySelector('[data-ribbon-quick="diagnostics"]')).not.toBeNull();
 
     act(() => root.unmount());
   });

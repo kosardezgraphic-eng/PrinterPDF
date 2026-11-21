@@ -50,6 +50,7 @@ import {
 } from '../engine/vectorPreviewBridge';
 import { sanitizeEraseColor, sanitizeEraseShapes, type EraseShape } from '@shared/models';
 import { commitEraseShape } from '../engine/imageErase';
+import { sanitizeSequence } from '../engine/numberingSequence';
 import { effectiveInvert, inheritedInvert } from '../engine/effectsPipeline';
 import { CommandHistoryManager } from '../engine/commandHistory';
 import {
@@ -84,6 +85,7 @@ import {
   imageDropPlacement,
   imageOverlayFromPlacement,
   newOverlayId as newImageId,
+  sheetImagePlacement,
 } from '../engine/imageOverlays';
 import { defaultShapeStyle, normalizeShapeStyle, shapeCapabilities } from '../engine/shapes';
 import { isImageFile, measureImage, readFileAsDataUrl } from '../engine/imageImport';
@@ -2262,11 +2264,15 @@ export const useAppStore = create<AppState>((set, get) => {
       const fallbackCell=state0.pages.length ? side.cells.find(c=>c.page?.id===state0.activePageId)??side.cells.find(c=>c.page?.isHighlighted)??side.cells.find(c=>c.page) : undefined;
       const target=point??(fallbackCell ? {xMm:fallbackCell.contentXMm+fallbackCell.contentWidthMm/2,yMm:fallbackCell.contentYMm+fallbackCell.contentHeightMm/2}
         : {xMm:side.widthMm/2,yMm:side.heightMm/2});
+      // On a grid — anything but one cell per side — a picture dropped anywhere goes across the whole output
+      // sheet. Echoing it into every cell is still available (`sheetFill: 'each-cell'`), but it has to be the
+      // operator's choice: a logo dropped on one ticket used to appear on all of them with no way to say no.
+      const grid=side.cells.filter(c=>c.page).length>1;
       const created:PageOverlayImage[]=[];
       for(const file of images){
         const src=await readFileAsDataUrl(file);
         const natural=await measureImage(src);
-        const placement=imageDropPlacement(side,target,natural);
+        const placement=(grid?null:imageDropPlacement(side,target,natural))??sheetImagePlacement(side,natural);
         if(!placement)continue;
         created.push(imageOverlayFromPlacement(newImageId(),src,(file.name?.replace(/\.[^.]+$/,''))||'تصویر',natural,placement));
       }
@@ -2847,7 +2853,13 @@ export const useAppStore = create<AppState>((set, get) => {
             effects: parsed.effects ?? DEFAULT_EFFECTS,
             watermark: parsed.watermark ?? getDefaultWatermarkSettings(),
             pageNumbering: parsed.pageNumbering ?? getDefaultPageNumberSettings(),
-            overlays: Array.isArray(parsed.overlays) ? parsed.overlays : [],
+            // Overlays come from a file, so the two fields that decide *what a number counts* and *whether a
+            // picture is repeated* are read through their own validators rather than trusted as written.
+            overlays: Array.isArray(parsed.overlays)
+              ? parsed.overlays.map((overlay) => overlay.kind === 'numbering'
+                ? { ...overlay, ...sanitizeSequence(overlay.sequenceBasis, overlay.sequenceDirection) }
+                : overlay)
+              : [],
             selectedOverlayId: null, textEdit: null, activePageId: null, eraseTool: 'off', erasePending: null,
             documents: parsed.documents as SourceDocument[],
             pages: parsed.pages,

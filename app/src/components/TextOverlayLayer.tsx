@@ -331,7 +331,10 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
   moveRing(e.currentTarget,e.clientX,e.clientY);
   const g=erase.current;if(!g||g.pointer!==e.pointerId)return;
   e.preventDefault();e.stopPropagation();
-  const next=growEraseShape(g.shape,g.anchor,erasePoint(e.currentTarget,e.clientX,e.clientY));
+  // The box is the part of the picture the eye sees: the brush's own diameter (in millimetres) is compared with it
+  // to decide whether two samples already touch, which is what keeps a fast drag one stroke instead of a dotted line.
+  const {box:eraseBox}=eraseSpaceOf((p as {image:PageOverlayImage}).image,p.width,p.height);
+  const next=growEraseShape(g.shape,g.anchor,erasePoint(e.currentTarget,e.clientX,e.clientY),eraseBox);
   if(next!==g.shape){g.shape=next;setLiveErase(next);}
  };
  const eraseFinish=(e:React.PointerEvent<HTMLElement>,cancel=false)=>{

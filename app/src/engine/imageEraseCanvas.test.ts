@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { createCanvas } from '@napi-rs/canvas';
 import type { EraseShape } from '@shared/models';
-import { applyEraseToContext, colorFromPixels, eraseMaskSvg, invertPixelsInContext } from './imageErase';
+import { ERASE_SAMPLE_PERCENT, applyEraseToContext, beginEraseShape, colorFromPixels, eraseMaskSvg, growEraseShape, invertPixelsInContext } from './imageErase';
 
 const box = { width: 200, height: 100, widthMm: 100, heightMm: 50 };         // two pixels per millimetre
 
@@ -44,6 +44,16 @@ describe('SVG mask used by the live page preview', () => {
     expect(svg).toContain('<rect x="0" y="0" width="200" height="100" fill="#fff"/>');
     expect(svg).toContain('<g fill="#000"><rect x="50" y="20" width="60" height="40"/>');
     expect(svg).toContain('mask="url(#e)"');
+  });
+
+  it('draws the stroke as a ribbon through its samples, so the preview has no dotted gaps either', () => {
+    const svg = eraseMaskSvg([{ mode: 'brush', radiusMm: 2, points: [{ x: 10, y: 50 }, { x: 90, y: 50 }] }], box)!;
+    // The two end dots stay (they are exact ellipses at the brush's size), and a round-capped line joins them.
+    expect(svg.match(/<ellipse /g)).toHaveLength(2);
+    // Percent of the 200×100 box: 10% is x=20, 90% is x=180, and a 2 mm radius at 2 px/mm is 8 px wide.
+    expect(svg).toContain('<polyline points="20,50 180,50"');
+    expect(svg).toContain('stroke-width="8"');
+    expect(svg).toContain('stroke-linecap="round"');
   });
 
   it('keeps the mask extent equal to the page instead of falling back to SVG 300×150 defaults', () => {
@@ -216,5 +226,50 @@ describe('reading a colour out of the artwork', () => {
     // A window that hangs past the file is clipped, not wrapped, and an all-empty one still says nothing.
     expect(colorFromPixels(field, 3, 0, 0, { radius: 8 })).toBe('#141d26');
     expect(colorFromPixels(new Uint8ClampedArray(9 * 4), 3, 1, 1, { radius: 1 })).toBeUndefined();
+  });
+});
+
+describe('a stroke the pointer moved across faster than one frame', () => {
+  const box = { width: 200, height: 100, widthMm: 200, heightMm: 100 };         // one unit per percent on both axes
+  const erasedAcross = (ctx: CanvasRenderingContext2D, y: number) => {
+    const data = Array.from(ctx.getImageData(0, y, 200, 1).data);
+    let last = -1, first = -1;
+    for (let x = 0; x < 200; x++) if (data[x * 4 + 3] === 0) { if (first < 0) first = x; last = x; }
+    return { first, last };
+  };
+
+  it('is one uninterrupted line, not a row of dots', () => {
+    // Two samples 40% of the page apart with a 2 mm brush: the old sampler kept only the two dots, and the
+    // middle of the drag stayed opaque — the "erases in pieces" report, reproduced exactly.
+    const shape: EraseShape = { mode: 'brush', radiusMm: 2, points: [{ x: 10, y: 50 }, { x: 50, y: 50 }, { x: 90, y: 50 }] };
+    const { ctx } = filled();
+    applyEraseToContext(ctx, [shape], box);
+    const span = erasedAcross(ctx, 50);
+    // 10% → x = 20 px and 90% → x = 180 px; the ends are anti-aliased, so the span is a couple of pixels short on
+    // each side — but it is one span. Dots alone would have left two short runs with a red gap in the middle.
+    expect(span.first).toBeLessThanOrEqual(22);
+    expect(span.last).toBeGreaterThanOrEqual(176);
+    for (const x of [40, 60, 80, 100, 120, 140, 160]) {
+      expect(Array.from(ctx.getImageData(x, 50, 1, 1).data)[3], `column ${x} is between two samples`).toBe(0);
+    }
+  });
+
+  it('fills the samples it skipped, so a fast drag is stored as a path rather than two far-apart points', () => {
+    const start = beginEraseShape('brush', { x: 10, y: 50 }, 1);
+    const moved = growEraseShape(start, { x: 10, y: 50 }, { x: 60, y: 50 }, box);
+    expect(moved.mode).toBe('brush');
+    if (moved.mode !== 'brush') return;
+    // 50% of 100 mm is 50 mm; a 1 mm brush may leave at most a brush-width of gap, so the path is continuous.
+    expect(moved.points.length).toBeGreaterThan(10);
+    for (let index = 1; index < moved.points.length; index++) {
+      const gap = Math.hypot(moved.points[index]!.x - moved.points[index - 1]!.x, moved.points[index]!.y - moved.points[index - 1]!.y);
+      // One unit per percent here, so a 1 mm brush is a 1% disc: no step may be wider than that disc.
+      expect(gap).toBeLessThanOrEqual(1.001);
+    }
+  });
+
+  it('never adds points for a hair of pointer jitter', () => {
+    const start = beginEraseShape('brush', { x: 50, y: 50 }, 4);
+    expect(growEraseShape(start, { x: 50, y: 50 }, { x: 50.1, y: 50.1 }, box)).toBe(start);
   });
 });

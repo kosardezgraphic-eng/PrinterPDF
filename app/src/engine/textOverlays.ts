@@ -1,5 +1,6 @@
 import type {ComputedSheetSide,PageItem,PageOverlay,PageOverlayText,PageOverlayNumbering} from '@shared/models';
 import {matchesOverlayScope,formatOverlayNumber} from './overlayRenderUtils';
+import {numberingSequence} from './numberingSequence';
 import {resolveTextTemplate} from './textFormatting';
 import type {TextScriptRange} from '@shared/models';
 
@@ -57,10 +58,20 @@ export function textPlacements(sheet:ComputedSheetSide,totalSheets:number,pages:
         width:rect.width*item.widthPercent/100,height:rect.height*item.heightPercent/100,
         parentX:rect.x,parentY:rect.y,parentWidth:rect.width,parentHeight:rect.height,parentRotation:rotation,pageId,sheetIndex:sheet.sideIndex,clip});
     };
+    // What the layer counts: the document's own page number, the cells read off the sheet, or one number per
+    // output side. `page` keeps `{page}`/`{total}` meaning exactly what they always did.
+    const numberFor=(target:'sheet'|'cell'|'page',pageId:string|undefined,pageIndex:number,basisPage:number,basisTotal:number)=>{
+      if(item.kind!=='numbering' || (item.sequenceBasis??'page')==='page') return {page:basisPage,total:basisTotal};
+      const walk=numberingSequence({basis:item.sequenceBasis,direction:item.sequenceDirection,pageId:pageId??'',sheet,
+        pageIndex:basisPage,pageTotal:basisTotal,sheetTotal:totalSheets});
+      return {page:walk.index,total:walk.total};
+    };
     if(item.target==='sheet'){
-      if(matchesOverlayScope(item,{pageIndex:0,total:totalSheets,sheetIndex:sheet.sideIndex,sheetPageIds}))
+      if(matchesOverlayScope(item,{pageIndex:0,total:totalSheets,sheetIndex:sheet.sideIndex,sheetPageIds})){
+        const counted=numberFor('sheet',undefined,0,sheet.sideIndex,totalSheets);
         add({x:0,y:0,width:sheet.widthMm,height:sheet.heightMm},`${item.id}-sheet-${sheet.sideIndex}`,0,
-          {page:sheet.sideIndex,total:totalSheets,sheet:sheet.sideIndex,file:sheet.cells.find(c=>c.page)?.page?.documentName??'',docPage:sheet.cells.find(c=>c.page)?.page?.sourcePageNumber??0});
+          {page:counted.page,total:counted.total,sheet:sheet.sideIndex,file:sheet.cells.find(c=>c.page)?.page?.documentName??'',docPage:sheet.cells.find(c=>c.page)?.page?.sourcePageNumber??0});
+      }
     }else{
       for(const cell of sheet.cells){if(!cell.page)continue;
         const pageIndex=indices.get(cell.page.id);if(!pageIndex)continue;
@@ -69,8 +80,9 @@ export function textPlacements(sheet:ComputedSheetSide,totalSheets:number,pages:
         const rect=cellTarget
           ? {x:cell.cellXMm,y:cell.cellYMm,width:cell.cellWidthMm,height:cell.cellHeightMm}
           : {x:cell.contentXMm,y:cell.contentYMm,width:cell.contentWidthMm,height:cell.contentHeightMm};
+        const counted=numberFor(cellTarget?'cell':'page',cell.page.id,pageIndex,pageIndex,pages.length);
         add(rect,`${item.id}-${cell.occurrenceKey??cell.cellIndex}`,cell.transform?.rotationDeg??0,
-          {page:pageIndex,total:pages.length,sheet:sheet.sideIndex,file:cell.page.documentName,docPage:cell.page.sourcePageNumber},
+          {page:counted.page,total:counted.total,sheet:sheet.sideIndex,file:cell.page.documentName,docPage:cell.page.sourcePageNumber},
           cellTarget||cell.allowOverflow?undefined:{x:cell.cellXMm,y:cell.cellYMm,width:cell.cellWidthMm,height:cell.cellHeightMm},cell.page.id);
       }
     }

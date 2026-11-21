@@ -2,6 +2,7 @@ import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {evaluateNumberScript} from '../engine/overlayRenderUtils';
 import type {OverlayScope,OverlayTarget,PageOverlayNumbering} from '@shared/models';
 import {computeImpositionSheets} from '../engine/layoutEngine';
+import {numberingSequence} from '../engine/numberingSequence';
 import {resolveNumberingTemplate} from '../engine/textOverlays';
 import {parseCoverageSelection,formatCoverageSelection} from '../engine/coverageSelection';
 import {useSystemFonts} from '../engine/systemFonts';
@@ -33,8 +34,15 @@ export function NumberingControlPanel(){
  const wrapSelection=(script:'super'|'sub')=>{const el=templateRef.current;if(!el)return;const start=el.selectionStart,end=el.selectionEnd;
    const inner=end>start?item.template.slice(start,end):'…';const opener=script==='super'?'^{':'_{';const next=`${item.template.slice(0,start)}${opener}${inner}}${item.template.slice(end)}`;
    patch({template:next});requestAnimationFrame(()=>{el.focus();el.setSelectionRange(start+opener.length,start+opener.length+inner.length);});};
- const previewIndex=item.target==='sheet'?Math.min(Math.max(activeSheetIndex+1,1),Math.max(1,sheets.length)):Math.max(1,(page?pages.findIndex(p=>p.id===page.id):-1)+1);
- const previewTotal=item.target==='sheet'?Math.max(1,sheets.length):pages.length;
+ // The preview has to count the same way the sheet will, or the panel shows one number and the paper prints
+ // another — the one failure a numbering panel must never have.
+ const previewSheet=sheets[Math.min(Math.max(activeSheetIndex,0),Math.max(0,sheets.length-1))];
+ const previewCell=previewSheet?.cells.find(c=>c.page?.id===page?.id)??previewSheet?.cells.find(c=>c.page);
+ const previewWalk=numberingSequence({basis:item.sequenceBasis,direction:item.sequenceDirection,
+   pageId:previewCell?.page?.id??page?.id??'',sheet:previewSheet??{sheetNumber:1,side:'front',sideIndex:1,widthMm:0,heightMm:0,cells:[]},
+   pageIndex:Math.max(1,(page?pages.findIndex(p=>p.id===page.id):-1)+1),pageTotal:Math.max(1,pages.length),sheetTotal:Math.max(1,sheets.length)});
+ const previewIndex=item.target==='sheet'?Math.min(Math.max(activeSheetIndex+1,1),Math.max(1,sheets.length)):previewWalk.index;
+ const previewTotal=item.target==='sheet'?Math.max(1,sheets.length):previewWalk.total;
  let previewText:string|null=null,formulaError:string|undefined;
  try{previewText=resolveNumberingTemplate(item,previewIndex,previewTotal).text;}catch(error){formulaError=(error as Error).message;}
  const setScope=(scope:OverlayScope,target:OverlayTarget=item.target)=>{
@@ -61,7 +69,9 @@ export function NumberingControlPanel(){
    <label className="block">{fa?'فرمول شماره':'Number formula'}<input aria-label={fa?'فرمول شماره':'Number formula'} dir="ltr" className={input} maxLength={160} value={item.customScript} placeholder="page+1000" onChange={e=>patch({customScript:e.target.value})}/></label>
    <p className="text-slate-500 dark:text-slate-400">{fa?'مثلاً page+1000 یا page-2؛ فقط محاسبات محدود، بدون اجرای کد.':'For example page+1000 or page-2; bounded arithmetic only, not code execution.'}</p>
    {formulaError && <p role="alert" className="text-rose-600 dark:text-rose-300">{fa?`فرمول نامعتبر: ${formulaError}`:`Invalid formula: ${formulaError}`}</p>}
-   {previewText ? <p className="text-slate-700 dark:text-slate-300">{fa?'پیش‌نمایش برای صفحهٔ جاری:':'Preview for the current page:'} <span dir="auto" className="font-semibold">{previewText}</span></p> : <p role="alert" className="text-amber-600 dark:text-amber-300">{fa?'قالب یا فرمول برای این صفحه قابل محاسبه نیست؛ شمارهٔ چاپی نشان داده نمی‌شود تا اصلاح شود.':'This template or formula cannot be computed for this page; nothing will print until it is fixed.'}</p>}
+   {previewText ? <p className="text-slate-700 dark:text-slate-300">{fa
+     ? ((item.sequenceBasis??'page')==='grid'?'پیش‌نمایش برای خانهٔ جاری روی شیت:':'پیش‌نمایش برای صفحهٔ جاری:')
+     : ((item.sequenceBasis??'page')==='grid'?'Preview for the current cell on the sheet:':'Preview for the current page:')} <span dir="auto" className="font-semibold">{previewText}</span></p> : <p role="alert" className="text-amber-600 dark:text-amber-300">{fa?'قالب یا فرمول برای این صفحه قابل محاسبه نیست؛ شمارهٔ چاپی نشان داده نمی‌شود تا اصلاح شود.':'This template or formula cannot be computed for this page; nothing will print until it is fixed.'}</p>}
    <label className="block">{fa?'عدد شروع':'Starting number'}<input aria-label={fa?'عدد شروع':'Starting number'} type="number" min="-999999999" max="999999999" className={input} value={item.startOffset} onChange={e=>{if(e.target.value && Number.isSafeInteger(+e.target.value))patch({startOffset:+e.target.value});}}/></label>
    <label className="block">{fa?'نوع شماره':'Number format'}<select aria-label={fa?'نوع شماره':'Number format'} className={input} value={item.format} onChange={e=>patch({format:e.target.value as PageOverlayNumbering['format']})}>{['persian','english','roman','abjad'].map(x=><option key={x} value={x}>{x}</option>)}</select></label>
    <label className="block">{fa?'تعداد رقم سریال (۰ بدون صفر)':'Serial padding (0 for none)'}<input aria-label={fa?'تعداد رقم سریال':'Serial padding'} type="number" min="0" max="10" className={input} value={item.padZeros} onChange={e=>patch({padZeros:Math.max(0,Math.min(10,Number(e.target.value)))})}/></label>
@@ -96,6 +106,20 @@ export function NumberingControlPanel(){
    <label className="block">{fa?'شفافیت':'Opacity'} {Math.round(item.opacity*100)}%<input aria-label={fa?'شفافیت شماره':'Number opacity'} type="range" min="10" max="100" value={item.opacity*100} onChange={e=>patch({opacity:+e.target.value/100})} className="w-full"/></label>
    <label className="block">{fa?'چرخش':'Rotation'} {item.rotation}°<input aria-label={fa?'چرخش شماره':'Number rotation'} type="range" min="0" max="360" value={item.rotation} onChange={e=>patch({rotation:+e.target.value})} className="w-full"/></label>
    <label className="block">{fa?'مبنا':'Attach to'}<select aria-label={fa?'مبنای شماره':'Number target'} className={input} value={item.target} onChange={e=>setScope(item.targetScope,e.target.value as OverlayTarget)}><option value="page">{fa?'داخل محتوای صفحه':'Inside document page'}</option><option value="cell">{fa?'هر سلول / خانه چاپی':'Each imposed cell'}</option><option value="sheet">{fa?'کل برگه خروجی':'Whole output sheet'}</option></select></label>
+   <label className="block">{fa?'مبنای شمارش':'Counting basis'}<select data-numbering-basis aria-label={fa?'مبنای شمارش':'Numbering basis'} className={input} value={item.sequenceBasis??'page'}
+     onChange={e=>patch({sequenceBasis:e.target.value as NonNullable<PageOverlayNumbering['sequenceBasis']>})}>
+     <option value="page">{fa?'شماره صفحهٔ سند (مستقل از چیدمان)':'Document page number (independent of the layout)'}</option>
+     <option value="grid">{fa?'ترتیب خانه‌ها روی شیت (جدول / بوکلت)':'Cell order on the printed sheet (grid / booklet)'}</option>
+     <option value="sheet">{fa?'شمارهٔ برگهٔ خروجی':'Output sheet number'}</option>
+   </select></label>
+   {(item.sequenceBasis??'page')==='grid' && <label className="block">{fa?'جهت شمارش':'Counting direction'}<select data-numbering-direction aria-label={fa?'جهت شمارش':'Numbering direction'} className={input} value={item.sequenceDirection??'ltr'}
+     onChange={e=>patch({sequenceDirection:e.target.value as NonNullable<PageOverlayNumbering['sequenceDirection']>})}>
+     <option value="ltr">{fa?'ردیف‌ها، از چپ به راست':'Rows, left to right'}</option>
+     <option value="rtl">{fa?'ردیف‌ها، از راست به چپ':'Rows, right to left'}</option>
+     <option value="ttb">{fa?'ستون‌ها، از بالا به پایین':'Columns, top to bottom'}</option>
+     <option value="btt">{fa?'ستون‌ها، از پایین به بالا':'Columns, bottom to top'}</option>
+     <option value="zigzag">{fa?'زیگزاگ (مارپیچی)':'Zigzag (snake)'}</option>
+   </select></label>}
    <label className="block">{fa?'دامنه':'Scope'}<select aria-label={fa?'دامنه شماره':'Number scope'} className={input} value={item.targetScope} onChange={e=>setScope(e.target.value as OverlayScope)}>{scopes.map((scope,i)=><option key={scope} value={scope}>{labels[i]}</option>)}</select></label>
    <label className="block">{item.target==='sheet'?(fa?'برگه‌های دلخواه':'Chosen output sheets'):(fa?'صفحات / سلول‌های دلخواه':'Chosen pages / cells')}<input aria-label={fa?'بازه شماره‌گذاری':'Numbering range'} dir="ltr" className={input} value={range} placeholder="1, 3-5" onChange={e=>{setRange(e.target.value);setRangeError(false);}}/></label>
    <button type="button" onClick={applyRange} className="rounded border border-slate-300 bg-slate-100 px-2 py-1 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 cursor-pointer">{fa?'اعمال بازه':'Apply range'}</button>
