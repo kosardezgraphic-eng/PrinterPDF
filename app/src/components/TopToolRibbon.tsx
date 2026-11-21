@@ -12,7 +12,6 @@ import {
   FilePlus2,
   FileSearch,
   FileStack,
-  FolderOpen,
   FolderX,
   Grid2x2Plus,
   Hash,
@@ -30,6 +29,7 @@ import {
   Scaling,
   Search,
   SlidersHorizontal,
+  Save,
   Sparkles,
   Square,
   Stamp,
@@ -93,6 +93,7 @@ export const TopToolRibbon: React.FC = () => {
     exportMergedOrImposedPdf,
     openPdfPreviewModal,
     setPdfExportOptions,
+    savePspProject,
   } = useAppStore();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -784,16 +785,33 @@ export const TopToolRibbon: React.FC = () => {
               </button>
             </Tooltip>
 
-            <Tooltip label={labels.file} side="bottom">
+            {/* There is deliberately no "File" tile here. It opened the same document buttons that sit in the row
+                above (add, close all, save) instead of any tool of its own, so it read as a second File menu and did
+                nothing the operator could not already reach — it was removed rather than given a new meaning.
+                The two tiles below are quick actions it used to crowd out: saving the project and the runtime
+                diagnostics panel. */}
+            <Tooltip label={isFa ? 'ذخیره پروژه' : 'Save project'} shortcut="Ctrl+Shift+S" side="bottom">
               <button
                 type="button"
-                data-ribbon-tool="file"
-                aria-label={labels.file}
-                aria-pressed={isToolActive('file')}
-                onClick={() => selectTool('file')}
-                className={iconTileClass(isToolActive('file'))}
+                data-ribbon-quick="save-project"
+                aria-label={isFa ? 'ذخیره پروژه (.psp)' : 'Save project (.psp)'}
+                title={isFa ? 'ذخیره پروژه (.psp) — Ctrl+Shift+S' : 'Save project (.psp) — Ctrl+Shift+S'}
+                onClick={() => savePspProject()}
+                className={iconTileClass(false)}
               >
-                <FolderOpen className="h-4 w-4" aria-hidden="true" />
+                <Save className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+              </button>
+            </Tooltip>
+
+            <Tooltip label={isFa ? 'تشخیص و خطاها' : 'Diagnostics'} side="bottom">
+              <button
+                type="button"
+                data-ribbon-quick="diagnostics"
+                aria-label={isFa ? 'پنل وضعیت و خطاها' : 'Status and diagnostics'}
+                onClick={() => setActiveInspectorTool('printers')}
+                className={iconTileClass(isToolActive('printers'))}
+              >
+                <AlertTriangle className="h-4 w-4 text-amber-500 dark:text-amber-400" aria-hidden="true" />
               </button>
             </Tooltip>
           </div>

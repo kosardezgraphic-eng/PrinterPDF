@@ -700,6 +700,26 @@ export type OverlayTarget = 'page' | 'cell' | 'sheet';
 /** `badge` is a ring: a circle with a reversed circle cut out of the middle. */
 export type ShapeType = 'rectangle' | 'square' | 'rounded-rect' | 'circle' | 'line' | 'arrow' | 'triangle' | 'polygon' | 'star' | 'diamond' | 'badge';
 export type NumberingNumberFormat = 'persian' | 'english' | 'roman' | 'abjad';
+
+/**
+ * What a numbering layer counts. A sheet of 2×2 cells printing pages 1–4 can be numbered by the document's own
+ * page number (`page`), by the order the cells are read off the printed sheet (`grid`), or once per output side
+ * (`sheet`) — the operator picks which of those is "the page number" without having to move the pages
+ * themselves. It is independent of the document's own page numbers: a booklet prints sheet 5 holding document
+ * pages 8 and 1, and both numbers may be wanted at once, which is why this lives on the numbering overlay and
+ * not on the document.
+ */
+export type NumberingSequenceBasis = 'page' | 'grid' | 'sheet';
+/**
+ * The direction of the grid walk, and only the grid walk: `ltr`/`rtl` read each printed row in writing order,
+ * `ttb`/`btt` read each column top-to-bottom or bottom-to-top, and `zigzag` reverses every other row so the
+ * count snakes across the sheet instead of jumping back to the leading edge — the usual request for a
+ * numbered grid of tickets.
+ */
+export type NumberingSequenceDirection = 'ltr' | 'rtl' | 'ttb' | 'btt' | 'zigzag';
+export const NUMBERING_SEQUENCE_BASES: NumberingSequenceBasis[] = ['page', 'grid', 'sheet'];
+export const NUMBERING_SEQUENCE_DIRECTIONS: NumberingSequenceDirection[] = ['ltr', 'rtl', 'ttb', 'btt', 'zigzag'];
+
 export interface OverlayBase {
   id: string;
   target: OverlayTarget;
@@ -758,6 +778,16 @@ export interface PageOverlayNumbering extends OverlayBase {
   backgroundColor?: string; bold: boolean; italic: boolean;
   format: NumberingNumberFormat; template: string; startOffset: number; padZeros: number; customScript: string;
   align?: 'left' | 'center' | 'right';
+  /**
+   * The axis every placed occurrence walks along. `page` counts pages in workspace order (the classic
+   * "each page gets the next number, wherever the imposition puts it"); `row` and `column` count cells on
+   * the printed sheet — left to right, top to bottom for a row walk, and down a column before moving to the
+   * next one for a column walk; `sheet` counts output sides. Absent means `page`, so an old project keeps
+   * the numbers it was saved with.
+   */
+  sequenceBasis?: NumberingSequenceBasis;
+  /** Where the walk starts in the sheet's own cell order. `reverse-*` runs the same walk backwards. */
+  sequenceDirection?: NumberingSequenceDirection;
 }
 /**
  * One gesture the eraser tool leaves on a picture, in **percent of the piece of the box the picture actually
@@ -813,6 +843,16 @@ export interface PageOverlayImage extends OverlayBase {
   invert?: boolean;
   /** Holes punched into the picture by the eraser. Empty or absent means nothing was erased. */
   erase?: EraseShape[];
+  /**
+   * How a sheet-targeted picture fills the sheet. `whole` (the default) draws it once across the whole output
+   * side, so a logo dropped on a 2×2 sheet stays one logo instead of becoming four; `each-cell` repeats it
+   * inside every populated cell, sized from that cell — the old behaviour, kept as an explicit choice because
+   * a watermark per cell is a real job too.
+   *
+   * Only `target: 'sheet'` reads this: a picture dropped *into* a page keeps belonging to that page and is
+   * never echoed onto its neighbours, which is what made a stamp dropped on one cell appear on all of them.
+   */
+  sheetFill?: 'whole' | 'each-cell';
 }
 /**
  * Erase gestures a renderer can be handed. Percentages are kept inside a generous band (a hole may start

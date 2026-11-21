@@ -29,8 +29,21 @@ function boxPlacements<T extends PageOverlayImage|PageOverlayShape>(
   const result:{item:T;rect:BoxHost;key:string;rotation:number;clip?:BoxHost;pageId?:string}[]=[];
   for(const item of wanted){
     if(item.target==='sheet'){
-      if(matchesOverlayScope(item,{pageIndex:0,total:totalSheets,sheetIndex:sheet.sideIndex,sheetPageIds}))
-        result.push({item,rect:{x:0,y:0,width:sheet.widthMm,height:sheet.heightMm},key:`${item.id}-sheet-${sheet.sideIndex}`,rotation:0});
+      if(!matchesOverlayScope(item,{pageIndex:0,total:totalSheets,sheetIndex:sheet.sideIndex,sheetPageIds}))continue;
+      // A sheet picture is one picture across the side; only a picture that asks to be repeated is echoed into
+      // every populated cell, and a picture dropped *into* a page never is — that is what made a stamp dropped
+      // on one cell turn up on all of them.
+      if(kind==='image' && (item as unknown as PageOverlayImage).sheetFill==='each-cell'){
+        for(const cell of sheet.cells){
+          if(!cell.page)continue;
+          if(!indices.has(cell.page.id))continue;
+          result.push({item,rect:{x:cell.contentXMm,y:cell.contentYMm,width:cell.contentWidthMm,height:cell.contentHeightMm},
+            key:`${item.id}-repeat-${cell.occurrenceKey??cell.cellIndex}`,rotation:cell.transform?.rotationDeg??0,
+            clip:cell.allowOverflow?undefined:{x:cell.cellXMm,y:cell.cellYMm,width:cell.cellWidthMm,height:cell.cellHeightMm},pageId:cell.page.id});
+        }
+        continue;
+      }
+      result.push({item,rect:{x:0,y:0,width:sheet.widthMm,height:sheet.heightMm},key:`${item.id}-sheet-${sheet.sideIndex}`,rotation:0});
       continue;
     }
     for(const cell of sheet.cells){

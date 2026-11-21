@@ -111,7 +111,7 @@ export function PageEraserLayer({ page, width, height, pxPerMm }: { page: PageIt
       const point = pointAt(event);
       setCursor(point);
       setDrag(current => current && current.pointerId === event.pointerId
-        ? { ...current, shape: growEraseShape(current.shape, current.anchor, point) }
+        ? { ...current, shape: growEraseShape(current.shape, current.anchor, point, box) }
         : current);
     }}
     onPointerUp={event => {

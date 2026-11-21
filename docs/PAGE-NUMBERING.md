@@ -43,6 +43,31 @@ page or output-sheet numbers (`1, 3-5`). Odd/even is evaluated against workspace
 against output-side order for sheet targets; ranges are captured as page IDs or side indexes and do not change print
 selection.
 
+## What a number counts: the document page or the printed cell
+
+`مبنای شمارش / Counting basis` is a third, independent question — *which* number a cell gets — and it is what makes
+separate numbering of a grid or a booklet possible without moving any pages:
+
+| Basis | The number | `{total}` |
+| --- | --- | --- |
+| `page` (default) | the page's own position in the workspace — exactly what the sidebar shows | number of pages |
+| `grid` | the cell's place in the reading order **of the printed side** | cells on that side |
+| `sheet` | the output side's number, shared by every cell on it | number of output sides |
+
+On a 2×2 imposition of an eight-page file, `page` prints 1–8 across the two sides, `grid` prints 1–4 on each side, and
+`sheet` prints 1,1,1,1 then 2,2,2,2. Because the basis is a property of the overlay, a document page number and a cell
+number can be printed on the same sheet at once — two overlays, two templates, two bases.
+
+For `grid`, `جهت شمارش / Counting direction` decides the walk: rows left-to-right (`ltr`), rows right-to-left (`rtl`),
+columns top-to-bottom (`ttb`), columns bottom-to-top (`btt`), or `zigzag` — a boustrophedon walk that reverses every
+second row, so a grid of tickets continues its count from the end of the previous row. The walk covers **occupied cells
+only**, so a half-filled matrix numbers 1–3 instead of jumping over the empty rectangle. The direction is stored with the
+overlay (also for `page`, where it has no effect yet) so switching basis back and forth does not forget it.
+
+`engine/numberingSequence.ts` is the single implementation of both, called by the placement engine the preview and the
+PDF exporter share; the panel's preview line uses the same function, so it cannot show one number while the paper prints
+another.
+
 Preview and PDF share `textPlacements()` and `drawOverlayText()`, so a number that is visible in the preview is drawn at
 the same mm position in the export. Because the number is rasterized into the page image at ~200 dpi, it is not
 selectable or searchable text in the PDF.

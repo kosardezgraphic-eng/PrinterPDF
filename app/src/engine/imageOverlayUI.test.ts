@@ -76,6 +76,44 @@ describe('picture format line',()=>{
  });
 });
 
+describe('a picture on a grid',()=>{
+ const four=[1,2,3,4].map(i=>({...page,id:`p${i}`,sourcePageNumber:i,isHighlighted:i===1}));
+ const gridLayout=()=>({...DEFAULT_LAYOUT,paperSize:'Custom' as const,customWidthMm:200,customHeightMm:300,rows:2,cols:2,sheetOrder:'ltr' as const,
+   duplexMode:'none' as const,marginMode:'custom' as const,marginsMm:{top:0,right:0,bottom:0,left:0},horizontalGutterMm:0,verticalGutterMm:0,autoRotateToFit:false,showCellBorders:false,rulerGuides:[]});
+ const placements=()=>imagePlacements(computeImpositionSheets(four,gridLayout())[0],1,four,useAppStore.getState().overlays);
+
+ it('drops onto the whole sheet once, not into every cell',async()=>{
+  act(()=>useAppStore.setState({pages:four,layout:gridLayout()}));
+  render();
+  const cell=computeImpositionSheets(four,gridLayout())[0].cells[0];
+  rect(canvas(),200,300);
+  drop(canvas(),'drop',[new File([PNG],'logo.png',{type:'image/png'})],cell.contentXMm+1,cell.contentYMm+1);
+  await flush();
+  const placed=overlay(0);
+  expect(placed.target).toBe('sheet');
+  expect(placements()).toHaveLength(1);                                            // one logo on the printed side
+  expect(field('Image placement')).toBeTruthy();
+ });
+
+ it('repeats into every cell only when the panel is told to',async()=>{
+  useAppStore.setState({pages:four,layout:gridLayout(),overlays:[image({target:'sheet',targetScope:'all'})],selectedOverlayId:'i'});
+  render();
+  expect(placements()).toHaveLength(1);
+  const placement=field('Image placement') as HTMLSelectElement;
+  expect([...placement.options].map(o=>o.value)).toEqual(['whole','each-cell']);
+  act(()=>{placement.value='each-cell';placement.dispatchEvent(new Event('change',{bubbles:true}));});
+  expect(overlay(0).sheetFill).toBe('each-cell');
+  act(()=>{rect(canvas(),200,300);});
+  expect(placements()).toHaveLength(4);                                            // one per populated cell
+ });
+
+ it('says when a picture belongs to one cell instead of the sheet',()=>{
+  useAppStore.setState({pages:four,layout:gridLayout(),overlays:[image({target:'page',targetPageIds:['p1'],targetScope:'current'})],selectedOverlayId:'i'});
+  render();
+  expect(host.textContent).toContain('This picture sits in one cell, not on the sheet');
+ });
+});
+
 describe('picture drop and gestures',()=>{
  it('drops a picture on the sheet as a page overlay centred on the cursor',async()=>{
   render();
@@ -309,8 +347,17 @@ describe('picture panel',()=>{
   expect(img().getAttribute('style')).toContain('mask');                           // the hole appears while the button is down
   expect(picture().erase).toBeUndefined();                                         // …but nothing is stored mid-gesture
   pointer(node(),'pointermove',45,22.5);pointer(node(),'pointerup',45,22.5);
-  expect(stroke()?.points).toEqual([{x:10,y:10},{x:50,y:50}]);
-  expect(stroke()?.radiusMm).toBe(4);                                              // the 8 mm default is a diameter
+  // The stroke starts under the pointer, ends where it was released, and carries the samples in between: a gap
+  // between them is exactly what used to be drawn as a row of dots. The ends are the exact geometry; the fill
+  // between them is what keeps the line continuous at the speed of the hand.
+  const painted=stroke()!;
+  expect(painted.points[0]).toEqual({x:10,y:10});
+  expect(painted.points[painted.points.length-1]).toEqual({x:50,y:50});
+  expect(painted.points.length).toBeGreaterThan(2);
+  for(let i=1;i<painted.points.length;i++){
+    expect(Math.hypot(painted.points[i]!.x-painted.points[i-1]!.x,painted.points[i]!.y-painted.points[i-1]!.y)).toBeLessThan(10);
+  }
+  expect(painted.radiusMm).toBe(4);                                              // the 8 mm default is a diameter
   expect(picture().src).toBe('data:image/png;base64,AAA');                          // erased, never rewritten
   expect(picture().xPercent).toBe(20);expect(picture().yPercent).toBe(30);          // the eraser ate the drag, not the position
   expect(img().getAttribute('style')).toContain('mask');
@@ -438,7 +485,9 @@ describe('picture panel',()=>{
   act(()=>useAppStore.setState({overlays:[image({flipHorizontal:true})],selectedOverlayId:'i'}));render();rect(img(),90,45);
   act(()=>eraseButton('brush').click());
   pointer(node(),'pointerdown',9,4.5);pointer(node(),'pointermove',45,22.5);pointer(node(),'pointerup',45,22.5);
-  expect(stroke()?.points.map(p=>p.x)).toEqual([90,50]);                             // 10 % and 50 % seen in the mirror
+  const xs=stroke()!.points.map(p=>p.x);
+  expect(xs[0]).toBe(90);expect(xs[xs.length-1]).toBe(50);                           // 10 % and 50 % seen in the mirror
+  expect(xs.every(x=>x<=90&&x>=50)).toBe(true);                                      // and the path stays between them
  });
  it('inverts the picture on one press and undoes it on the next',()=>{
   act(()=>useAppStore.setState({overlays:[image()],selectedOverlayId:'i'}));render();

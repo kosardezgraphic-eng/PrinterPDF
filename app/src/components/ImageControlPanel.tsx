@@ -85,6 +85,27 @@ export function ImageControlPanel(){
      <button type="button" onClick={()=>addOverlay({...item,id:newOverlayId(),xPercent:item.xPercent+5,yPercent:item.yPercent+5})} className="rounded border border-slate-300 bg-slate-100 px-2 py-1 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 cursor-pointer">{fa?'+ نسخه':'+ Copy'}</button></div>
    <div role="tablist" aria-label={fa?'تصویرها':'Pictures'} className="flex gap-1 overflow-x-auto">{numbers.map((n,i)=><button key={n.id} role="tab" type="button" aria-selected={n.id===item.id} onClick={()=>useAppStore.getState().selectOverlay(n.id)} className={`shrink-0 rounded px-2 py-1 cursor-pointer ${n.id===item.id?'bg-sky-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{fa?`تصویر ${i+1}`:`Picture ${i+1}`}</button>)}</div>
    <p className="truncate text-slate-500 dark:text-slate-400" title={item.name}>{item.name} · {item.naturalWidth}×{item.naturalHeight}px</p>
+   <label className="block">{fa?'جای تصویر':'Placement'}<select data-image-placement aria-label={fa?'جای تصویر':'Image placement'} className={input}
+     value={item.target==='sheet'&&item.sheetFill==='each-cell'?'each-cell':'whole'}
+     onChange={e=>{
+       // Two different questions in one control because they are one decision for the operator: is this
+       // picture on the printed side, or on every cell of it? `whole` puts it on the side; `each-cell` asks
+       // for the repetition explicitly, which is the only way it is allowed to happen.
+       if(e.target.value==='each-cell'){
+         const currentSheet=sheets[Math.min(activeSheetIndex,Math.max(0,sheets.length-1))];
+         patch({target:'sheet',targetScope:'all',sheetFill:'each-cell',targetSheetIndices:undefined,
+           ...(currentSheet?{targetSheetIndex:currentSheet.sideIndex}:{})});
+       } else patch({target:'sheet',targetScope:'all',sheetFill:'whole',targetSheetIndices:undefined});
+     }}>
+     <option value="whole">{fa?'روی کل شیت (یک‌بار)':'Across the whole sheet (once)'}</option>
+     <option value="each-cell">{fa?'در همهٔ خانه‌ها (تکرار)':'In every cell (repeat)'}</option>
+   </select></label>
+   {item.target!=='sheet' && <p className="text-[10px] leading-4 text-amber-600 dark:text-amber-300">{fa
+     ? 'این تصویر روی یک خانه است، نه کل شیت. برای اینکه روی همهٔ خانه‌ها بیاید، «در همهٔ خانه‌ها» را انتخاب کنید.'
+     : 'This picture sits in one cell, not on the sheet. Choose “In every cell” to repeat it across the sheet.'}</p>}
+   {item.target==='sheet' && item.sheetFill!=='each-cell' && <p className="text-[10px] leading-4 text-slate-500 dark:text-slate-400">{fa
+     ? 'روی شیت چیده شده و به همان یک شکل چاپ می‌شود؛ در ماتریس تکرار نمی‌شود.'
+     : 'Placed once on the sheet and printed once — it is not repeated by the matrix.'}</p>}
    <label className="block">{fa?'جایگزینی تصویر':'Replace picture'}<input data-image-source type="file" accept="image/*" className={input} onChange={e=>void replace(e.target.files?.[0])}/></label>
    <div className="flex gap-1">
      <label className="flex-1">{fa?'عرض (میلی‌متر)':'Width (mm)'}<input aria-label={fa?'عرض تصویر':'Image width'} type="number" min="1" max="2000" step="0.1" className={input} value={Number(widthMm.toFixed(2))} onChange={e=>setMm('width',Number(e.target.value))}/></label>

@@ -36,13 +36,22 @@ export function eraseToolPaints(tool: EraseTool): boolean {
 }
 
 /**
- * Two samples closer than this (percent of the fit rectangle) are the same dot.
+ * Two samples closer than this (percent of the fit rectangle) are the same dot — but only once the stroke is
+ * *dense enough to be continuous*.
  *
  * A pointermove arrives far faster than the eye can see a new dot, and every point is stored in the project
  * file and repeated in each undo snapshot — an un-sampled 400 px drag would bankroll thousands of identical
- * ellipses for the rest of the session.
+ * ellipses for the rest of the session. The catch is that a stroke is drawn as one dot per point, so dropping
+ * every sample shorter than a fixed distance leaves visible gaps between them once the brush is small or the
+ * pointer moves fast. The next sample is therefore only skipped when the dot already there covers the way to it.
  */
 export const ERASE_SAMPLE_PERCENT = 0.3;
+/**
+ * How much of the brush's diameter two consecutive samples may be apart before the stretch between them is
+ * filled in. The brush paints a disc of its radius at each point, so two points one diameter apart already
+ * overlap; anything over that leaves a lens-shaped gap the eye reads as a dotted line.
+ */
+export const ERASE_MAX_GAP_DIAMETERS = 1;
 
 /** A region smaller than this on either axis was a click, not a marquee. */
 export const ERASE_REGION_MIN_PERCENT = 0.4;
@@ -61,6 +70,13 @@ export interface ErasePaintBox {
 export interface EraseParts {
   /** Brush dots: one ellipse per sampled point. */
   holes: { cx: number; cy: number; rx: number; ry: number }[];
+  /**
+   * The strokes' paths, one per brush gesture that has a second point: a polyline anchored *at the centre* of
+   * each dot. The dots alone are a dotted line whenever the samples are further apart than the brush, which is
+   * exactly what a fast freehand drag produces; a `round`-capped line of the brush's width through the same
+   * centres is the continuous stroke the operator drew.
+   */
+  strokes: { xs: number[]; ys: number[]; width: number }[];
   /** Marquee regions. */
   rects: { x: number; y: number; width: number; height: number }[];
 }
@@ -95,7 +111,8 @@ export function eraseShapeIsPaint(shape: EraseShape): boolean {
 export function growEraseShape(
   shape: EraseShape,
   anchor: { x: number; y: number },
-  to: { x: number; y: number }
+  to: { x: number; y: number },
+  box?: { widthMm: number; heightMm: number }
 ): EraseShape {
   if (shape.mode === 'region') {
     return {
@@ -107,8 +124,25 @@ export function growEraseShape(
     };
   }
   const last = shape.points[shape.points.length - 1];
-  if (last && Math.hypot(to.x - last.x, to.y - last.y) < ERASE_SAMPLE_PERCENT) return shape;
-  return { ...shape, points: [...shape.points, { x: to.x, y: to.y }] };
+  if (!last) return { ...shape, points: [to] };
+  const gap = Math.hypot(to.x - last.x, to.y - last.y);
+  if (gap < ERASE_SAMPLE_PERCENT) return shape;
+  // When the brush's own footprint leaves a hole between the two samples, the stroke is *interpolated* rather
+  // than stepped: an ellipse per skipped sample, so the line is continuous at any speed. Without the box the
+  // caller is describing a freehand path (a test, a paste), where the plain sample is the honest answer.
+  if (!box) return { ...shape, points: [...shape.points, { ...to }] };
+  // The gap is compared on both axes so a stretched rectangle cannot hide a hole in the short direction.
+  const diameterX = 2 * shape.radiusMm / Math.max(0.0001, box.widthMm) * 100;
+  const diameterY = 2 * shape.radiusMm / Math.max(0.0001, box.heightMm) * 100;
+  const allowed = Math.max(ERASE_SAMPLE_PERCENT, Math.min(diameterX, diameterY) * ERASE_MAX_GAP_DIAMETERS);
+  if (gap <= allowed) return { ...shape, points: [...shape.points, { ...to }] };
+  const steps = Math.min(256, Math.ceil(gap / Math.max(ERASE_SAMPLE_PERCENT, allowed)));
+  const points = [...shape.points];
+  for (let step = 1; step <= steps; step++) {
+    const t = step / steps;
+    points.push({ x: last.x + (to.x - last.x) * t, y: last.y + (to.y - last.y) * t });
+  }
+  return { ...shape, points };
 }
 
 /** Is this gesture worth committing at all? A click without travel is not — for a marquee. */
@@ -140,11 +174,12 @@ function scalesOf(box: ErasePaintBox) {
 export function eraseShapeParts(shape: EraseShape, box: ErasePaintBox): EraseParts {
   const { sx, sy, mmx, mmy } = scalesOf(box);
   if (shape.mode === 'region') {
-    return { holes: [], rects: [{ x: shape.x * sx, y: shape.y * sy, width: shape.width * sx, height: shape.height * sy }] };
+    return { holes: [], strokes: [], rects: [{ x: shape.x * sx, y: shape.y * sy, width: shape.width * sx, height: shape.height * sy }] };
   }
   const rx = shape.radiusMm * mmx, ry = shape.radiusMm * mmy;
   return {
     holes: shape.points.map(point => ({ cx: point.x * sx, cy: point.y * sy, rx, ry })),
+    strokes: [],
     rects: [],
   };
 }
@@ -152,13 +187,24 @@ export function eraseShapeParts(shape: EraseShape, box: ErasePaintBox): ErasePar
 /** The same, for a whole (possibly junk) list — the single sanitising door every renderer walks through. */
 export function eraseParts(shapes: EraseShape[] | undefined, box: ErasePaintBox): EraseParts {
   const holes: EraseParts['holes'] = [];
+  const strokes: EraseParts['strokes'] = [];
   const rects: EraseParts['rects'] = [];
+  const { sx, sy, mmx, mmy } = scalesOf(box);
   for (const shape of sanitizeEraseShapes(shapes ?? [])) {
     const parts = eraseShapeParts(shape, box);
     holes.push(...parts.holes);
     rects.push(...parts.rects);
+    if (shape.mode === 'brush' && shape.points.length > 1) {
+      // One width per axis: the brush becomes an ellipse in a stretched picture, and a line cannot be both, so the
+      // stroke carries the *larger* of the two and the per-point ellipses keep the exact footprint.
+      strokes.push({
+        xs: shape.points.map(point => point.x * sx),
+        ys: shape.points.map(point => point.y * sy),
+        width: 2 * shape.radiusMm * Math.max(mmx, mmy),
+      });
+    }
   }
-  return { holes, rects };
+  return { holes, strokes, rects };
 }
 
 /** Only the holes, in order, from a given position in the list — the mask a paint stroke is cut by. */
@@ -172,6 +218,7 @@ const num = (value: number) => (Math.round(value * 1000) / 1000).toString();
 function partsMarkup(parts: EraseParts): string {
   return [
     ...parts.rects.map(rect => `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(Math.max(0.001, rect.width))}" height="${num(Math.max(0.001, rect.height))}"/>`),
+    ...parts.strokes.map(stroke => `<polyline points="${stroke.xs.map((x, i) => `${num(x)},${num(stroke.ys[i] ?? 0)}`).join(' ')}" fill="none" stroke-width="${num(Math.max(0.001, stroke.width))}" stroke-linecap="round" stroke-linejoin="round"/>`),
     ...parts.holes.map(hole => `<ellipse cx="${num(hole.cx)}" cy="${num(hole.cy)}" rx="${num(Math.max(0.001, hole.rx))}" ry="${num(Math.max(0.001, hole.ry))}"/>`),
   ].join('');
 }
@@ -236,7 +283,7 @@ export function erasePaintSvg(shapes: EraseShape[] | undefined, box: ErasePaintB
         + `<g fill="#000">${partsMarkup(later)}</g></mask>`);
       mask = ` mask="url(#${id})"`;
     }
-    groups.push(`<g fill="${shape.color}"${mask}>${partsMarkup(eraseShapeParts(shape, box))}</g>`);
+    groups.push(`<g fill="${shape.color}" stroke="${shape.color}"${mask}>${partsMarkup(eraseShapeParts(shape, box))}</g>`);
   });
   if (!groups.length) return undefined;
   return svgShell(`<defs>${defs.join('')}</defs>${groups.join('')}`, box);
@@ -264,15 +311,30 @@ export function applyEraseToContext(
   for (const shape of clean) {
     const parts = eraseShapeParts(shape, box);
     if (!parts.holes.length && !parts.rects.length) continue;
+    const all = eraseParts([shape], box);
     ctx.save();
     if (shape.color) ctx.fillStyle = shape.color;
     else ctx.fillStyle = '#000';
     ctx.globalCompositeOperation = shape.color ? 'source-over' : 'destination-out';
     for (const rect of parts.rects) ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+    // The dots first, then the ribbon through their centres: a stroke drawn as separate dots has visible notches
+    // wherever the pointer outran the brush, and the raster the PDF embeds would keep them.
     for (const hole of parts.holes) {
       ctx.beginPath();
       ctx.ellipse(hole.cx, hole.cy, Math.max(0.001, hole.rx), Math.max(0.001, hole.ry), 0, 0, Math.PI * 2);
       ctx.fill();
+    }
+    if (all.strokes.length) {
+      ctx.strokeStyle = shape.color ?? '#000';
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      for (const stroke of all.strokes) {
+        ctx.lineWidth = Math.max(0.001, stroke.width);
+        ctx.beginPath();
+        ctx.moveTo(stroke.xs[0]!, stroke.ys[0]!);
+        for (let index = 1; index < stroke.xs.length; index++) ctx.lineTo(stroke.xs[index]!, stroke.ys[index]!);
+        ctx.stroke();
+      }
     }
     ctx.restore();
   }

@@ -37,6 +37,37 @@ describe('interactive page numbers',()=>{
    expect(number().target).toBe('sheet');
   });
 
+ it('counts cells off the sheet, in the chosen direction, independently of the document page number',()=>{
+  // A 2×2 sheet of six pages: the first side holds p1–p4 in reading order, the second p5, p6.
+  act(()=>useAppStore.setState({pages:[...pages,...[4,5,6].map(i=>({id:`p${i}`,documentId:'d',documentName:'d',sourcePageNumber:i,widthMm:200,heightMm:300,rotation:0 as const,selectedForPrint:true,isHighlighted:false,isBlankPage:false,colorProfile:'color' as const,inkCoveragePercent:0}))],
+    layout:{...DEFAULT_LAYOUT,paperSize:'Custom',customWidthMm:200,customHeightMm:300,rows:2,cols:2,sheetOrder:'ltr',duplexMode:'none',rulerGuides:[]}}));
+  act(()=>field('Add editable page number').click());
+  const basis=field('Numbering basis') as HTMLSelectElement;
+  expect([...basis.options].map(o=>o.value)).toEqual(['page','grid','sheet']);
+  expect(number().sequenceBasis).toBeUndefined();                                   // untouched means "document page"
+  setValue(field('Number template') as HTMLTextAreaElement,'{page}');
+  act(()=>{basis.value='grid';basis.dispatchEvent(new Event('change',{bubbles:true}));});
+  expect(number().sequenceBasis).toBe('grid');
+  // The panel preview must agree with the sheet: the active cell is p1, so cell 1 of the sheet's four.
+  expect(host.textContent).toContain('Preview for the current cell on the sheet');
+  // The side being looked at has to be the side that was walked: a number placed while the preview shows the
+  // first sheet would otherwise be computed against another sheet's cells.
+  act(()=>{const sheet=host.querySelector<HTMLElement>('[data-sheet-canvas-index="1"]');if(sheet)pointer(sheet,'click',5,5);});
+  const direction=field('Numbering direction') as HTMLSelectElement;
+  expect([...direction.options].map(o=>o.value)).toEqual(['ltr','rtl','ttb','btt','zigzag']);
+  act(()=>{direction.value='ttb';direction.dispatchEvent(new Event('change',{bubbles:true}));});
+  expect(number().sequenceDirection).toBe('ttb');
+  // The number drawn on the cell being looked at follows the walk, not the sidebar order: p2 sits in the
+  // second cell of the first side, which the column walk reaches fourth (p1, p3, p2, p4).
+  act(()=>useAppStore.setState({activeSheetIndex:0}));
+  const labels=[...host.querySelectorAll<HTMLElement>('[data-overlay-id]')].map(node=>node.getAttribute('aria-label'));
+  expect(labels).toEqual(['1']);
+  const drawn=useAppStore.getState().overlays.find(o=>o.kind==='numbering')!;
+  expect(drawn.id).toBe(number().id);
+  act(()=>useAppStore.getState().undo());                                           // the direction is undoable like anything else
+  expect(number().sequenceDirection).toBeUndefined();                               // …back to "never chosen" 
+ });
+
  it('adds, edits, moves and resizes a numbering overlay with undo',()=>{
   act(()=>field('Add editable page number').click());expect(number()).toMatchObject({target:'sheet',targetScope:'all',template:'{page}',enabled:true});
   setValue(field('Number template') as HTMLTextAreaElement,'Page {page}');setValue(field('Number formula') as HTMLInputElement,'page+1000');

@@ -7,6 +7,7 @@ Where the file is dropped decides what it becomes:
 - On a populated page box of a sheet → a picture overlay attached to that page (`page` target, `Only this page` scope, so a dropped logo does not silently cover the whole document).
 - On the margins, gutter or an empty cell of a sheet → an overlay attached to the **output sheet** instead, limited to that sheet.
 - Anywhere else in the application, or on a sheet while a single page is open in the read-only temporary preview → the file is imported as a **document/page** exactly as before. A mixed drop is split: pictures land on the sheet, everything else goes to the importer, and a PDF dropped on a sheet is still imported once, not twice.
+- On a sheet that holds more than one cell (any matrix, grid or booklet) → the picture goes **across the whole side**, once, whatever cell it was dropped on. A logo on 2×4 tickets belongs to the printed side, not to one ticket, and it must not be echoed into its neighbours. The picture panel's **جای تصویر / Placement** control makes the repetition an explicit choice — `Across the whole sheet (once)` or `In every cell (repeat)` — and the repeat keeps a per-cell copy in each populated cell, sized from that cell, which is what a per-ticket watermark needs. A picture dropped *into* a page (a one-cell sheet) still belongs to that page and is never repeated.
 - Outside the sheet bounds → not an overlay; it is imported as a document.
 
 While a picture hovers over a sheet the sheet is tinted and a dashed box previews the size the picture will get. The hint only appears for files that look like images.
@@ -134,6 +135,13 @@ selected layer is not removed and the highlighted pages survive the press.
   pixel, and a hairline brush narrows the window to a single pixel. A picture displayed inverted hands back the
   colour you *see* (the negation is applied to the average, which is the same number because both are linear).
   A spot with no alpha has no colour: the tool says so instead of quietly picking white.
+
+**A stroke is a line, not a row of dots.** The preview and the exported raster draw a brush gesture as its
+per-point ellipses *plus* a round-capped polyline through the same centres (`EraseParts.strokes`), and
+`growEraseShape()` fills in the samples the pointer skipped whenever two consecutive points are further apart
+than the brush's own diameter. Keeping only every sample above a fixed distance — which is what the eraser did
+first — left visible notches wherever the hand moved faster than one dot; the stored gesture is compact
+(`ERASE_SAMPLE_PERCENT` still drops pointer jitter) but the stroke it describes is continuous at any speed.
 
 **A colour turns the brush from a hole into a patch of paint.** `eraseColor` in the store is either `null`
 (remove the pixels, show the page through the picture) or a `#rrggbb` (lay that colour down), and both the
