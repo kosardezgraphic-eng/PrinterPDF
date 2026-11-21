@@ -137,7 +137,7 @@ npm run build:electron
 | اسکریپت | کار |
 | --- | --- |
 | `dev` | فقط Vite روی ۵۱۷۳ — پیش‌نمایش مرورگر، پرینتر شبیه‌سازی‌شده |
-| `electron:dev` | ساخت سرویس C# (در صورت نبود) + کامپایل main + `build:preload` + اجرای هم‌زمان Vite و الکترون با `VITE_DEV_SERVER_URL` |
+| `electron:dev` | ساخت سرویس C# (در صورت نبود) + کامپایل main + `write-electron-module-shim` + `build:preload` + اجرای هم‌زمان Vite و الکترون با `VITE_DEV_SERVER_URL` |
 | `build:preload` | باندل `electron/preload.ts` با esbuild به `dist-electron/electron/preload.cjs` (قالب CJS، `--external:electron`) |
 | `build:service` | `dotnet publish` سرویس پرینتر برای `win-x64` به‌صورت self-contained |
 | `build:electron` | `build:service` → `build:preload` → کامپایل الکترون → `vite build` → pre-flight → `electron-builder --win --x64` |
@@ -206,6 +206,7 @@ npm run build:electron:nosidecar
 
 | پیام در UI | علت | راه‌حل |
 | --- | --- | --- |
+| `ReferenceError: exports is not defined in ES module scope` (پنجره هیچ‌وقت باز نمی‌شود) | مخزن `"type": "module"` است، پس `.js`های `dist-electron` به‌عنوان ESM پارس می‌شوند؛ `tsc` پروسهٔ اصلی را CommonJS می‌سازد و بدون `dist-electron/package.json` با `{"type":"commonjs"}` الکترون پیش از ساختن پنجره می‌میرد | `npm run build:electron-main` (خودش `scripts/write-electron-module-shim.mjs` را اجرا می‌کند) و بعد `npm run electron:dev`؛ `electron:dev` هم این shim را می‌نویسد، پس هر بار کامپایل تازه مشکلی ندارد. تست `packaging.test.ts` نبود آن را در مسیر dev می‌گیرد. |
 | `Electron preload bridge is unavailable` | پریلود لود نشده است | `npm run build:preload` و بعد `npm run electron:dev`. در حالت `sandbox: true` فقط یک باندل CommonJS تک‌فایل لود می‌شود؛ خروجی `tsc` برای `electron/preload.ts` قالب ESM دارد و بی‌صدا رد می‌شود، پس `window.printStudioAPI` تعریف نمی‌ماند. |
 | `Browser preview: the printer list is simulated` | برنامه در مرورگر باز شده، نه در الکترون | برای دیدن پرینتر واقعی `npm run electron:dev` را اجرا کنید؛ `npm run dev` عمداً فقط Vite است و `VITE_DEV_SERVER_URL` را هم ست نمی‌کند. |
 | `PrinterService.exe was not found` | سرویس C# ساخته نشده | `npm run build:service` (همان `dotnet publish ... -r win-x64 --self-contained true`؛ نبود `-r win-x64` پوشهٔ `printer-service/bin/Release/net8.0-windows/win-x64/publish` را که `electron-builder.yml` کپی می‌کند می‌سازد). `npm run electron:dev` خودش `scripts/ensure-sidecar.mjs` را اجرا می‌کند. |

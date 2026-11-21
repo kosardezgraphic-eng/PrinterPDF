@@ -35,6 +35,23 @@ describe('windows packaging layout', () => {
     expect(pkg.scripts['build:electron']).toContain('prepare-win-build.mjs');
   });
 
+  it('marks dist-electron CommonJS for the dev run too, not only for packaging', () => {
+    // `electron:dev` never runs the packaging pre-flight, so it needs the shim itself; otherwise
+    // `electron .` starts, parses the CommonJS main process as ESM and dies before the window with
+    // "exports is not defined in ES module scope" — the app simply never opens.
+    const shim = read('../../../scripts/write-electron-module-shim.mjs');
+    expect(shim).toContain("type: 'commonjs'");
+    expect(shim).toContain('dist-electron');
+    expect(pkg.scripts['electron:dev']).toContain('write-electron-module-shim.mjs');
+    // Compiling the main process is the moment the shim can go stale, so it is written right after.
+    expect(pkg.scripts['build:electron-main']).toContain('write-electron-module-shim.mjs');
+    expect(pkg.scripts['build:electron-main'].indexOf('tsc -p tsconfig.electron.json'))
+      .toBeLessThan(pkg.scripts['build:electron-main'].indexOf('write-electron-module-shim.mjs'));
+    // Both dev and packaging end up going through that one compile step.
+    expect(pkg.scripts['electron:dev']).toContain('build:electron-main');
+    expect(pkg.scripts['build:electron']).toContain('build:electron-main');
+  });
+
   it('resolves the renderer and the preload from the packed layout', () => {
     const mainDir = path.posix.dirname(pkg.main);
     // A sandboxed renderer can only load a bundled CommonJS preload, never a .js emitted as ESM.
