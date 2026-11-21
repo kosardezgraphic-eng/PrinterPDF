@@ -11,7 +11,7 @@ interface AppShellProps {
   theme: string;
   labels: AppShellLabels;
   topbar: ReactNode;
-  navigation: ReactNode;
+  navigation?: ReactNode;
   workspace: ReactNode;
   statusBar: ReactNode;
   overlays?: ReactNode;
@@ -41,13 +41,20 @@ export const AppShell: React.FC<AppShellProps> = ({
     <div
       className={`psp-app-shell ${resolvedDark ? 'theme-dark dark' : 'theme-light'}`}
       data-psp-app-shell
+      style={
+        navigation
+          ? undefined
+          : { gridTemplateRows: 'max-content minmax(0, 1fr) max-content' }
+      }
     >
       <header className="psp-app-shell__topbar" aria-label={labels.topbar}>
         {topbar}
       </header>
-      <nav className="psp-app-shell__navigation" aria-label={labels.navigation}>
-        {navigation}
-      </nav>
+      {navigation ? (
+        <nav className="psp-app-shell__navigation" aria-label={labels.navigation}>
+          {navigation}
+        </nav>
+      ) : null}
       <main className="psp-app-shell__workspace" aria-label={labels.workspace}>
         {workspace}
       </main>

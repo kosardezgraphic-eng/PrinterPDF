@@ -1,4 +1,4 @@
-import React,{useEffect,useLayoutEffect,useRef,useState} from 'react';
+import React,{useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import type {ComputedSheetSide,PageItem,PageOverlay,PageOverlayImage,PageOverlayShape,PageOverlayText} from '@shared/models';
 import {drawOverlayText} from '../engine/textOverlays';
 import {imageDrawRect,overlayPlacements,type OverlayPlacement} from '../engine/overlayPlacements';
@@ -14,15 +14,29 @@ const newId=()=>globalThis.crypto?.randomUUID?.()??`overlay-${Date.now()}-${Math
 /** The editable geometry lives on the overlay itself for every kind. */
 const targetOf=(p:OverlayPlacement)=>'text' in p ? p.text : 'image' in p ? p.image : p.shape;
 
-function TextCanvas({item,width,height,pxPerMm}:{item:PageOverlayText;width:number;height:number;pxPerMm:number}) {
+function TextCanvas({item,width,height,pxPerMm,thumbnailMode=false}:{item:PageOverlayText;width:number;height:number;pxPerMm:number;thumbnailMode?:boolean}) {
  const ref=useRef<HTMLCanvasElement>(null);
  useEffect(()=>{
   let canceled=false;
-  const draw=()=>{if(canceled||!ref.current)return;const canvas=ref.current,dpr=Math.min(3,window.devicePixelRatio||1);
+  const draw=()=>{if(canceled||!ref.current)return;const canvas=ref.current,dpr=thumbnailMode?Math.max(2,Math.min(3,window.devicePixelRatio||1)):Math.min(3,window.devicePixelRatio||1);
     canvas.width=Math.max(1,Math.ceil(width*pxPerMm*dpr));canvas.height=Math.max(1,Math.ceil(height*pxPerMm*dpr));
     const ctx=canvas.getContext('2d');if(ctx)drawOverlayText(ctx,item,canvas.width,canvas.height,pxPerMm*dpr/MM_TO_PT);
   };
-  if(document.fonts?.load)void document.fonts.load(`${item.italic?'italic ':''}${item.bold?'bold':'normal'} 18px "${item.fontFamily.replace(/["\\]/g,'')}"`,item.text).then(draw,draw);else draw();
+  const family = item.fontFamily.replace(/["\\]/g, '').trim();
+  if (document.fonts?.load && family) {
+    try {
+      void Promise.resolve(
+        document.fonts.load(
+          `${item.italic ? 'italic ' : ''}${item.bold ? 'bold' : 'normal'} 18px "${family}"`,
+          item.text || 'اABC123'
+        )
+      ).then(draw, draw);
+    } catch {
+      draw();
+    }
+  } else {
+    draw();
+  }
   return ()=>{canceled=true;};
  },[item,width,height,pxPerMm]);
  return <canvas ref={ref} style={{width:'100%',height:'100%',display:'block',opacity:item.opacity}} aria-hidden="true"/>;
@@ -399,9 +413,33 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
       className="flex h-6 w-6 items-center justify-center rounded-full border border-white bg-sky-700"/>}
  </div>;
 }
-export function TextOverlayLayer({sheet,totalSheets,pages,pageIndices,pxPerMm,enabled,previewOnly=false}:{sheet:ComputedSheetSide;totalSheets:number;pages:PageItem[];pageIndices:Map<string,number>;pxPerMm:number;enabled:boolean;previewOnly?:boolean}){
- const overlays=useAppStore(s=>s.overlays),selected=useAppStore(s=>s.selectedOverlayId);
- const placements=overlayPlacements(sheet,totalSheets,pages,overlays,pageIndices);
+function ThumbnailOverlayOccurrence({p,pxPerMm}:{p:OverlayPlacement;pxPerMm:number}){
+ const item=targetOf(p);
+ const isImage='image' in p;
+ const isShape='shape' in p;
+ return <div aria-hidden="true" style={{position:'absolute',left:`${item.xPercent}%`,top:`${item.yPercent}%`,width:`${item.widthPercent}%`,height:`${item.heightPercent}%`,transform:`rotate(${item.rotation}deg)`,pointerEvents:'none'}}>
+  {isImage
+    ? <ImagePicture item={(p as {image:PageOverlayImage}).image} width={p.width} height={p.height}/>
+    : isShape
+      ? <ShapeGlyph item={(p as {shape:PageOverlayShape}).shape} widthMm={p.width} heightMm={p.height}/>
+      : <TextCanvas item={(p as {renderText:PageOverlayText}).renderText} width={p.width} height={p.height} pxPerMm={pxPerMm} thumbnailMode/>}
+ </div>;
+}
+export function TextOverlayLayer({sheet,totalSheets,pages,pageIndices,pxPerMm,enabled,previewOnly=false,thumbnailMode=false,thumbnailPageId,thumbnailOccurrenceKey}:{sheet:ComputedSheetSide;totalSheets:number;pages:PageItem[];pageIndices:Map<string,number>;pxPerMm:number;enabled:boolean;previewOnly?:boolean;thumbnailMode?:boolean;thumbnailPageId?:string;thumbnailOccurrenceKey?:string}){
+ const overlays=useAppStore(s=>s.overlays),selected=useAppStore(s=>s.selectedOverlayId),textEdit=useAppStore(s=>s.textEdit);
+ const effectiveOverlays=useMemo(()=>{
+  if(!thumbnailMode||!textEdit)return overlays;
+  return overlays.map(o=>o.kind==='text'&&o.id===textEdit.overlayId?{...o,text:textEdit.text,scriptRanges:textEdit.ranges}:o);
+ },[overlays,thumbnailMode,textEdit]);
+ const rawPlacements=overlayPlacements(sheet,totalSheets,pages,effectiveOverlays,pageIndices);
+ const placements=useMemo(()=>{
+  if(!thumbnailMode||(!thumbnailPageId&&!thumbnailOccurrenceKey))return rawPlacements;
+  return rawPlacements.filter(p=>{
+   if(!p.pageId)return true;
+   if(thumbnailOccurrenceKey)return p.key.endsWith(`-${thumbnailOccurrenceKey}`);
+   return p.pageId===thumbnailPageId;
+  });
+ },[rawPlacements,thumbnailMode,thumbnailPageId,thumbnailOccurrenceKey]);
  const sheetMm={width:sheet.widthMm,height:sheet.heightMm};
  return <div className="pointer-events-none absolute inset-0 z-10">{placements.map(p=>{
   const item=targetOf(p);
@@ -409,7 +447,9 @@ export function TextOverlayLayer({sheet,totalSheets,pages,pageIndices,pxPerMm,en
   const clip=c?`inset(${c.y*pxPerMm}px ${Math.max(0,(sheet.widthMm-c.x-c.width)*pxPerMm)}px ${Math.max(0,(sheet.heightMm-c.y-c.height)*pxPerMm)}px ${c.x*pxPerMm}px)`:undefined;
   return <div key={p.key} className="pointer-events-none absolute inset-0" style={{clipPath:clip}}>
     <div className="pointer-events-none absolute" style={{left:p.parentX*pxPerMm,top:p.parentY*pxPerMm,width:p.parentWidth*pxPerMm,height:p.parentHeight*pxPerMm,transform:`rotate(${p.parentRotation}deg)`}}>
-      <OverlayOccurrence p={p} pxPerMm={pxPerMm} sheetMm={sheetMm} selected={selected===item.id} enabled={enabled && (!previewOnly || item.target!=='sheet')}/>
+      {thumbnailMode
+        ? <ThumbnailOverlayOccurrence p={p} pxPerMm={pxPerMm}/>
+        : <OverlayOccurrence p={p} pxPerMm={pxPerMm} sheetMm={sheetMm} selected={selected===item.id} enabled={enabled && (!previewOnly || item.target!=='sheet')}/>}
     </div>
   </div>;
  })}</div>;

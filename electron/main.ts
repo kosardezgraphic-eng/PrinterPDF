@@ -6,8 +6,11 @@ import fs from 'node:fs/promises';
 import { IPC_CHANNELS, type LocalFilePayload } from '../shared/ipc-channels';
 import { PrinterSidecarClient } from './printerSidecarClient';
 import { SessionStore } from './sessionStore';
+import { listInstalledSystemFonts } from './systemFonts';
+import { VirtualPrinterManager } from './virtualPrinter';
 import {
   applyProfileToWindowsPrinterViaPowerShell,
+  enrichVirtualPrinterInfo,
   isVirtualPrinterName,
   mapElectronPrintersToPrinterInfo,
   printToWindowsPrinterViaPowerShell,
@@ -16,14 +19,17 @@ import {
   queryWindowsSpoolerJobsViaPowerShell,
   setWindowsDefaultPrinterViaPowerShell,
 } from './windowsPrinterFallback';
-import type {
-  AppSettings,
-  PrinterInfo,
-  PrinterProfileSettings,
-  PrinterMarginRequest,
-  PrintJobRequest,
-  PspProjectFile,
-  SettingsPreset,
+import {
+  VIRTUAL_PRINTER_DEFAULT_NAME,
+  type AppSettings,
+  type PrinterInfo,
+  type PrinterProfileSettings,
+  type PrinterMarginRequest,
+  type PrintJobRequest,
+  type PspProjectFile,
+  type SettingsPreset,
+  type VirtualPrinterConfig,
+  type VirtualPrinterIncomingPayload,
 } from '../shared/models';
 
 /** Anything bigger than this is not something a preview app should hold in memory twice. */
@@ -40,6 +46,7 @@ const MIME_BY_EXTENSION: Record<string, string> = {
 const sidecar = new PrinterSidecarClient();
 let mainWindow: BrowserWindow | null = null;
 let sessionStore: SessionStore;
+let virtualPrinterManager: VirtualPrinterManager | null = null;
 let lastNativeFallbackWorked = false;
 /** User-edited printer profiles preserved across refreshes when using Windows PowerShell fallback. */
 const userProfileOverrides = new Map<string, PrinterProfileSettings>();
@@ -52,8 +59,20 @@ interface QueuedProfileSync {
 }
 const fallbackProfileSyncQueue = new Map<string, QueuedProfileSync>();
 
+function isPrintStudioVirtualPrinter(printerName: string): boolean {
+  const configuredName = virtualPrinterManager?.getConfig().printerName || VIRTUAL_PRINTER_DEFAULT_NAME;
+  return (
+    printerName.trim().toLowerCase() === configuredName.toLowerCase() ||
+    printerName.trim().toLowerCase() === VIRTUAL_PRINTER_DEFAULT_NAME.toLowerCase()
+  );
+}
+
 function queueFallbackProfileSync(printerName: string, profile: PrinterProfileSettings): Promise<void> {
-  if (process.platform !== 'win32' || sidecar.isRunning || isVirtualPrinterName(printerName)) {
+  if (
+    process.platform !== 'win32' ||
+    sidecar.isRunning ||
+    (isVirtualPrinterName(printerName) && !isPrintStudioVirtualPrinter(printerName))
+  ) {
     return Promise.resolve();
   }
   const key = printerName.toLowerCase();
@@ -92,6 +111,8 @@ async function flushFallbackProfileSync(printerName: string): Promise<void> {
 
 /** Files that arrived before the renderer had a listener, flushed once it does. */
 let pendingOpenFiles: string[] = [];
+/** Jobs captured by the Windows Virtual Printer before renderer finished loading. */
+let pendingVirtualJobs: VirtualPrinterIncomingPayload[] = [];
 
 // Enforce Single-Instance Lock (K3)
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -136,6 +157,16 @@ function sendOpenFiles(paths: string[]): void {
   mainWindow.webContents.send(IPC_CHANNELS.CLI_OPEN_FILES, paths);
 }
 
+function sendVirtualPrinterJob(payload: VirtualPrinterIncomingPayload): void {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isLoadingMainFrame()) {
+    pendingVirtualJobs = [...pendingVirtualJobs, payload];
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+  mainWindow.webContents.send(IPC_CHANNELS.VIRTUAL_PRINTER_JOB_RECEIVED, payload);
+}
+
 app.on('second-instance', (_event, commandLine) => {
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore();
@@ -146,7 +177,12 @@ app.on('second-instance', (_event, commandLine) => {
 });
 
 async function createMainWindow(): Promise<void> {
-  sessionStore = new SessionStore(app.getPath('userData'));
+  const userDataDir = app.getPath('userData');
+  sessionStore = new SessionStore(userDataDir);
+  virtualPrinterManager = new VirtualPrinterManager(sessionStore, userDataDir);
+  await virtualPrinterManager.startWatching((payload) => {
+    sendVirtualPrinterJob(payload);
+  });
   sidecar.startSidecar(process.resourcesPath);
 
   // Enforce strict Content Security Policy header
@@ -188,6 +224,13 @@ async function createMainWindow(): Promise<void> {
       const queued = pendingOpenFiles;
       pendingOpenFiles = [];
       mainWindow?.webContents.send(IPC_CHANNELS.CLI_OPEN_FILES, queued);
+    }
+    if (pendingVirtualJobs.length) {
+      const queuedJobs = pendingVirtualJobs;
+      pendingVirtualJobs = [];
+      for (const jobPayload of queuedJobs) {
+        mainWindow?.webContents.send(IPC_CHANNELS.VIRTUAL_PRINTER_JOB_RECEIVED, jobPayload);
+      }
     }
   });
 
@@ -275,7 +318,9 @@ async function withSidecarDiagnostics<TResult>(action: Promise<TResult>): Promis
 }
 
 function applyCachedProfileOverrides(printers: PrinterInfo[]): PrinterInfo[] {
-  return printers.map((printer) => {
+  const vpConfig = virtualPrinterManager?.getConfig();
+  return printers.map((rawPrinter) => {
+    const printer = enrichVirtualPrinterInfo(rawPrinter, vpConfig);
     const override = userProfileOverrides.get(printer.name);
     if (!override) return printer;
     return {
@@ -363,13 +408,23 @@ function registerIpcHandlers(): void {
         printerName: payload.printerName,
       };
       userProfileOverrides.set(payload.printerName, mergedProfile);
+      if (virtualPrinterManager && isPrintStudioVirtualPrinter(payload.printerName)) {
+        await virtualPrinterManager.updateConfig({
+          paperSize: mergedProfile.paperSize,
+          ...(mergedProfile.paperWidthMm ? { paperWidthMm: mergedProfile.paperWidthMm } : {}),
+          ...(mergedProfile.paperHeightMm ? { paperHeightMm: mergedProfile.paperHeightMm } : {}),
+          orientation: mergedProfile.orientation,
+          dpi: mergedProfile.dpi,
+        });
+      }
       try {
         if (sidecar.isRunning) {
           const updated = await sidecar.updateProfile(payload.printerName, mergedProfile);
+          const enriched = enrichVirtualPrinterInfo(updated, virtualPrinterManager?.getConfig());
           lastKnownPrinters = lastKnownPrinters.map((p) =>
-            p.name.toLowerCase() === payload.printerName.toLowerCase() ? updated : p
+            p.name.toLowerCase() === payload.printerName.toLowerCase() ? enriched : p
           );
-          return updated;
+          return enriched;
         }
       } catch {
         // Fall back to syncing Windows DEVMODE/UserPrintTicket via PowerShell
@@ -379,14 +434,17 @@ function registerIpcHandlers(): void {
         (p) => p.name.toLowerCase() === payload.printerName.toLowerCase()
       );
       if (cachedMatch) {
-        const updatedCached: PrinterInfo = {
-          ...cachedMatch,
-          activeProfile: {
-            ...cachedMatch.activeProfile,
-            ...mergedProfile,
-            printerName: cachedMatch.name,
+        const updatedCached = enrichVirtualPrinterInfo(
+          {
+            ...cachedMatch,
+            activeProfile: {
+              ...cachedMatch.activeProfile,
+              ...mergedProfile,
+              printerName: cachedMatch.name,
+            },
           },
-        };
+          virtualPrinterManager?.getConfig()
+        );
         lastKnownPrinters = lastKnownPrinters.map((p) =>
           p.name.toLowerCase() === payload.printerName.toLowerCase() ? updatedCached : p
         );
@@ -436,6 +494,14 @@ function registerIpcHandlers(): void {
       _e,
       payload: { request: PrintJobRequest; pdfBytes?: Uint8Array; pageImages?: Uint8Array[] }
     ) => {
+      if (virtualPrinterManager && isPrintStudioVirtualPrinter(payload.request?.printerName || '')) {
+        return virtualPrinterManager.captureInAppPrintJob(
+          payload.request,
+          payload.pdfBytes,
+          payload.pageImages
+        );
+      }
+
       let tempPdfPath: string | undefined;
       const tempImagePaths: string[] = [];
       const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -472,6 +538,37 @@ function registerIpcHandlers(): void {
       }
     }
   );
+
+  ipcMain.handle(IPC_CHANNELS.VIRTUAL_PRINTER_GET_STATUS, async () => {
+    if (!virtualPrinterManager) {
+      throw new Error('Virtual printer manager is not initialized');
+    }
+    return virtualPrinterManager.getStatus(true);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.VIRTUAL_PRINTER_UPDATE_CONFIG,
+    async (_e, patch: Partial<VirtualPrinterConfig>) => {
+      if (!virtualPrinterManager) {
+        throw new Error('Virtual printer manager is not initialized');
+      }
+      return virtualPrinterManager.updateConfig(patch ?? {});
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.VIRTUAL_PRINTER_INSTALL, async () => {
+    if (!virtualPrinterManager) {
+      throw new Error('Virtual printer manager is not initialized');
+    }
+    return virtualPrinterManager.install();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.VIRTUAL_PRINTER_UNINSTALL, async () => {
+    if (!virtualPrinterManager) {
+      throw new Error('Virtual printer manager is not initialized');
+    }
+    return virtualPrinterManager.uninstall();
+  });
 
   ipcMain.handle(IPC_CHANNELS.SPOOLER_LIST_JOBS, async (_e, printerName?: string) => {
     try {
@@ -532,6 +629,10 @@ function registerIpcHandlers(): void {
     return sessionStore.loadSettingsPresets();
   });
 
+  ipcMain.handle(IPC_CHANNELS.SYSTEM_LIST_FONTS, async (_e, forceRefresh?: boolean) => {
+    return listInstalledSystemFonts(Boolean(forceRefresh));
+  });
+
   ipcMain.handle(IPC_CHANNELS.FILE_READ_LOCAL, async (_e, filePath: unknown): Promise<LocalFilePayload> => {
     if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) throw new Error('Invalid file path');
     const resolved = path.resolve(filePath);
@@ -563,6 +664,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
+  virtualPrinterManager?.stopWatching();
   sidecar.stopSidecar();
   if (process.platform !== 'darwin') {
     app.quit();

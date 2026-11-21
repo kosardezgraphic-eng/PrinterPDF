@@ -23,6 +23,9 @@ import {
   FileText,
   RectangleVertical,
   BookOpen,
+  Keyboard,
+  LayoutGrid,
+  Boxes,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { PrinterRetryButton } from './PrinterStatus';
@@ -37,16 +40,19 @@ import {
 
 export const QuickBar: React.FC = () => {
   const {
+    appMode,
     pages,
     layout,
     settings,
     printers,
     selectedPrinterName,
+    batchQueue,
     canUndo,
     canRedo,
     undoLabel,
     redoLabel,
     isExportingPdf,
+    setAppMode,
     undo,
     redo,
     selectPrinter,
@@ -72,6 +78,14 @@ export const QuickBar: React.FC = () => {
 
   const currentPrinter = printers.find((p) => p.name === selectedPrinterName);
   const sheetDims = getSheetDimensionsMm(layout);
+
+  useEffect(() => {
+    const onOpenPsp = () => {
+      pspInputRef.current?.click();
+    };
+    window.addEventListener('printstudio:open-psp', onOpenPsp);
+    return () => window.removeEventListener('printstudio:open-psp', onOpenPsp);
+  }, []);
 
   useEffect(() => {
     if (!showHardwarePopover) return;
@@ -195,8 +209,74 @@ export const QuickBar: React.FC = () => {
       dir="ltr"
       className="relative z-40 flex min-h-10 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-2.5 py-1 text-slate-800 select-none dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
     >
-      {/* Left Cluster: SavePDF -> Quick Print -> PrintNow -> Printer & Hardware -> Tray -> Paper -> Orientation -> Duplex -> Counter ($) -> Merge */}
+      {/* Left Cluster */}
       <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+        {/* Studio <-> Standalone Batch Print Workspace Switcher */}
+        <div
+          data-app-mode-switcher
+          role="group"
+          aria-label={isFa ? 'تغییر محیط کاری' : 'Workspace Mode'}
+          className="flex h-7 items-center rounded-md border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-700 dark:bg-slate-800 shrink-0"
+        >
+          <button
+            type="button"
+            data-app-mode-studio
+            aria-pressed={appMode === 'studio'}
+            onClick={() => setAppMode('studio')}
+            title={isFa ? 'محیط طراحی و صفحه‌آرایی (Studio)' : 'Design & Imposition Studio'}
+            className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] font-bold transition-colors whitespace-nowrap cursor-pointer ${
+              appMode === 'studio'
+                ? 'bg-white text-sky-700 shadow-xs dark:bg-slate-700 dark:text-sky-300'
+                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'
+            }`}
+          >
+            <LayoutGrid className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>{isFa ? 'استودیو' : 'Studio'}</span>
+          </button>
+          <button
+            type="button"
+            data-app-mode-batch
+            data-enter-batch-mode
+            aria-pressed={appMode === 'batch'}
+            onClick={() => setAppMode('batch')}
+            title={
+              isFa
+                ? 'محیط مستقل چاپ دسته‌ای چندفایلی و پرینتر مجازی'
+                : 'Standalone Batch Print & Virtual Printer Environment'
+            }
+            className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] font-bold transition-colors whitespace-nowrap cursor-pointer ${
+              appMode === 'batch'
+                ? 'bg-sky-600 text-white shadow-xs dark:bg-sky-500'
+                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'
+            }`}
+          >
+            <Boxes className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>{isFa ? 'چاپ دسته‌ای' : 'Batch Print'}</span>
+            {batchQueue.length > 0 && (
+              <span
+                className={`rounded-full px-1.5 py-0 text-[10px] font-extrabold tabular-nums ${
+                  appMode === 'batch'
+                    ? 'bg-white/25 text-white'
+                    : 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300'
+                }`}
+              >
+                {batchQueue.length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {appMode === 'batch' ? (
+          <div className="flex items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-800 dark:border-sky-500/30 dark:bg-sky-950/30 dark:text-sky-200">
+            <Printer className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
+            <span>
+              {isFa
+                ? 'محیط مجزای چاپ دسته‌ای — کنترل کامل بازه، تعداد سری، سخت‌افزار و پرینتر مجازی'
+                : 'Standalone Batch Print Environment — Ranges, Sets, Hardware & Virtual Printer'}
+            </span>
+          </div>
+        ) : (
+          <>
         {/* SavePDF */}
         <button
           type="button"
@@ -216,13 +296,14 @@ export const QuickBar: React.FC = () => {
         {/* Quick Print */}
         <button
           type="button"
+          data-quick-print
           disabled={isExportingPdf || !currentPrinter || pages.length === 0}
           onClick={() => void silentPrintNow()}
           aria-label={isFa ? 'ارسال مستقیم چاپ فوری' : 'Direct Quick Print'}
           title={
             isFa
-              ? 'ارسال مستقیم به اسپولر ویندوز با تنظیمات سخت‌افزاری فعلی'
-              : 'Send directly to Windows Spooler with active hardware settings'
+              ? 'چاپ سریع و مستقیم با تنظیمات سخت‌افزاری فعلی (Ctrl+P)'
+              : 'Send directly to printer with active hardware settings (Ctrl+P)'
           }
           className="flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-slate-100 px-2.5 text-[11px] font-semibold text-slate-800 hover:bg-slate-200 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700 whitespace-nowrap shrink-0 cursor-pointer disabled:cursor-not-allowed transition-colors"
         >
@@ -233,11 +314,12 @@ export const QuickBar: React.FC = () => {
         {/* PrintNow (Full Print Modal) */}
         <button
           type="button"
+          data-full-print-dialog
           onClick={() => setModalState('print', true)}
           title={
             isFa
-              ? 'پنجره چاپ با پیش‌نمایش و تنظیمات کامل پرینتر (Ctrl+P)'
-              : 'Open Full Print Dialog (Ctrl+P)'
+              ? 'پنجره چاپ با پیش‌نمایش و تنظیمات کامل پرینتر (Ctrl+Shift+P)'
+              : 'Open Full Print Dialog (Ctrl+Shift+P)'
           }
           className="flex h-7 items-center gap-1 rounded-md border border-sky-500/30 bg-sky-50 px-2.5 text-[11px] font-semibold text-sky-800 hover:bg-sky-100 dark:border-sky-500/40 dark:bg-sky-600/20 dark:text-sky-200 dark:hover:bg-sky-600/30 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
         >
@@ -763,6 +845,8 @@ export const QuickBar: React.FC = () => {
           <GitMerge className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400 shrink-0" aria-hidden="true" />
           <span className="hidden xl:inline">{tr.quickBar.merge}</span>
         </button>
+          </>
+        )}
       </div>
 
       {/* Right Cluster: Undo, Redo, Save .psp, Open .psp, FA/EN, Theme, Tour (i), Settings, Brand */}
@@ -779,6 +863,8 @@ export const QuickBar: React.FC = () => {
           }}
         />
 
+        {appMode === 'studio' && (
+          <>
         <button
           type="button"
           disabled={!canUndo}
@@ -803,7 +889,7 @@ export const QuickBar: React.FC = () => {
         <button
           type="button"
           onClick={savePspProject}
-          title={tr.quickBar.saveProject}
+          title={`${tr.quickBar.saveProject} (Ctrl+Shift+S)`}
           aria-label={tr.quickBar.saveProject}
           className={iconBtnClass}
         >
@@ -812,12 +898,14 @@ export const QuickBar: React.FC = () => {
         <button
           type="button"
           onClick={() => pspInputRef.current?.click()}
-          title={isFa ? 'باز کردن فایل پروژه .psp' : 'Open .psp Project'}
+          title={isFa ? 'باز کردن فایل پروژه .psp (Ctrl+Shift+O)' : 'Open .psp Project (Ctrl+Shift+O)'}
           aria-label={isFa ? 'باز کردن فایل پروژه .psp' : 'Open .psp Project'}
           className={iconBtnClass}
         >
           <FolderOpen className="h-3.5 w-3.5 text-amber-500" aria-hidden="true" />
         </button>
+          </>
+        )}
 
         <button
           type="button"
@@ -845,6 +933,17 @@ export const QuickBar: React.FC = () => {
           ) : (
             <Moon className="h-3.5 w-3.5 text-slate-700" aria-hidden="true" />
           )}
+        </button>
+
+        <button
+          type="button"
+          data-shortcuts-trigger
+          onClick={() => setModalState('shortcuts', true)}
+          title={isFa ? 'میانبرهای کیبورد (F1 / Ctrl+/)' : 'Keyboard Shortcuts (F1 / Ctrl+/)'}
+          aria-label={isFa ? 'میانبرهای کیبورد' : 'Keyboard Shortcuts'}
+          className={iconBtnClass}
+        >
+          <Keyboard className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" aria-hidden="true" />
         </button>
 
         <button

@@ -17,8 +17,10 @@ import {
   Maximize2,
   SlidersHorizontal,
   Zap,
+  Boxes,
 } from 'lucide-react';
 import { useAppStore, type CanvasTool, type PageEditScope } from '../store/useAppStore';
+import { VirtualPrinterCard } from './VirtualPrinterCard';
 import { PageCanvasCell } from './PageCanvasCell';
 import { PrinterRetryButton, PrinterServiceStatus } from './PrinterStatus';
 import { LayoutGuides, MeasurementTool } from './SheetTools';
@@ -117,6 +119,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     removeBatchJob,
     openPageSetup,
     updateSettings,
+    setAppMode,
   } = useAppStore();
 
   const activeWorkspaceDrawer = workspaceDrawer === 'closed'
@@ -879,8 +882,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
 
               {/* Preview-only direct matrix gutter drag bands matching the booklet spine style (centered full-gap hatched bands). */}
               {!previewOnlyPage && !layout.booklet?.enabled && activeGuideSheet !== sheetSide.sideIndex - 1 && (() => {
-                const matrixCols = Math.max(1, Math.min(10, Math.floor(layout.cols)));
-                const matrixRows = Math.max(1, Math.min(10, Math.floor(layout.rows)));
+                const matrixCols = Math.max(1, Math.min(50, Math.floor(layout.cols)));
+                const matrixRows = Math.max(1, Math.min(50, Math.floor(layout.rows)));
                 const hGutterMm = Math.max(0, layout.horizontalGutterMm);
                 const vGutterMm = Math.max(0, layout.verticalGutterMm);
                 const printableW = Math.max(10, sheetSide.widthMm - marginLeftMm - marginRightMm);
@@ -1530,15 +1533,30 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 ? 'در صورت بروز خطا در یک فایل، صف به‌صورت خودکار به فایل بعدی ادامه می‌دهد'
                 : 'Fault-isolated batch execution with automatic retry'}
             </span>
-            <button
-              type="button"
-              aria-label={lang === 'fa' ? 'بستن پنل صف دسته‌ای' : 'Close batch queue drawer'}
-              title={lang === 'fa' ? 'بستن پنل' : 'Close panel'}
-              onClick={() => setWorkspaceDrawer('closed')}
-              className="shrink-0 rounded-lg border border-slate-300 bg-slate-100 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer"
-            >
-              {lang === 'fa' ? 'بستن' : 'Close'}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setWorkspaceDrawer('closed');
+                  setAppMode('batch');
+                }}
+                className="flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-sky-500 cursor-pointer"
+              >
+                <Boxes className="h-3.5 w-3.5" />
+                <span>
+                  {lang === 'fa' ? 'باز کردن محیط مجزای چاپ دسته‌ای' : 'Open Batch Workspace'}
+                </span>
+              </button>
+              <button
+                type="button"
+                aria-label={lang === 'fa' ? 'بستن پنل صف دسته‌ای' : 'Close batch queue drawer'}
+                title={lang === 'fa' ? 'بستن پنل' : 'Close panel'}
+                onClick={() => setWorkspaceDrawer('closed')}
+                className="shrink-0 rounded-lg border border-slate-300 bg-slate-100 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer"
+              >
+                {lang === 'fa' ? 'بستن' : 'Close'}
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
@@ -2201,6 +2219,10 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 )}
               </div>
             </div>
+          </div>
+
+          <div className="mt-4">
+            <VirtualPrinterCard />
           </div>
         </section>
         );

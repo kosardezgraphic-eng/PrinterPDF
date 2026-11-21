@@ -9,7 +9,7 @@ import { CrispPageCanvas, useCrispPageFrame } from './CrispPageCanvas';
 import { useSmartGuides } from './SmartGuidesOverlay';
 import { useAppStore } from '../store/useAppStore';
 import { PageEraserLayer } from './PageEraserLayer';
-import { eraseMaskCss } from '../engine/imageErase';
+import { eraseMaskCss, erasePaintCss } from '../engine/imageErase';
 
 export type CanvasTool = 'move' | 'crop' | 'layout' | 'measure';
 const HANDLES: { id: Handle; left: string; top: string; cursor: string }[] = [
@@ -228,7 +228,9 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
     }, 600);
   };
   const crisp = useCrispPageFrame({ page, enabled: crispEnabled, width:display.width, height:display.height, hostRef: contentRef });
-  const pageEraseMask = eraseMaskCss(page.erase, { width: display.width, height: display.height, widthMm: display.width / Math.max(0.01, pxPerMm), heightMm: display.height / Math.max(0.01, pxPerMm) });
+  const pageEraseBox = { width: display.width, height: display.height, widthMm: display.width / Math.max(0.01, pxPerMm), heightMm: display.height / Math.max(0.01, pxPerMm) };
+  const pageEraseMask = eraseMaskCss(page.erase, pageEraseBox);
+  const pageErasePaint = erasePaintCss(page.erase, pageEraseBox);
   const pointerEvents = { onPointerMove:move, onPointerUp:(e: React.PointerEvent<HTMLElement>) => finishPress(e), onPointerCancel:(e: React.PointerEvent<HTMLElement>) => finishPress(e,true), onLostPointerCapture:(e: React.PointerEvent<HTMLElement>) => finishPress(e,true) };
   const fa = language === 'fa';
   const menuActions = [
@@ -272,6 +274,10 @@ export function PageCanvasCell({ cell, sheetIndex, isActive, readOnly = false, p
           width={display.width} height={display.height} frame={crisp.frame} onStaleFrame={crisp.askAgain}
           style={pageImageStyle(page, cell.effectiveRotation, display.width, display.height)} />}
       </div>
+      {(eraseTool === 'off' || readOnly) && pageErasePaint && (
+        <div aria-hidden="true" data-page-paint className="pointer-events-none absolute inset-0 z-[4]"
+          style={{ backgroundImage: pageErasePaint, backgroundSize: '100% 100%', backgroundRepeat: 'no-repeat' }} />
+      )}
       {eraseTool !== 'off' && !readOnly && <PageEraserLayer page={page} width={display.width} height={display.height} pxPerMm={pxPerMm} />}
     </div>
     {canEdit && <div style={{ left:tool === 'crop' ? cropFrame.x : display.x, top:tool === 'crop' ? cropFrame.y : display.y,

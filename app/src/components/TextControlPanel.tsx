@@ -1,6 +1,7 @@
 import React, {useMemo, useState} from 'react';
 import type {OverlayScope,OverlayTarget,PageOverlayText} from '@shared/models';
 import {computeImpositionSheets} from '../engine/layoutEngine';
+import {useSystemFonts} from '../engine/systemFonts';
 import {useAppStore} from '../store/useAppStore';
 import {TextCoverageControls} from './TextCoverageControls';
 const input='w-full rounded border border-slate-300 bg-white p-1 text-xs text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white';
@@ -9,8 +10,10 @@ export function TextControlPanel(){
  const {settings,pages,layout,overlays,selectedOverlayId,activeSheetIndex,activePageId,textEdit,addTextOverlay,updateOverlay,removeOverlay,selectOverlay,styleTextSelection,insertTextToken}=useAppStore();
  const lang=settings.language,fa=lang==='fa';
  const [formula,setFormula]=useState('page+1000');
+ const [customFont,setCustomFont]=useState('');
  const texts=overlays.filter((o):o is PageOverlayText=>o.kind==='text');
  const selected=texts.find(t=>t.id===selectedOverlayId);
+ const {bundledFonts,systemFonts,isLoading:fontsLoading,refreshSystemFonts}=useSystemFonts(selected?.fontFamily);
  const sheets=useMemo(()=>computeImpositionSheets(pages,layout),[pages,layout]);
  const sheet=sheets[Math.min(activeSheetIndex,Math.max(0,sheets.length-1))];
  const current=pages.find(p=>p.id===activePageId) ?? sheet?.cells.find(c=>c.page?.isHighlighted)?.page ?? sheet?.cells.find(c=>c.page)?.page ?? pages.find(p=>p.isHighlighted);
@@ -28,9 +31,28 @@ export function TextControlPanel(){
   <div role="tablist" className="mb-2 flex gap-1 overflow-x-auto">{texts.map((t,i)=><button role="tab" aria-selected={selected?.id===t.id} key={t.id} onClick={()=>selectOverlay(t.id)} className={`shrink-0 rounded px-2 py-1 cursor-pointer ${selected?.id===t.id?'bg-sky-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{fa?'متن':'Text'} {i+1}</button>)}</div>
   {selected ? <div className="space-y-2">
     <p className="text-slate-500 dark:text-slate-400">{editing?(fa?'متن را روی صفحه ویرایش کنید.':'Edit directly on the page.'):(fa?'برای ویرایش متن، روی آن دوبار کلیک کنید.':'Double-click the text to edit on the page.')}</p>
-    <label className="block">{fa?'فونت':'Font'}<select aria-label={fa?'فونت نوشته':'Text font'} value={selected.fontFamily} onChange={e=>patch({fontFamily:e.target.value})} className={input}>
-      {['Vazirmatn','Shabnam','Sahel','Titr','Mitra','Nastaliq','Tahoma','Arial','Times New Roman'].map(font=><option key={font} value={font}>{font}{['Titr','Mitra','Nastaliq','Tahoma','Arial','Times New Roman'].includes(font)?(fa?' (در صورت نصب)':' (if installed)'):''}</option>)}
-    </select></label>
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-1">
+        <span>{fa?'فونت':'Font'}</span>
+        <button type="button" data-refresh-system-fonts onClick={()=>{void refreshSystemFonts();}} disabled={fontsLoading} className="rounded border border-slate-300 bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-700 hover:bg-slate-200 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 cursor-pointer">
+          {fontsLoading ? (fa?'در حال خواندن...':'Scanning...') : (fa?`فونت‌های سیستم (${systemFonts.length})`:`System fonts (${systemFonts.length})`)}
+        </button>
+      </div>
+      <select aria-label={fa?'فونت نوشته':'Text font'} value={selected.fontFamily} onChange={e=>patch({fontFamily:e.target.value})} className={input} style={{fontFamily:`"${selected.fontFamily}", sans-serif`}}>
+        <optgroup label={fa?'فونت‌های همراه برنامه':'Bundled fonts'}>
+          {bundledFonts.map(font=><option key={`b:${font}`} value={font} style={{fontFamily:`"${font}", sans-serif`}}>{font}</option>)}
+        </optgroup>
+        {systemFonts.length > 0 && (
+          <optgroup label={fa?'فونت‌های نصب‌شده سیستم':'Installed system fonts'}>
+            {systemFonts.map(font=><option key={`s:${font}`} value={font} style={{fontFamily:`"${font}", sans-serif`}}>{font}</option>)}
+          </optgroup>
+        )}
+      </select>
+      <div className="flex items-center gap-1">
+        <input type="text" dir="ltr" aria-label={fa?'نام دلخواه فونت سیستم':'Custom system font name'} value={customFont} onChange={e=>setCustomFont(e.target.value)} placeholder={fa?'مثلاً B Nazanin یا Tahoma':'e.g. B Nazanin or Segoe UI'} className={input}/>
+        <button type="button" disabled={!customFont.trim()} onClick={()=>{const f=customFont.trim();if(f){patch({fontFamily:f});setCustomFont('');}}} className="shrink-0 rounded border border-slate-300 bg-slate-100 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-200 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 cursor-pointer">{fa?'اعمال':'Use'}</button>
+      </div>
+    </div>
     <label className="block">{fa?'اندازه':'Size'} {selected.fontSize} pt<input aria-label={fa?'اندازه فونت':'Font size'} type="range" min="8" max="80" value={selected.fontSize} onChange={e=>patch({fontSize:+e.target.value})} className="w-full"/></label>
     <label className="block">{fa?'رنگ متن':'Text color'} <input aria-label={fa?'انتخاب رنگ متن':'Pick text color'} type="color" value={/^#[0-9a-f]{6}$/i.test(selected.color)?selected.color:'#000000'} onChange={e=>patch({color:e.target.value})}/><input aria-label={fa?'مقدار رنگ متن':'Text color value'} className={input} value={selected.color} onChange={e=>patch({color:e.target.value})} /></label>
     <label className="block">{fa?'رنگ پس‌زمینه (اختیاری)':'Background (optional)'} <input type="color" aria-label={fa?'انتخاب رنگ پس‌زمینه':'Pick background color'} value={/^#[0-9a-f]{6}$/i.test(selected.backgroundColor??'')?selected.backgroundColor:'#ffffff'} onChange={e=>patch({backgroundColor:e.target.value})}/><input aria-label={fa?'مقدار رنگ پس‌زمینه':'Background color value'} className={input} placeholder="transparent" value={selected.backgroundColor??''} onChange={e=>patch({backgroundColor:e.target.value||undefined})}/></label>

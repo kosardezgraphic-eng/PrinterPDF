@@ -3,7 +3,12 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { sanitizeSettingsPresetList } from '../shared/models.js';
-import type { AppSettings, PspProjectFile, SettingsPreset } from '../shared/models.js';
+import type {
+  AppSettings,
+  PspProjectFile,
+  SettingsPreset,
+  VirtualPrinterConfig,
+} from '../shared/models.js';
 
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
@@ -101,6 +106,29 @@ export class SessionStore {
     } catch {
       // A missing file is the normal case on a first run; a broken one is treated the same way.
       return [];
+    }
+  }
+
+  private get virtualPrinterPath(): string {
+    return path.join(this.userDataDir, 'virtual-printer.json');
+  }
+
+  public async saveVirtualPrinterConfig(config: VirtualPrinterConfig): Promise<boolean> {
+    try {
+      await fs.mkdir(this.userDataDir, { recursive: true });
+      await fs.writeFile(this.virtualPrinterPath, JSON.stringify(config, null, 2), 'utf8');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  public async loadVirtualPrinterConfig(): Promise<Partial<VirtualPrinterConfig> | null> {
+    try {
+      const content = await fs.readFile(this.virtualPrinterPath, 'utf8');
+      return JSON.parse(content) as Partial<VirtualPrinterConfig>;
+    } catch {
+      return null;
     }
   }
 }

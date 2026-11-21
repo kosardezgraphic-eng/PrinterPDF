@@ -1,8 +1,9 @@
 import React from 'react';
-import { Contrast, Calendar, ZoomIn, ZoomOut } from 'lucide-react';
+import { Contrast, Calendar, ZoomIn, ZoomOut, Boxes } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { t } from '../i18n/translations';
 import { computeCounterSummary } from '../engine/counterEngine';
+import { estimateBatchJobMetrics } from '../engine/batchService';
 import { getSheetDimensionsMm } from '../engine/layoutEngine';
 import {
   formatGregorianDate,
@@ -16,6 +17,7 @@ interface StatusBarProps {
 
 export const StatusBar: React.FC<StatusBarProps> = ({ cursorPos }) => {
   const {
+    appMode,
     documents,
     pages,
     layout,
@@ -23,6 +25,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({ cursorPos }) => {
     settings,
     printers,
     selectedPrinterName,
+    batchQueue,
     activeSheetIndex,
     zoomPercent,
     setZoomPercent,
@@ -37,6 +40,65 @@ export const StatusBar: React.FC<StatusBarProps> = ({ cursorPos }) => {
 
   const highlightedIdx = pages.findIndex((p) => p.isHighlighted);
   const currentPageNum = highlightedIdx >= 0 ? highlightedIdx + 1 : 1;
+
+  if (appMode === 'batch') {
+    const queuedCount = batchQueue.filter(
+      (b) => b.status === 'queued' || b.status === 'paused' || b.status === 'processing'
+    ).length;
+    const completedCount = batchQueue.filter((b) => b.status === 'completed').length;
+    const totalBatchSheets = batchQueue.reduce(
+      (sum, j) => sum + estimateBatchJobMetrics(j).totalSheets,
+      0
+    );
+
+    return (
+      <footer
+        data-status-bar-info
+        data-status-bar-mode="batch"
+        dir="ltr"
+        className="flex h-7 shrink-0 items-center justify-between gap-3 border-t border-slate-200 bg-slate-100 px-3 text-[11px] text-slate-700 select-none dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+      >
+        <div className="flex items-center gap-2.5 overflow-x-auto no-scrollbar">
+          <div className="flex items-center gap-1 text-[10px] text-slate-600 dark:text-slate-400 whitespace-nowrap">
+            <Calendar className="h-3 w-3 text-sky-600 dark:text-sky-400 shrink-0" aria-hidden="true" />
+            <span className="tabular-nums">
+              {settings.calendar === 'shamsi'
+                ? formatShamsiDate(new Date(), isFa)
+                : formatGregorianDate(new Date())}
+            </span>
+          </div>
+          <span className="text-slate-300 dark:text-slate-700">|</span>
+          <div
+            dir={isFa ? 'rtl' : 'ltr'}
+            className="flex items-center gap-1.5 rounded bg-white/80 px-2 py-0.5 text-[10px] font-medium text-slate-700 border border-slate-200 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 whitespace-nowrap tabular-nums"
+          >
+            <Boxes className="h-3 w-3 text-sky-600 dark:text-sky-400 shrink-0" />
+            {isFa ? (
+              <span>
+                صف چاپ دسته‌ای: {formatLocalizedNumber(batchQueue.length, lang)} فایل •{' '}
+                {formatLocalizedNumber(queuedCount, lang)} در انتظار •{' '}
+                {formatLocalizedNumber(completedCount, lang)} ارسال‌شده •{' '}
+                {formatLocalizedNumber(totalBatchSheets, lang)} برگ کاغذ
+              </span>
+            ) : (
+              <span>
+                Batch Queue: {batchQueue.length} files · {queuedCount} pending · {completedCount} completed · {totalBatchSheets} sheets
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div dir={isFa ? 'rtl' : 'ltr'} className="flex items-center gap-2 text-[10px] whitespace-nowrap">
+          <span className="text-slate-500 dark:text-slate-400">
+            {isFa ? 'پرینتر فعال:' : 'Active Printer:'}
+          </span>
+          <span className="font-bold text-sky-700 dark:text-sky-300">
+            {selectedPrinter?.name || tr.quickBar.noPrinter}
+          </span>
+        </div>
+      </footer>
+    );
+  }
 
   return (
     <footer

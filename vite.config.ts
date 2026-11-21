@@ -11,6 +11,7 @@ import {
   queryWindowsSpoolerJobsViaPowerShell,
   setWindowsDefaultPrinterViaPowerShell,
 } from './electron/windowsPrinterFallback';
+import { listInstalledSystemFonts } from './electron/systemFonts';
 import type { PrinterMarginRequest, PrintJobRequest } from './shared/models';
 
 function readJsonBody<T>(req: { on: (event: string, cb: (chunk?: any) => void) => void }): Promise<T> {
@@ -156,6 +157,24 @@ function windowsPrinterBridgePlugin(): Plugin {
       } catch {
         res.statusCode = 500;
         res.end(JSON.stringify({ ok: false }));
+      }
+    });
+
+    middlewares.use('/api/system-fonts', async (req, res) => {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      try {
+        const url = new URL(req.url || '/', 'http://localhost');
+        const refresh = url.searchParams.get('refresh') === '1';
+        const fonts = await listInstalledSystemFonts(refresh);
+        res.end(JSON.stringify({ fonts }));
+      } catch (error) {
+        res.statusCode = 500;
+        res.end(
+          JSON.stringify({
+            fonts: [],
+            error: error instanceof Error ? error.message : String(error),
+          })
+        );
       }
     });
   };

@@ -6,6 +6,17 @@
 
 import type { EffectsSettings, PageItem } from '@shared/models';
 
+export function isPageInEffectScope(
+  page: PageItem,
+  effects: EffectsSettings
+): boolean {
+  if (!effects.enabled) return false;
+  if (effects.scope === 'all') return true;
+  return effects.targetPageIds !== undefined
+    ? effects.targetPageIds.includes(page.id)
+    : page.isHighlighted;
+}
+
 export function shouldApplyEffectsToPage(
   page: PageItem,
   effects: EffectsSettings
@@ -16,9 +27,7 @@ export function shouldApplyEffectsToPage(
   effectiveBlackAndWhite: boolean;
 } {
   const pageOverrideInvert = page.overrides?.invert;
-  const scopeMatch =
-    effects.enabled &&
-    (effects.scope === 'all' || (effects.scope === 'selected' && page.isHighlighted));
+  const scopeMatch = isPageInEffectScope(page, effects);
 
   const effectiveInvert =
     pageOverrideInvert !== undefined
@@ -73,8 +82,10 @@ export function resolvePageEffects(
   const gamma = applyGlobal && effects.gamma > 0 ? effects.gamma : 1;
   const blackText = applyGlobal && effects.blackText;
   const sharpness = applyGlobal ? effects.sharpness : 0;
+  const invertAsRaster = effectiveInvert && effects.invertPdfStrategy === 'raster';
 
   const hasPixelEffects =
+    invertAsRaster ||
     effectiveGrayscale ||
     effectiveBlackAndWhite ||
     brightness !== 0 ||
@@ -103,10 +114,7 @@ export function resolvePageEffects(
  * store needs the counterfactual: "would dropping this override change anything?"
  */
 export function inheritedInvert(page: PageItem, effects: EffectsSettings): boolean {
-  const scopeMatch =
-    effects.enabled &&
-    (effects.scope === 'all' || (effects.scope === 'selected' && page.isHighlighted));
-  return Boolean(scopeMatch && effects.invert);
+  return Boolean(isPageInEffectScope(page, effects) && effects.invert);
 }
 
 /** The inversion the operator actually sees: the page's own override when it has one, else the document. */

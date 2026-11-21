@@ -4,6 +4,7 @@ import type {OverlayScope,OverlayTarget,PageOverlayNumbering} from '@shared/mode
 import {computeImpositionSheets} from '../engine/layoutEngine';
 import {resolveNumberingTemplate} from '../engine/textOverlays';
 import {parseCoverageSelection,formatCoverageSelection} from '../engine/coverageSelection';
+import {useSystemFonts} from '../engine/systemFonts';
 import {useAppStore} from '../store/useAppStore';
 
 const input='w-full rounded border border-slate-300 bg-white p-1 text-xs text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white';
@@ -11,9 +12,11 @@ export function NumberingControlPanel(){
  const {settings,pages,layout,activePageId,activeSheetIndex,overlays,selectedOverlayId,updateOverlay,removeOverlay,addOverlay,selectOverlay,addNumberingOverlay}=useAppStore();
  const fa=settings.language==='fa';
  const item=overlays.find((o):o is PageOverlayNumbering=>o.id===selectedOverlayId&&o.kind==='numbering');
+ const {bundledFonts,systemFonts,isLoading:fontsLoading,refreshSystemFonts}=useSystemFonts(item?.fontFamily);
  const numbers=overlays.filter((o):o is PageOverlayNumbering=>o.kind==='numbering');
  const sheets=useMemo(()=>computeImpositionSheets(pages,layout),[pages,layout]);
  const [range,setRange]=useState('');const [rangeError,setRangeError]=useState(false);
+ const [customFont,setCustomFont]=useState('');
  const templateRef=useRef<HTMLTextAreaElement>(null);
  useEffect(()=>{
    if(!item || item.targetScope!=='selected'){setRange('');return;}
@@ -62,7 +65,28 @@ export function NumberingControlPanel(){
    <label className="block">{fa?'عدد شروع':'Starting number'}<input aria-label={fa?'عدد شروع':'Starting number'} type="number" min="-999999999" max="999999999" className={input} value={item.startOffset} onChange={e=>{if(e.target.value && Number.isSafeInteger(+e.target.value))patch({startOffset:+e.target.value});}}/></label>
    <label className="block">{fa?'نوع شماره':'Number format'}<select aria-label={fa?'نوع شماره':'Number format'} className={input} value={item.format} onChange={e=>patch({format:e.target.value as PageOverlayNumbering['format']})}>{['persian','english','roman','abjad'].map(x=><option key={x} value={x}>{x}</option>)}</select></label>
    <label className="block">{fa?'تعداد رقم سریال (۰ بدون صفر)':'Serial padding (0 for none)'}<input aria-label={fa?'تعداد رقم سریال':'Serial padding'} type="number" min="0" max="10" className={input} value={item.padZeros} onChange={e=>patch({padZeros:Math.max(0,Math.min(10,Number(e.target.value)))})}/></label>
-   <label className="block">{fa?'فونت':'Font'}<select aria-label={fa?'فونت شماره':'Number font'} className={input} value={item.fontFamily} onChange={e=>patch({fontFamily:e.target.value})}>{['Vazirmatn','Shabnam','Sahel','Titr','Mitra','Nastaliq','Tahoma','Arial','Times New Roman'].map(f=><option key={f}>{f}</option>)}</select></label>
+   <div className="space-y-1">
+     <div className="flex items-center justify-between gap-1">
+       <span>{fa?'فونت':'Font'}</span>
+       <button type="button" data-refresh-system-fonts onClick={()=>{void refreshSystemFonts();}} disabled={fontsLoading} className="rounded border border-slate-300 bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-700 hover:bg-slate-200 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 cursor-pointer">
+         {fontsLoading ? (fa?'در حال خواندن...':'Scanning...') : (fa?`فونت‌های سیستم (${systemFonts.length})`:`System fonts (${systemFonts.length})`)}
+       </button>
+     </div>
+     <select aria-label={fa?'فونت شماره':'Number font'} className={input} value={item.fontFamily} onChange={e=>patch({fontFamily:e.target.value})} style={{fontFamily:`"${item.fontFamily}", sans-serif`}}>
+       <optgroup label={fa?'فونت‌های همراه برنامه':'Bundled fonts'}>
+         {bundledFonts.map(f=><option key={`b:${f}`} value={f} style={{fontFamily:`"${f}", sans-serif`}}>{f}</option>)}
+       </optgroup>
+       {systemFonts.length > 0 && (
+         <optgroup label={fa?'فونت‌های نصب‌شده سیستم':'Installed system fonts'}>
+           {systemFonts.map(f=><option key={`s:${f}`} value={f} style={{fontFamily:`"${f}", sans-serif`}}>{f}</option>)}
+         </optgroup>
+       )}
+     </select>
+     <div className="flex items-center gap-1">
+       <input type="text" dir="ltr" aria-label={fa?'نام دلخواه فونت سیستم برای شماره':'Custom system font name for number'} value={customFont} onChange={e=>setCustomFont(e.target.value)} placeholder={fa?'مثلاً B Nazanin یا Tahoma':'e.g. B Nazanin or Segoe UI'} className={input}/>
+       <button type="button" disabled={!customFont.trim()} onClick={()=>{const f=customFont.trim();if(f){patch({fontFamily:f});setCustomFont('');}}} className="shrink-0 rounded border border-slate-300 bg-slate-100 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-200 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 cursor-pointer">{fa?'اعمال':'Use'}</button>
+     </div>
+   </div>
    <label className="block">{fa?'اندازه فونت':'Font size'} {item.fontSize} pt<input aria-label={fa?'اندازه فونت شماره':'Number font size'} type="range" min="8" max="80" value={item.fontSize} onChange={e=>patch({fontSize:+e.target.value})} className="w-full"/></label>
    <label className="block">{fa?'رنگ':'Color'}<input aria-label={fa?'رنگ شماره':'Number color'} type="color" value={/^#[0-9a-f]{6}$/i.test(item.color)?item.color:'#000000'} onChange={e=>patch({color:e.target.value})}/></label>
    <div className="flex flex-wrap gap-1">{(['bold','italic'] as const).map((k,i)=><button type="button" key={k} aria-label={(fa?['درشت','کج']:['Bold','Italic'])[i]} aria-pressed={item[k]} onClick={()=>patch({[k]:!item[k]})} className={`rounded px-2 py-1 cursor-pointer ${item[k]?'bg-sky-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{k==='bold'?'B':'I'}</button>)}

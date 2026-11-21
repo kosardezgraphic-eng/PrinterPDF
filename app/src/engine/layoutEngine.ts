@@ -107,8 +107,8 @@ export function getOrderedGridCoordinates(
   cols: number,
   order: SheetOrderMode
 ): Array<{ row: number; col: number }> {
-  const safeRows = Math.max(1, Math.min(10, Math.floor(rows)));
-  const safeCols = Math.max(1, Math.min(10, Math.floor(cols)));
+  const safeRows = Math.max(1, Math.min(50, Math.floor(rows)));
+  const safeCols = Math.max(1, Math.min(50, Math.floor(cols)));
   const coords: Array<{ row: number; col: number }> = [];
 
   if (order === 'ltr') {
@@ -210,8 +210,8 @@ export function computeImpositionSheets(
   const activePages = pages.filter((p) => p.selectedForPrint);
   const { widthMm: sheetW, heightMm: sheetH } = getSheetDimensionsMm(layout);
 
-  const rows = Math.max(1, Math.min(10, Math.floor(layout.rows)));
-  const cols = Math.max(1, Math.min(10, Math.floor(layout.cols)));
+  const rows = Math.max(1, Math.min(50, Math.floor(layout.rows)));
+  const cols = Math.max(1, Math.min(50, Math.floor(layout.cols)));
   const cellsPerSide = rows * cols;
 
   if (activePages.length === 0) {

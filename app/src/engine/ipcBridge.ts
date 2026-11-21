@@ -16,8 +16,15 @@ import type {
   PspProjectFile,
   SettingsPreset,
   SpoolerJobInfo,
+  VirtualPrinterConfig,
+  VirtualPrinterIncomingPayload,
+  VirtualPrinterStatus,
 } from '@shared/models';
-import { sanitizeAppSettings, sanitizeSettingsPresetList } from '@shared/models';
+import {
+  VIRTUAL_PRINTER_DEFAULT_NAME,
+  sanitizeAppSettings,
+  sanitizeSettingsPresetList,
+} from '@shared/models';
 
 const BROWSER_NO_WINDOWS_NOTE =
   'Browser preview cannot access local Windows printers directly (no fake printers are shown). Run the app on Windows using "npm run electron:dev" or "npm run dev" on your Windows PC.';
@@ -380,5 +387,129 @@ export const ipcBridge = {
     } catch {
       return [];
     }
+  },
+
+  async listSystemFonts(forceRefresh = false): Promise<string[]> {
+    const api = electronApi();
+    if (api && typeof api.listSystemFonts === 'function') {
+      try {
+        const fonts = await api.listSystemFonts(forceRefresh);
+        return Array.isArray(fonts) ? fonts : [];
+      } catch {
+        return [];
+      }
+    }
+    if (canUseHttpBridge()) {
+      try {
+        const query = forceRefresh ? '?refresh=1' : '';
+        const response = await fetch(`/api/system-fonts${query}`, {
+          headers: { Accept: 'application/json' },
+        });
+        if (response.ok) {
+          const contentType = response.headers.get('content-type') ?? '';
+          if (contentType.includes('application/json')) {
+            const data = (await response.json()) as { fonts?: unknown };
+            if (Array.isArray(data.fonts)) {
+              return data.fonts.filter((f): f is string => typeof f === 'string' && f.trim().length > 0);
+            }
+          }
+        }
+      } catch {
+        // Ignore network errors and fall back to browser probes
+      }
+    }
+    return [];
+  },
+
+  async getVirtualPrinterStatus(): Promise<VirtualPrinterStatus> {
+    const api = electronApi();
+    if (api && typeof api.getVirtualPrinterStatus === 'function') {
+      return api.getVirtualPrinterStatus();
+    }
+    const storedRaw = (() => {
+      try {
+        const raw = localStorage.getItem('printstudio:virtual-printer-config');
+        return raw ? (JSON.parse(raw) as Partial<VirtualPrinterConfig>) : null;
+      } catch {
+        return null;
+      }
+    })();
+    return {
+      supportedOnOs: false,
+      installedInWindows: false,
+      driverName: null,
+      portName: null,
+      spoolDir: '',
+      watcherActive: false,
+      lastError: null,
+      config: {
+        enabled: storedRaw?.enabled ?? true,
+        printerName: storedRaw?.printerName || VIRTUAL_PRINTER_DEFAULT_NAME,
+        paperSize: storedRaw?.paperSize ?? 'A4',
+        paperWidthMm: storedRaw?.paperWidthMm ?? 210,
+        paperHeightMm: storedRaw?.paperHeightMm ?? 297,
+        orientation: storedRaw?.orientation ?? 'portrait',
+        dpi: storedRaw?.dpi ?? 600,
+        autoImportToStudio: storedRaw?.autoImportToStudio ?? true,
+        switchToStudioOnReceive: storedRaw?.switchToStudioOnReceive ?? true,
+      },
+      recentJobs: [],
+    };
+  },
+
+  async updateVirtualPrinterConfig(
+    patch: Partial<VirtualPrinterConfig>
+  ): Promise<VirtualPrinterStatus> {
+    const api = electronApi();
+    if (api && typeof api.updateVirtualPrinterConfig === 'function') {
+      return api.updateVirtualPrinterConfig(patch);
+    }
+    const current = await this.getVirtualPrinterStatus();
+    const nextConfig: VirtualPrinterConfig = {
+      ...current.config,
+      ...patch,
+    };
+    try {
+      localStorage.setItem(
+        'printstudio:virtual-printer-config',
+        JSON.stringify(nextConfig)
+      );
+    } catch {
+      // Ignore storage quota errors
+    }
+    return {
+      ...current,
+      config: nextConfig,
+    };
+  },
+
+  async installVirtualPrinter(): Promise<VirtualPrinterStatus> {
+    const api = electronApi();
+    if (api && typeof api.installVirtualPrinter === 'function') {
+      return api.installVirtualPrinter();
+    }
+    throw new Error(
+      'Installing the Windows Virtual Printer requires the Windows desktop app.'
+    );
+  },
+
+  async uninstallVirtualPrinter(): Promise<VirtualPrinterStatus> {
+    const api = electronApi();
+    if (api && typeof api.uninstallVirtualPrinter === 'function') {
+      return api.uninstallVirtualPrinter();
+    }
+    throw new Error(
+      'Uninstalling the Windows Virtual Printer requires the Windows desktop app.'
+    );
+  },
+
+  listenForVirtualPrinterJobs(
+    callback: (payload: VirtualPrinterIncomingPayload) => void
+  ): () => void {
+    const api = window.printStudioAPI;
+    if (api?.isElectron && typeof api.onVirtualPrinterJob === 'function') {
+      return api.onVirtualPrinterJob(callback);
+    }
+    return () => undefined;
   },
 };

@@ -40,8 +40,8 @@ export function moveLayoutGuide(
   dy: number,
   minMargins?: Partial<MarginsMm>,
 ): LayoutSettings {
-  const rows = Math.max(1, Math.min(10, Math.floor(layout.rows)));
-  const cols = Math.max(1, Math.min(10, Math.floor(layout.cols)));
+  const rows = Math.max(1, Math.min(50, Math.floor(layout.rows)));
+  const cols = Math.max(1, Math.min(50, Math.floor(layout.cols)));
   const margins = layout.marginsMm;
   if (guide.type === 'margin') {
     const horizontal = guide.side === 'left' || guide.side === 'right';

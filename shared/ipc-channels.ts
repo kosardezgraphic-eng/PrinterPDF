@@ -14,6 +14,9 @@ import type {
   PspProjectFile,
   SettingsPreset,
   SpoolerJobInfo,
+  VirtualPrinterConfig,
+  VirtualPrinterIncomingPayload,
+  VirtualPrinterStatus,
 } from './models';
 
 export const IPC_CHANNELS = {
@@ -34,7 +37,6 @@ export const IPC_CHANNELS = {
   PRINTER_GET_CAPABILITIES: 'printer:get-capabilities',
   PRINTER_GET_MARGINS: 'printer:get-margins',
   /** Why the print sidecar cannot answer, or null when it is healthy. */
-  /** Why the print sidecar cannot answer, or null when it is healthy. */
   PRINTER_STATUS_NOTE: 'printer:status-note',
   PRINTER_UPDATE_PROFILE: 'printer:update-profile',
   PRINTER_SET_DEFAULT: 'printer:set-default',
@@ -42,6 +44,13 @@ export const IPC_CHANNELS = {
   PRINTER_OPEN_PREFERENCES: 'printer:open-preferences',
   PRINTER_PRINT_JOB: 'printer:print-job',
   PRINTER_SILENT_PRINT: 'printer:silent-print',
+
+  // Windows Virtual Printer
+  VIRTUAL_PRINTER_GET_STATUS: 'virtual-printer:get-status',
+  VIRTUAL_PRINTER_UPDATE_CONFIG: 'virtual-printer:update-config',
+  VIRTUAL_PRINTER_INSTALL: 'virtual-printer:install',
+  VIRTUAL_PRINTER_UNINSTALL: 'virtual-printer:uninstall',
+  VIRTUAL_PRINTER_JOB_RECEIVED: 'virtual-printer:job-received',
 
   // Spooler Queue Manager (I3)
   SPOOLER_LIST_JOBS: 'spooler:list-jobs',
@@ -57,6 +66,7 @@ export const IPC_CHANNELS = {
   SETTINGS_SAVE: 'settings:save',
   SETTINGS_PRESETS_LOAD: 'settings:presets-load',
   SETTINGS_PRESETS_SAVE: 'settings:presets-save',
+  SYSTEM_LIST_FONTS: 'system:list-fonts',
   CACHE_CLEAR: 'cache:clear',
 } as const;
 
@@ -114,6 +124,11 @@ export interface PrintStudioElectronAPI {
     priority?: number
   ): Promise<boolean>;
   purgePrinterQueue(printerName: string): Promise<boolean>;
+  getVirtualPrinterStatus(): Promise<VirtualPrinterStatus>;
+  updateVirtualPrinterConfig(patch: Partial<VirtualPrinterConfig>): Promise<VirtualPrinterStatus>;
+  installVirtualPrinter(): Promise<VirtualPrinterStatus>;
+  uninstallVirtualPrinter(): Promise<VirtualPrinterStatus>;
+  onVirtualPrinterJob(callback: (payload: VirtualPrinterIncomingPayload) => void): () => void;
   saveAutoSaveSession(project: PspProjectFile): Promise<boolean>;
   loadAutoSaveSession(): Promise<PspProjectFile | null>;
   saveSettings(settings: AppSettings): Promise<boolean>;
@@ -121,6 +136,7 @@ export interface PrintStudioElectronAPI {
   /** Saved setting profiles, kept in their own file so a preset survives a settings reset. */
   saveSettingsPresets(presets: SettingsPreset[]): Promise<boolean>;
   loadSettingsPresets(): Promise<SettingsPreset[] | null>;
+  listSystemFonts(forceRefresh?: boolean): Promise<string[]>;
   clearCache(): Promise<boolean>;
 }
 

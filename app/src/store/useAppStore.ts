@@ -33,6 +33,9 @@ import type {
   SettingsPreset,
   SourceDocument,
   SpoolerJobInfo,
+  VirtualPrinterConfig,
+  VirtualPrinterIncomingPayload,
+  VirtualPrinterStatus,
   WatermarkSettings,
 } from '@shared/models';
 import {
@@ -88,6 +91,23 @@ import { centeredAspectCrop, cropToMm, IDENTITY_TRANSFORM, type Insets } from '.
 import { computeImpositionSheets, getSheetDimensionsMm, sortCellsByLayer, stripTrailingEmptyDuplexSides } from '../engine/layoutEngine';
 import { ipcBridge, selectOptimalPrinter } from '../engine/ipcBridge';
 import { adjustScriptRanges, setScriptRange } from '../engine/textFormatting';
+import { buildBatchExecutionPlan, nUpToRowsCols } from '../engine/batchService';
+import { computeAutoPackPlan, type AutoPackPlan } from '../engine/autoPack';
+
+export interface AutoPackRequest {
+  pageId?: string;
+  widthMm: number;
+  heightMm: number;
+  lockAspect: boolean;
+  horizontalGapMm: number;
+  verticalGapMm: number;
+  outerMarginMm: number;
+  allowRotateForMax: boolean;
+  centerOnSheet: boolean;
+  onlySelectedPage: boolean;
+}
+
+export type AppMode = 'studio' | 'batch';
 
 export type RibbonTabId =
   | 'file'
@@ -158,6 +178,8 @@ let activePrintRunId = 0;
 const canceledPrintRuns = new Set<number>();
 let activeSpoolerJob: { printerName: string; jobId: number } | null = null;
 const profileSyncSeq = new Map<string, number>();
+let batchRunPaused = false;
+const canceledBatchJobIds = new Set<string>();
 
 function syncPrintersDuplex(printers: PrinterInfo[], duplexMode: DuplexMode): PrinterInfo[] {
   let changed = false;
@@ -238,6 +260,49 @@ export const DEFAULT_EFFECTS: EffectsSettings = {
   gamma: 1.0,
   sharpness: 0,
 };
+
+function hasActiveVisualEffects(effects: EffectsSettings): boolean {
+  return Boolean(
+    effects.enabled &&
+      (effects.invert ||
+        effects.grayscale ||
+        effects.blackAndWhite ||
+        effects.blackText ||
+        effects.brightness !== 0 ||
+        effects.contrast !== 0 ||
+        Math.abs(effects.gamma - 1) > 0.001 ||
+        effects.sharpness !== 0)
+  );
+}
+
+const SIDEBAR_WIDTH_MIN = 180;
+const SIDEBAR_WIDTH_MAX = 560;
+const SIDEBAR_WIDTH_DEFAULT = 288;
+const THUMB_SIZE_MIN = 72;
+const THUMB_SIZE_MAX = 240;
+const THUMB_SIZE_DEFAULT = 112;
+
+function readStoredNumber(key: string, min: number, max: number, fallback: number): number {
+  try {
+    if (typeof localStorage === 'undefined') return fallback;
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    const val = Number(raw);
+    return Number.isFinite(val) ? Math.max(min, Math.min(max, Math.round(val))) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredNumber(key: string, value: number): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(key, String(value));
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
 
 export const DEFAULT_SETTINGS: AppSettings = {
   language: 'fa',
@@ -336,9 +401,15 @@ interface AppState {
   printerServiceNote: string | null;
   isRefreshingPrinters: boolean;
 
-  // Batch Queue
+  // Batch Queue & Standalone Environment
+  appMode: AppMode;
   batchQueue: BatchJobItem[];
+  batchSelectedJobId: string | null;
   isBatchRunning: boolean;
+
+  // Windows Virtual Printer
+  virtualPrinterStatus: VirtualPrinterStatus | null;
+  virtualPrinterBusy: boolean;
 
   // UI & Workspace State
   activeRibbonTab: RibbonTabId;
@@ -353,6 +424,8 @@ interface AppState {
   isGeneratingPdfPreview: boolean;
   workspaceDrawer: WorkspaceDrawerState;
   sidebarTab: 'pages' | 'bookmarks';
+  sidebarWidthPx: number;
+  sidebarThumbnailSizePx: number;
   activeSheetIndex: number;
   sidebarReveal: { pageId: string; occurrenceKey?: string } | null;
   previewPageRequest: { pageId: string } | null;
@@ -375,6 +448,7 @@ interface AppState {
   showPageSetupModal: boolean;
   pageSetupInitialTab: 'margins' | 'paper';
   showOnboardingTour: boolean;
+  showShortcutsModal: boolean;
   lastCustomMarginsMm: MarginsMm | null;
   pendingDuplexPrint: PrintJobRequest | null;
   printProgress: PrintProgressState | null;
@@ -437,6 +511,7 @@ interface AppState {
   // Layout & Effects & Insert
   updateLayout: (patch: Partial<LayoutSettings>, recordUndo?: boolean) => void;
   setNUpMatrix: (rows: number, cols: number, placementMode?: LayoutSettings['placementMode']) => void;
+  autoPackPageOnSheet: (request: AutoPackRequest) => AutoPackPlan | null;
   updateMargins: (patch: Partial<LayoutSettings['marginsMm']>) => void;
   applyMarginPreset: (presetId: MarginPresetId) => void;
   addRulerGuide: (guide: RulerGuide) => void;
@@ -534,12 +609,29 @@ interface AppState {
   ) => Promise<void>;
   purgePrinterQueue: (printerName: string) => Promise<void>;
 
-  // Batch Print Queue
+  // Batch Print Queue & Workspace Mode
+  setAppMode: (mode: AppMode) => void;
+  selectBatchJob: (id: string | null) => void;
+  addBatchFiles: (files: File[]) => Promise<void>;
   addCurrentWorkspaceToBatch: () => void;
+  updateBatchJob: (id: string, patch: Partial<BatchJobItem>) => void;
+  applyPrinterProfileToAllBatchJobs: () => void;
+  moveBatchJob: (id: string, direction: 'up' | 'down') => void;
+  duplicateBatchJob: (id: string) => void;
+  clearCompletedBatchJobs: () => void;
+  clearAllBatchJobs: () => void;
+  cancelBatchJob: (id: string) => void;
   runBatchQueue: () => Promise<void>;
   pauseBatchQueue: () => void;
   removeBatchJob: (id: string) => void;
   retryFailedBatchJobs: () => void;
+
+  // Windows Virtual Printer
+  refreshVirtualPrinterStatus: () => Promise<void>;
+  updateVirtualPrinterConfig: (patch: Partial<VirtualPrinterConfig>) => Promise<void>;
+  installVirtualPrinter: () => Promise<void>;
+  uninstallVirtualPrinter: () => Promise<void>;
+  handleIncomingVirtualPrinterJob: (payload: VirtualPrinterIncomingPayload) => Promise<void>;
 
   // UI Helpers
   setActiveRibbonTab: (tab: RibbonTabId) => void;
@@ -551,6 +643,8 @@ interface AppState {
   triggerFitPage: () => void;
   setWorkspaceDrawer: (drawer: WorkspaceDrawerState) => void;
   setSidebarTab: (tab: 'pages' | 'bookmarks') => void;
+  setSidebarWidthPx: (widthPx: number) => void;
+  setSidebarThumbnailSizePx: (sizePx: number) => void;
   setActiveSheetIndex: (idx: number) => void;
   setZoomPercent: (zoom: number) => void;
   setViewMode: (mode: PreviewViewMode) => void;
@@ -567,7 +661,8 @@ interface AppState {
       | 'manualDuplex'
       | 'split'
       | 'pageSetup'
-      | 'tour',
+      | 'tour'
+      | 'shortcuts',
     open: boolean
   ) => void;
   openPageSetup: (tab?: 'margins' | 'paper') => void;
@@ -771,8 +866,13 @@ export const useAppStore = create<AppState>((set, get) => {
     printerServiceNote: null,
     isRefreshingPrinters: false,
 
+    appMode: 'studio',
     batchQueue: INITIAL_BATCH_QUEUE,
+    batchSelectedJobId: null,
     isBatchRunning: false,
+
+    virtualPrinterStatus: null,
+    virtualPrinterBusy: false,
 
     activeRibbonTab: 'layout',
     ribbonCollapsed: false,
@@ -786,6 +886,8 @@ export const useAppStore = create<AppState>((set, get) => {
     isGeneratingPdfPreview: false,
     workspaceDrawer: null,
     sidebarTab: 'pages',
+    sidebarWidthPx: readStoredNumber('printstudio:sidebar-width-px', SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_DEFAULT),
+    sidebarThumbnailSizePx: readStoredNumber('printstudio:sidebar-thumb-px', THUMB_SIZE_MIN, THUMB_SIZE_MAX, THUMB_SIZE_DEFAULT),
     activeSheetIndex: 0,
     sidebarReveal: null,
     previewPageRequest: null,
@@ -807,6 +909,7 @@ export const useAppStore = create<AppState>((set, get) => {
     showPageSetupModal: false,
     pageSetupInitialTab: 'margins',
     showOnboardingTour: false,
+    showShortcutsModal: false,
     lastCustomMarginsMm: null,
     pendingDuplexPrint: null,
     printProgress: null,
@@ -1057,6 +1160,7 @@ export const useAppStore = create<AppState>((set, get) => {
         const targetIndex = state.pages.findIndex((p) => p.id === pageId);
         if (targetIndex === -1) return state;
 
+        let nextPages: PageItem[];
         if (rangeSelect) {
           const lastHighlightedIdx = state.pages.findIndex((p) => p.isHighlighted);
           const start = Math.min(
@@ -1067,30 +1171,35 @@ export const useAppStore = create<AppState>((set, get) => {
             lastHighlightedIdx === -1 ? targetIndex : lastHighlightedIdx,
             targetIndex
           );
-          return {
-            activePageId: pageId,
-            pages: state.pages.map((p, idx) => ({
-              ...p,
-              isHighlighted: idx >= start && idx <= end,
-            })),
-          };
+          nextPages = state.pages.map((p, idx) => ({
+            ...p,
+            isHighlighted: idx >= start && idx <= end,
+          }));
+        } else if (multiSelect) {
+          nextPages = state.pages.map((p) =>
+            p.id === pageId ? { ...p, isHighlighted: !p.isHighlighted } : p
+          );
+        } else {
+          nextPages = state.pages.map((p) => ({
+            ...p,
+            isHighlighted: p.id === pageId,
+          }));
         }
 
-        if (multiSelect) {
-          return {
-            activePageId: pageId,
-            pages: state.pages.map((p) =>
-              p.id === pageId ? { ...p, isHighlighted: !p.isHighlighted } : p
-            ),
-          };
-        }
+        const shouldFollowHighlight =
+          state.effects.scope === 'selected' && !hasActiveVisualEffects(state.effects);
 
         return {
           activePageId: pageId,
-          pages: state.pages.map((p) => ({
-            ...p,
-            isHighlighted: p.id === pageId,
-          })),
+          pages: nextPages,
+          ...(shouldFollowHighlight
+            ? {
+                effects: {
+                  ...state.effects,
+                  targetPageIds: nextPages.filter((p) => p.isHighlighted).map((p) => p.id),
+                },
+              }
+            : {}),
         };
       });
     },
@@ -1448,6 +1557,14 @@ export const useAppStore = create<AppState>((set, get) => {
       set((state) => ({
         pages: state.pages.filter((p) => !idSet.has(p.id)),
         layout: removeCellOverrides(state.layout, idSet),
+        ...(state.effects.targetPageIds !== undefined
+          ? {
+              effects: {
+                ...state.effects,
+                targetPageIds: state.effects.targetPageIds.filter((id) => !idSet.has(id)),
+              },
+            }
+          : {}),
       }));
       pushUndo(
         `حذف ${pageIds.length} صفحه`,
@@ -1459,12 +1576,23 @@ export const useAppStore = create<AppState>((set, get) => {
 
     removeDocument: (docId) => {
       const before = captureSnapshot(get());
-      set((state) => ({
-        documents: state.documents.filter((d) => d.id !== docId),
-        pages: state.pages.filter((p) => p.documentId !== docId),
-        layout: removeCellOverrides(state.layout, new Set(state.pages.filter(p => p.documentId === docId).map(p => p.id))),
-        bookmarks: state.bookmarks.filter((b) => b.documentId !== docId),
-      }));
+      set((state) => {
+        const removedIds = new Set(state.pages.filter((p) => p.documentId === docId).map((p) => p.id));
+        return {
+          documents: state.documents.filter((d) => d.id !== docId),
+          pages: state.pages.filter((p) => p.documentId !== docId),
+          layout: removeCellOverrides(state.layout, removedIds),
+          bookmarks: state.bookmarks.filter((b) => b.documentId !== docId),
+          ...(state.effects.targetPageIds !== undefined
+            ? {
+                effects: {
+                  ...state.effects,
+                  targetPageIds: state.effects.targetPageIds.filter((id) => !removedIds.has(id)),
+                },
+              }
+            : {}),
+        };
+      });
       // The parsed file and every bitmap made from it go with it; keeping them would hold megabytes
       // for pages that can never be looked at again.
       releaseCrispPreviewDocument(docId);
@@ -1722,8 +1850,8 @@ export const useAppStore = create<AppState>((set, get) => {
       set((state) => ({
         layout: {
           ...state.layout,
-          rows: Math.max(1, Math.min(10, rows)),
-          cols: Math.max(1, Math.min(10, cols)),
+          rows: Math.max(1, Math.min(50, rows)),
+          cols: Math.max(1, Math.min(50, cols)),
           placementMode: placementMode ?? state.layout.placementMode,
         },
         activeSheetIndex: 0,
@@ -1734,6 +1862,136 @@ export const useAppStore = create<AppState>((set, get) => {
         before,
         captureSnapshot(get())
       );
+    },
+
+    autoPackPageOnSheet: (request) => {
+      const state = get();
+      const targetPage =
+        (request.pageId ? state.pages.find((p) => p.id === request.pageId) : undefined) ??
+        (state.activePageId ? state.pages.find((p) => p.id === state.activePageId) : undefined) ??
+        state.pages.find((p) => p.isHighlighted) ??
+        state.pages.find((p) => p.selectedForPrint) ??
+        state.pages[0];
+
+      const lang = state.settings.language;
+      if (!targetPage) {
+        state.addToast({
+          type: 'warning',
+          title: lang === 'fa' ? 'ابتدا یک تصویر یا صفحه وارد کنید' : 'Import an image or page first',
+        });
+        return null;
+      }
+
+      const activePrinter = state.printers.find((p) => p.name === state.selectedPrinterName);
+      const minMargins = resolvePrinterMinMargins(state.printerMargins, activePrinter);
+      const reqMargin = Math.max(0, Number.isFinite(request.outerMarginMm) ? request.outerMarginMm : 0);
+      const baseMarginsMm: MarginsMm = {
+        top: Math.max(minMargins?.top ?? 0, reqMargin),
+        right: Math.max(minMargins?.right ?? 0, reqMargin),
+        bottom: Math.max(minMargins?.bottom ?? 0, reqMargin),
+        left: Math.max(minMargins?.left ?? 0, reqMargin),
+      };
+
+      const layoutForSheet: LayoutSettings = state.layout.booklet?.enabled
+        ? { ...state.layout, booklet: { ...state.layout.booklet, enabled: false } }
+        : state.layout;
+      const sheetDims = getSheetDimensionsMm(layoutForSheet);
+
+      const plan = computeAutoPackPlan({
+        sheetWidthMm: sheetDims.widthMm,
+        sheetHeightMm: sheetDims.heightMm,
+        baseMarginsMm,
+        itemWidthMm: request.widthMm,
+        itemHeightMm: request.heightMm,
+        horizontalGapMm: request.horizontalGapMm,
+        verticalGapMm: request.verticalGapMm,
+        allowRotateForMax: request.allowRotateForMax,
+        centerOnSheet: request.centerOnSheet,
+      });
+
+      if (!plan.fits) {
+        state.addToast({
+          type: 'warning',
+          title:
+            lang === 'fa'
+              ? 'ابعاد انتخاب‌شده از فضای قابل چاپ شیت بزرگ‌تر است'
+              : 'Selected item dimensions exceed the printable sheet area',
+        });
+        return plan;
+      }
+
+      const before = captureSnapshot(state);
+      const nextRotation: PageRotation = plan.rotated90
+        ? (((targetPage.rotation + 90) % 360) as PageRotation)
+        : targetPage.rotation;
+
+      set((curr) => ({
+        pages: curr.pages.map((page) => {
+          const isTarget = page.id === targetPage.id;
+          const nextSelected = request.onlySelectedPage
+            ? isTarget
+            : isTarget
+              ? true
+              : page.selectedForPrint;
+          if (!isTarget) {
+            return nextSelected !== page.selectedForPrint
+              ? { ...page, selectedForPrint: nextSelected }
+              : page;
+          }
+          const nextOverrides = page.overrides
+            ? {
+                ...page.overrides,
+                manualRotation: plan.rotated90 ? true : page.overrides.manualRotation,
+                transform: undefined,
+              }
+            : plan.rotated90
+              ? { manualRotation: true }
+              : undefined;
+          return {
+            ...page,
+            rotation: nextRotation,
+            selectedForPrint: nextSelected,
+            overrides: nextOverrides,
+          };
+        }),
+        layout: {
+          ...curr.layout,
+          booklet: curr.layout.booklet
+            ? { ...curr.layout.booklet, enabled: false }
+            : curr.layout.booklet,
+          rows: plan.rows,
+          cols: plan.cols,
+          placementMode: 'step-and-repeat',
+          scaleMode: request.lockAspect ? 'fit' : 'fill',
+          uniqueScale: true,
+          autoRotateToFit: false,
+          marginMode: 'custom',
+          marginsMm: plan.marginsMm,
+          horizontalGutterMm: plan.horizontalGutterMm,
+          verticalGutterMm: plan.verticalGutterMm,
+          cellOverrides: undefined,
+        },
+        lastCustomMarginsMm: plan.marginsMm,
+        activePageId: targetPage.id,
+        activeSheetIndex: 0,
+      }));
+
+      pushUndo(
+        `چیدمان بیشینه ${plan.rows}×${plan.cols} (${plan.totalPerSheet} عدد در برگ)`,
+        `Auto-pack ${plan.rows}×${plan.cols} (${plan.totalPerSheet} per sheet)`,
+        before,
+        captureSnapshot(get())
+      );
+
+      get().addToast({
+        type: 'success',
+        title:
+          lang === 'fa'
+            ? `${plan.totalPerSheet} نسخه (${plan.cols}×${plan.rows}) با اندازه ${plan.cellWidthMm}×${plan.cellHeightMm}mm روی برگ چیده شد`
+            : `Packed ${plan.totalPerSheet} copies (${plan.cols}×${plan.rows}) at ${plan.cellWidthMm}×${plan.cellHeightMm} mm per sheet`,
+      });
+
+      return plan;
     },
 
     addRulerGuide: (guide) => {
@@ -1864,13 +2122,25 @@ export const useAppStore = create<AppState>((set, get) => {
 
     updateEffects: (patch, recordUndo = false) => {
       const before = captureSnapshot(get());
-      set((state) => ({
-        effects: {
-          ...state.effects,
-          ...patch,
-          enabled: patch.enabled !== undefined ? patch.enabled : true,
-        },
-      }));
+      set((state) => {
+        const nextScope = patch.scope ?? state.effects.scope;
+        let targetPageIds = state.effects.targetPageIds;
+        if (nextScope === 'all') {
+          targetPageIds = undefined;
+        } else if (patch.targetPageIds !== undefined) {
+          targetPageIds = [...patch.targetPageIds];
+        } else if (patch.scope === 'selected' || state.effects.targetPageIds === undefined) {
+          targetPageIds = state.pages.filter((p) => p.isHighlighted).map((p) => p.id);
+        }
+        return {
+          effects: {
+            ...state.effects,
+            ...patch,
+            targetPageIds,
+            enabled: patch.enabled !== undefined ? patch.enabled : true,
+          },
+        };
+      });
       if (recordUndo) {
         pushUndo('تغییر افکت‌های تصویر', 'Update visual effects', before, captureSnapshot(get()));
       }
@@ -1884,6 +2154,9 @@ export const useAppStore = create<AppState>((set, get) => {
           ...state.effects,
           enabled: true,
           invert: nextInvert,
+          ...(state.effects.scope === 'selected' && state.effects.targetPageIds === undefined
+            ? { targetPageIds: state.pages.filter((p) => p.isHighlighted).map((p) => p.id) }
+            : {}),
         },
       }));
       pushUndo(
@@ -3311,24 +3584,162 @@ export const useAppStore = create<AppState>((set, get) => {
       });
     },
 
+    setAppMode: (mode) => set({ appMode: mode }),
+
+    selectBatchJob: (id) => set({ batchSelectedJobId: id }),
+
+    addBatchFiles: async (files) => {
+      if (!files.length) return;
+      const state = get();
+      const isFa = state.settings.language === 'fa';
+      const activePrinter =
+        state.printers.find((p) => p.name === state.selectedPrinterName) ??
+        state.printers.find((p) => p.isDefault) ??
+        state.printers[0];
+      const hw = activePrinter?.activeProfile;
+      const addedJobs: BatchJobItem[] = [];
+
+      for (const file of files) {
+        const result = await importFilesBatch([file]);
+        for (const doc of result.documents) {
+          const docPages = result.pages
+            .filter((p) => p.documentId === doc.id)
+            .map((p) => ({ ...p, selectedForPrint: true }));
+          if (docPages.length === 0) continue;
+
+          const newJob: BatchJobItem = {
+            id: `batch-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            fileName: doc.name,
+            fileSize: doc.fileSize,
+            pageCount: docPages.length,
+            printerName: activePrinter?.name ?? state.selectedPrinterName ?? '',
+            copies: 1,
+            collate: hw?.collate ?? true,
+            pageRangeMode: 'all',
+            customRangeText: '',
+            oddEvenFilter: 'all',
+            reverseOrder: false,
+            nUp: 1,
+            scaleMode: 'fit',
+            paperSize: hw?.paperSize ?? state.layout.paperSize,
+            paperName: hw?.paperName,
+            paperWidthMm: hw?.paperWidthMm,
+            paperHeightMm: hw?.paperHeightMm,
+            orientation: hw?.orientation ?? state.layout.orientation,
+            tray: hw?.tray ?? 'Auto Select',
+            mediaType: hw?.mediaType ?? 'Plain Paper',
+            dpi: hw?.dpi ?? 600,
+            quality: hw?.quality ?? 'normal',
+            colorMode: hw?.colorMode === 'monochrome' ? 'bw' : 'color',
+            duplexMode: hw?.duplexMode ?? 'none',
+            staple: hw?.staple,
+            holePunch: hw?.holePunch,
+            fold: hw?.fold,
+            outputBin: hw?.outputBin,
+            borderless: hw?.borderless,
+            invert: false,
+            useGlobalPrinterSettings: true,
+            snapshotDocuments: [doc],
+            snapshotPages: docPages,
+            snapshotLayout: {
+              ...DEFAULT_LAYOUT,
+              paperSize: hw?.paperSize ?? state.layout.paperSize,
+              customWidthMm: hw?.paperWidthMm ?? state.layout.customWidthMm,
+              customHeightMm: hw?.paperHeightMm ?? state.layout.customHeightMm,
+              orientation: hw?.orientation ?? state.layout.orientation,
+              duplexMode: hw?.duplexMode ?? 'none',
+              rows: 1,
+              cols: 1,
+              marginsMm: { ...state.layout.marginsMm },
+            },
+            status: 'queued',
+            progressPercent: 0,
+            retryCount: 0,
+            addedAt: new Date().toISOString(),
+          };
+          addedJobs.push(newJob);
+        }
+        for (const err of result.errors) {
+          state.addToast({
+            type: 'error',
+            title: isFa ? err.reasonFa : err.reasonEn,
+            message: isFa ? err.solutionFa : err.solutionEn,
+          });
+        }
+      }
+
+      if (addedJobs.length > 0) {
+        set((s) => ({
+          batchQueue: [...s.batchQueue, ...addedJobs],
+          batchSelectedJobId: s.batchSelectedJobId ?? addedJobs[0].id,
+        }));
+        state.addToast({
+          type: 'success',
+          title: isFa
+            ? `${addedJobs.length} فایل به صف چاپ دسته‌ای اضافه شد`
+            : `Added ${addedJobs.length} file(s) to Batch Print Queue`,
+        });
+      }
+    },
+
     addCurrentWorkspaceToBatch: () => {
       const state = get();
-      const selectedCount = state.pages.filter((p) => p.selectedForPrint).length;
-      if (selectedCount === 0) return;
+      const selectedPages = state.pages.filter((p) => p.selectedForPrint);
+      if (selectedPages.length === 0) return;
+
+      const activePrinter =
+        state.printers.find((p) => p.name === state.selectedPrinterName) ??
+        state.printers.find((p) => p.isDefault) ??
+        state.printers[0];
+      const hw = activePrinter?.activeProfile;
 
       const newItem: BatchJobItem = {
-        id: `batch-${Date.now()}`,
+        id: `batch-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
         fileName:
           state.documents.length === 1
             ? state.documents[0].name
             : `پروژه-ادغامی-${state.documents.length}-فایل.pdf`,
         fileSize: state.documents.reduce((acc, d) => acc + d.fileSize, 0),
-        pageCount: selectedCount,
+        pageCount: selectedPages.length,
         printerName: state.selectedPrinterName || state.printers[0]?.name || '',
         copies: 1,
+        collate: hw?.collate ?? true,
+        pageRangeMode: 'all',
+        customRangeText: '',
+        oddEvenFilter: 'all',
+        reverseOrder: false,
         nUp: state.layout.rows * state.layout.cols,
-        duplexMode: state.layout.duplexMode,
+        scaleMode: state.layout.scaleMode === 'original' ? 'actual' : 'fit',
+        paperSize: hw?.paperSize ?? state.layout.paperSize,
+        paperName: hw?.paperName,
+        paperWidthMm: hw?.paperWidthMm,
+        paperHeightMm: hw?.paperHeightMm,
+        orientation: hw?.orientation ?? state.layout.orientation,
+        tray: hw?.tray ?? 'Auto Select',
+        mediaType: hw?.mediaType ?? 'Plain Paper',
+        dpi: hw?.dpi ?? 600,
+        quality: hw?.quality ?? 'normal',
+        colorMode:
+          state.effects.grayscale ||
+          state.effects.blackAndWhite ||
+          hw?.colorMode === 'monochrome'
+            ? 'bw'
+            : 'color',
+        duplexMode: hw?.duplexMode ?? state.layout.duplexMode,
+        staple: hw?.staple,
+        holePunch: hw?.holePunch,
+        fold: hw?.fold,
+        outputBin: hw?.outputBin,
+        borderless: hw?.borderless,
         invert: state.effects.invert,
+        useGlobalPrinterSettings: true,
+        snapshotDocuments: state.documents.map((d) => ({ ...d })),
+        snapshotPages: selectedPages.map((p) => ({ ...p, selectedForPrint: true })),
+        snapshotLayout: structuredClone(state.layout),
+        snapshotEffects: structuredClone(state.effects),
+        snapshotWatermark: structuredClone(state.watermark),
+        snapshotPageNumbering: structuredClone(state.pageNumbering),
+        snapshotOverlays: structuredClone(state.overlays),
         status: 'queued',
         progressPercent: 0,
         retryCount: 0,
@@ -3337,6 +3748,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
       set((s) => ({
         batchQueue: [...s.batchQueue, newItem],
+        batchSelectedJobId: newItem.id,
         activeRibbonTab: 'batch',
         workspaceDrawer: null,
       }));
@@ -3349,22 +3761,363 @@ export const useAppStore = create<AppState>((set, get) => {
       });
     },
 
-    runBatchQueue: async () => {
-      // Batch items contain only metadata, not a snapshot of the document bytes.
-      // Marking them complete would falsely report that a job was printed.
-      const message = get().settings.language === 'fa'
-        ? 'چاپ دسته‌ای هنوز به ارسال واقعی اسناد متصل نیست؛ هیچ کاری چاپ نشد.'
-        : 'Batch printing is not connected to document submission; no jobs were printed.';
-      set(state => ({
-        isBatchRunning: false,
-        batchQueue: state.batchQueue.map(item => item.status === 'queued'
-          ? { ...item, status: 'failed', progressPercent: 0 }
-          : item),
+    updateBatchJob: (id, patch) => {
+      set((s) => ({
+        batchQueue: s.batchQueue.map((item) => {
+          if (item.id !== id) return item;
+          const next = { ...item, ...patch };
+          if (patch.nUp !== undefined && next.snapshotLayout) {
+            const { rows, cols } = nUpToRowsCols(patch.nUp);
+            next.snapshotLayout = { ...next.snapshotLayout, rows, cols };
+          }
+          return next;
+        }),
       }));
-      get().addToast({ type: 'error', title: message });
+    },
+
+    applyPrinterProfileToAllBatchJobs: () => {
+      const state = get();
+      const activePrinter =
+        state.printers.find((p) => p.name === state.selectedPrinterName) ??
+        state.printers[0];
+      if (!activePrinter) return;
+      const hw = activePrinter.activeProfile;
+      set((s) => ({
+        batchQueue: s.batchQueue.map((item) =>
+          item.status === 'processing'
+            ? item
+            : {
+                ...item,
+                printerName: activePrinter.name,
+                paperSize: hw.paperSize,
+                paperName: hw.paperName,
+                paperWidthMm: hw.paperWidthMm,
+                paperHeightMm: hw.paperHeightMm,
+                orientation: hw.orientation,
+                tray: hw.tray,
+                mediaType: hw.mediaType,
+                dpi: hw.dpi,
+                quality: hw.quality,
+                collate: hw.collate,
+                duplexMode: hw.duplexMode,
+                colorMode: hw.colorMode === 'monochrome' ? 'bw' : 'color',
+                staple: hw.staple,
+                holePunch: hw.holePunch,
+                fold: hw.fold,
+                outputBin: hw.outputBin,
+                borderless: hw.borderless,
+                useGlobalPrinterSettings: true,
+              }
+        ),
+      }));
+      state.addToast({
+        type: 'info',
+        title:
+          state.settings.language === 'fa'
+            ? `تنظیمات سخت‌افزاری «${activePrinter.name}» به کل صف اعمال شد`
+            : `Applied "${activePrinter.name}" hardware profile to all batch jobs`,
+      });
+    },
+
+    moveBatchJob: (id, direction) => {
+      set((s) => {
+        const idx = s.batchQueue.findIndex((b) => b.id === id);
+        if (idx === -1) return s;
+        const nextIdx = direction === 'up' ? idx - 1 : idx + 1;
+        if (nextIdx < 0 || nextIdx >= s.batchQueue.length) return s;
+        const copy = s.batchQueue.slice();
+        const [moved] = copy.splice(idx, 1);
+        copy.splice(nextIdx, 0, moved);
+        return { batchQueue: copy };
+      });
+    },
+
+    duplicateBatchJob: (id) => {
+      set((s) => {
+        const idx = s.batchQueue.findIndex((b) => b.id === id);
+        if (idx === -1) return s;
+        const src = s.batchQueue[idx];
+        const dup: BatchJobItem = {
+          ...src,
+          id: `batch-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          status: 'queued',
+          progressPercent: 0,
+          retryCount: 0,
+          errorMessage: undefined,
+          spoolerJobId: undefined,
+          completedAt: undefined,
+          addedAt: new Date().toISOString(),
+        };
+        const copy = s.batchQueue.slice();
+        copy.splice(idx + 1, 0, dup);
+        return { batchQueue: copy, batchSelectedJobId: dup.id };
+      });
+    },
+
+    clearCompletedBatchJobs: () => {
+      set((s) => {
+        const next = s.batchQueue.filter((b) => b.status !== 'completed');
+        const nextSel = next.some((b) => b.id === s.batchSelectedJobId)
+          ? s.batchSelectedJobId
+          : next[0]?.id ?? null;
+        return { batchQueue: next, batchSelectedJobId: nextSel };
+      });
+    },
+
+    clearAllBatchJobs: () => {
+      set((s) => ({
+        isBatchRunning: false,
+        batchQueue: s.batchQueue.filter((b) => b.status === 'processing'),
+        batchSelectedJobId: null,
+      }));
+    },
+
+    cancelBatchJob: (id) => {
+      canceledBatchJobIds.add(id);
+      set((s) => ({
+        batchQueue: s.batchQueue.map((b) =>
+          b.id === id ? { ...b, status: 'canceled', progressPercent: 0 } : b
+        ),
+      }));
+    },
+
+    runBatchQueue: async () => {
+      const initialState = get();
+      if (initialState.isBatchRunning) return;
+
+      const queuedIds = initialState.batchQueue
+        .filter((b) => b.status === 'queued' || b.status === 'paused')
+        .map((b) => b.id);
+      if (queuedIds.length === 0) return;
+
+      batchRunPaused = false;
+      canceledBatchJobIds.clear();
+      set({ isBatchRunning: true });
+
+      let completedCount = 0;
+      let failedCount = 0;
+      let lastFailureMessage = '';
+
+      for (const jobId of queuedIds) {
+        if (batchRunPaused) break;
+        const currentJob = get().batchQueue.find((b) => b.id === jobId);
+        if (!currentJob || currentJob.status === 'canceled') continue;
+
+        const isFa = get().settings.language === 'fa';
+
+        // Fail cleanly (and never falsely report completion) if a stub job has no document bytes/pages.
+        if (!currentJob.snapshotDocuments?.length || !currentJob.snapshotPages?.length) {
+          failedCount++;
+          lastFailureMessage = isFa
+            ? 'چاپ دسته‌ای برای این آیتم فاقد داده سند و فایل منبع است؛ امکان چاپ وجود ندارد.'
+            : 'Batch item has no source document snapshot to print.';
+          set((s) => ({
+            batchQueue: s.batchQueue.map((item) =>
+              item.id === jobId
+                ? {
+                    ...item,
+                    status: 'failed',
+                    progressPercent: 0,
+                    errorMessage: lastFailureMessage,
+                  }
+                : item
+            ),
+          }));
+          continue;
+        }
+
+        try {
+          set((s) => ({
+            batchQueue: s.batchQueue.map((item) =>
+              item.id === jobId
+                ? {
+                    ...item,
+                    status: 'processing',
+                    progressPercent: 12,
+                    errorMessage: undefined,
+                  }
+                : item
+            ),
+          }));
+
+          const liveState = get();
+          const targetPrinterName =
+            currentJob.printerName ||
+            liveState.selectedPrinterName ||
+            liveState.printers.find((p) => p.isDefault)?.name ||
+            liveState.printers[0]?.name ||
+            '';
+          const matchedPrinter = liveState.printers.find(
+            (p) => p.name.toLowerCase() === targetPrinterName.toLowerCase()
+          );
+
+          const plan = buildBatchExecutionPlan(
+            { ...currentJob, printerName: targetPrinterName },
+            matchedPrinter,
+            liveState.layout,
+            isFa
+          );
+
+          if (!plan.request.printerName) {
+            throw new Error(
+              isFa
+                ? 'هیچ پرینتری برای ارسال کار انتخاب نشده است.'
+                : 'No target printer is selected.'
+            );
+          }
+
+          if (canceledBatchJobIds.has(jobId) || batchRunPaused) continue;
+
+          const imposedPdfBytes = await exportImposedPdf({
+            documents: currentJob.snapshotDocuments,
+            pages: plan.targetPages,
+            layout: plan.layout,
+            effects: plan.effects,
+            watermark: plan.watermark,
+            pageNumbering: plan.pageNumbering,
+            overlays: plan.overlays,
+            allPages: plan.allPages,
+            userName: liveState.settings.userName,
+            onProgress: (pct) => {
+              if (canceledBatchJobIds.has(jobId) || batchRunPaused) return;
+              const mapped = 15 + Math.round(pct * 0.45);
+              set((s) => ({
+                batchQueue: s.batchQueue.map((item) =>
+                  item.id === jobId ? { ...item, progressPercent: mapped } : item
+                ),
+              }));
+            },
+          });
+
+          if (canceledBatchJobIds.has(jobId) || batchRunPaused) continue;
+
+          set((s) => ({
+            batchQueue: s.batchQueue.map((item) =>
+              item.id === jobId ? { ...item, progressPercent: 65 } : item
+            ),
+          }));
+
+          const sheetPngs = await renderPdfToSheetPngs(
+            imposedPdfBytes,
+            plan.request.dpi,
+            (rendered, total) => {
+              if (canceledBatchJobIds.has(jobId) || batchRunPaused) return;
+              const mapped = 65 + Math.round((rendered / Math.max(1, total)) * 25);
+              set((s) => ({
+                batchQueue: s.batchQueue.map((item) =>
+                  item.id === jobId ? { ...item, progressPercent: mapped } : item
+                ),
+              }));
+            },
+            () => canceledBatchJobIds.has(jobId) || batchRunPaused
+          );
+
+          if (canceledBatchJobIds.has(jobId) || batchRunPaused) continue;
+
+          const totalSheetSides = Math.max(
+            1,
+            sheetPngs.length || plan.estimatedSheetSides
+          );
+
+          set((s) => ({
+            batchQueue: s.batchQueue.map((item) =>
+              item.id === jobId ? { ...item, progressPercent: 92 } : item
+            ),
+          }));
+
+          const spoolJob = await ipcBridge.submitPrintJob(
+            plan.request,
+            totalSheetSides,
+            imposedPdfBytes,
+            sheetPngs
+          );
+
+          completedCount++;
+          set((s) => ({
+            batchQueue: s.batchQueue.map((item) =>
+              item.id === jobId
+                ? {
+                    ...item,
+                    status: 'completed',
+                    progressPercent: 100,
+                    spoolerJobId: spoolJob.jobId,
+                    completedAt: new Date().toISOString(),
+                    errorMessage: undefined,
+                  }
+                : item
+            ),
+          }));
+        } catch (err) {
+          if (canceledBatchJobIds.has(jobId)) {
+            set((s) => ({
+              batchQueue: s.batchQueue.map((item) =>
+                item.id === jobId
+                  ? { ...item, status: 'canceled', progressPercent: 0 }
+                  : item
+              ),
+            }));
+          } else if (batchRunPaused) {
+            set((s) => ({
+              batchQueue: s.batchQueue.map((item) =>
+                item.id === jobId
+                  ? { ...item, status: 'paused', progressPercent: 0 }
+                  : item
+              ),
+            }));
+          } else {
+            failedCount++;
+            lastFailureMessage = err instanceof Error ? err.message : String(err);
+            set((s) => ({
+              batchQueue: s.batchQueue.map((item) =>
+                item.id === jobId
+                  ? {
+                      ...item,
+                      status: 'failed',
+                      progressPercent: 0,
+                      errorMessage: lastFailureMessage,
+                    }
+                  : item
+              ),
+            }));
+          }
+        }
+      }
+
+      if (completedCount > 0) {
+        const refreshed = await ipcBridge
+          .listSpoolerJobs(get().selectedPrinterName || undefined)
+          .catch(() => null);
+        if (refreshed) {
+          set({ spoolerJobs: refreshed });
+        }
+      }
+
+      set({ isBatchRunning: false });
+
+      const isFa = get().settings.language === 'fa';
+      if (failedCount > 0) {
+        get().addToast({
+          type: 'error',
+          title:
+            completedCount > 0
+              ? isFa
+                ? `${completedCount} فایل چاپ شد، ${failedCount} فایل ناموفق بود`
+                : `${completedCount} printed, ${failedCount} failed`
+              : lastFailureMessage ||
+                (isFa ? 'ارسال صف چاپ دسته‌ای ناموفق بود' : 'Batch print failed'),
+        });
+      } else if (completedCount > 0 && !batchRunPaused) {
+        get().addToast({
+          type: 'success',
+          title: isFa
+            ? `صف چاپ دسته‌ای تکمیل شد (${completedCount} فایل به پرینتر ارسال گردید)`
+            : `Batch queue completed (${completedCount} job(s) sent)`,
+        });
+      }
     },
 
     pauseBatchQueue: () => {
+      batchRunPaused = true;
       set((s) => ({
         isBatchRunning: false,
         batchQueue: s.batchQueue.map((b) =>
@@ -3374,25 +4127,196 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     removeBatchJob: (id) => {
-      set((s) => ({
-        batchQueue: s.batchQueue.filter((b) => b.id !== id),
-      }));
+      canceledBatchJobIds.add(id);
+      set((s) => {
+        const nextQueue = s.batchQueue.filter((b) => b.id !== id);
+        const nextSelected =
+          s.batchSelectedJobId === id
+            ? nextQueue[0]?.id ?? null
+            : s.batchSelectedJobId;
+        return {
+          batchQueue: nextQueue,
+          batchSelectedJobId: nextSelected,
+        };
+      });
     },
 
     retryFailedBatchJobs: () => {
       set((s) => ({
         batchQueue: s.batchQueue.map((b) =>
-          b.status === 'failed' || b.status === 'paused'
+          b.status === 'failed' || b.status === 'paused' || b.status === 'canceled'
             ? {
                 ...b,
                 status: 'queued',
                 progressPercent: 0,
+                errorMessage: undefined,
                 retryCount: b.retryCount + 1,
               }
             : b
         ),
       }));
       void get().runBatchQueue();
+    },
+
+    refreshVirtualPrinterStatus: async () => {
+      try {
+        const status = await ipcBridge.getVirtualPrinterStatus();
+        set({ virtualPrinterStatus: status });
+      } catch {
+        // Ignore if unavailable outside desktop shell
+      }
+    },
+
+    updateVirtualPrinterConfig: async (patch) => {
+      set({ virtualPrinterBusy: true });
+      try {
+        const nextStatus = await ipcBridge.updateVirtualPrinterConfig(patch);
+        set({ virtualPrinterStatus: nextStatus });
+        const printers = get().printers;
+        const matchVp = printers.find(
+          (p) =>
+            p.name.toLowerCase() ===
+            nextStatus.config.printerName.toLowerCase()
+        );
+        if (matchVp) {
+          set({
+            printers: printers.map((p) =>
+              p.name === matchVp.name
+                ? {
+                    ...p,
+                    activeProfile: {
+                      ...p.activeProfile,
+                      paperSize: nextStatus.config.paperSize,
+                      paperName:
+                        nextStatus.config.paperSize !== 'Custom'
+                          ? nextStatus.config.paperSize
+                          : p.activeProfile.paperName,
+                      paperWidthMm: nextStatus.config.paperWidthMm,
+                      paperHeightMm: nextStatus.config.paperHeightMm,
+                      orientation: nextStatus.config.orientation,
+                      dpi: nextStatus.config.dpi,
+                    },
+                  }
+                : p
+            ),
+          });
+        }
+      } finally {
+        set({ virtualPrinterBusy: false });
+      }
+    },
+
+    installVirtualPrinter: async () => {
+      const isFa = get().settings.language === 'fa';
+      set({ virtualPrinterBusy: true });
+      try {
+        const nextStatus = await ipcBridge.installVirtualPrinter();
+        set({ virtualPrinterStatus: nextStatus });
+        if (nextStatus.installedInWindows) {
+          await get().retryPrinters();
+          get().addToast({
+            type: 'success',
+            title: isFa
+              ? `پرینتر مجازی «${nextStatus.config.printerName}» در ویندوز نصب شد`
+              : `Installed "${nextStatus.config.printerName}" in Windows`,
+            message: isFa
+              ? 'اکنون از هر برنامه ویندوز می‌توانید روی این پرینتر چاپ بگیرید تا خودکار وارد PrintStudio Pro شود.'
+              : 'You can now print from any Windows app to this printer to import directly into PrintStudio Pro.',
+          });
+        } else if (nextStatus.lastError) {
+          get().addToast({
+            type: 'error',
+            title: isFa ? 'نصب پرینتر مجازی ناموفق بود' : 'Virtual Printer installation failed',
+            message: nextStatus.lastError,
+          });
+        }
+      } catch (err) {
+        get().addToast({
+          type: 'error',
+          title: isFa ? 'نصب پرینتر مجازی ناموفق بود' : 'Virtual Printer installation failed',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        set({ virtualPrinterBusy: false });
+      }
+    },
+
+    uninstallVirtualPrinter: async () => {
+      const isFa = get().settings.language === 'fa';
+      set({ virtualPrinterBusy: true });
+      try {
+        const nextStatus = await ipcBridge.uninstallVirtualPrinter();
+        set({ virtualPrinterStatus: nextStatus });
+        await get().retryPrinters();
+        get().addToast({
+          type: 'info',
+          title: isFa
+            ? 'پرینتر مجازی از ویندوز حذف شد'
+            : 'Windows Virtual Printer uninstalled',
+        });
+      } catch (err) {
+        get().addToast({
+          type: 'error',
+          title: isFa ? 'حذف پرینتر مجازی ناموفق بود' : 'Virtual Printer uninstall failed',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        set({ virtualPrinterBusy: false });
+      }
+    },
+
+    handleIncomingVirtualPrinterJob: async (payload) => {
+      if (!payload?.bytes || payload.bytes.byteLength === 0) return;
+      const state = get();
+      const isFa = state.settings.language === 'fa';
+      const cfg = state.virtualPrinterStatus?.config;
+
+      set((s) => ({
+        virtualPrinterStatus: s.virtualPrinterStatus
+          ? {
+              ...s.virtualPrinterStatus,
+              recentJobs: [payload.job, ...s.virtualPrinterStatus.recentJobs].slice(0, 25),
+            }
+          : s.virtualPrinterStatus,
+      }));
+
+      if (cfg && !cfg.autoImportToStudio) {
+        state.addToast({
+          type: 'info',
+          title: isFa
+            ? `فایل «${payload.fileName}» از پرینتر مجازی دریافت شد`
+            : `Captured "${payload.fileName}" from Virtual Printer`,
+        });
+        return;
+      }
+
+      const rawCopy = new Uint8Array(payload.bytes.byteLength);
+      rawCopy.set(payload.bytes);
+      const file = new File([rawCopy], payload.fileName, {
+        type: payload.mimeType || 'application/pdf',
+      });
+      if (typeof (file as { arrayBuffer?: unknown }).arrayBuffer !== 'function') {
+        Object.defineProperty(file, 'arrayBuffer', {
+          value: async () =>
+            rawCopy.buffer.slice(rawCopy.byteOffset, rawCopy.byteOffset + rawCopy.byteLength),
+        });
+      }
+
+      await state.importFiles([file]);
+
+      if (cfg?.switchToStudioOnReceive ?? true) {
+        set({ appMode: 'studio' });
+      }
+
+      state.addToast({
+        type: 'success',
+        title: isFa
+          ? `فایل «${payload.fileName}» از پرینتر مجازی وارد استودیو شد`
+          : `Added "${payload.fileName}" from Virtual Printer to workspace`,
+        message: isFa
+          ? `${payload.job.paperSize} • ${payload.job.orientation === 'landscape' ? 'افقی' : 'عمودی'} • ${payload.job.dpi} DPI`
+          : `${payload.job.paperSize} · ${payload.job.orientation} · ${payload.job.dpi} DPI`,
+      });
     },
 
     setActiveRibbonTab: (tab) => set({ activeRibbonTab: tab, workspaceDrawer: null }),
@@ -3433,6 +4357,18 @@ export const useAppStore = create<AppState>((set, get) => {
     triggerFitPage: () => set((state) => ({ fitPageNonce: state.fitPageNonce + 1 })),
     setWorkspaceDrawer: (drawer) => set({ workspaceDrawer: drawer }),
     setSidebarTab: (tab) => set({ sidebarTab: tab }),
+    setSidebarWidthPx: (widthPx) => {
+      if (!Number.isFinite(widthPx)) return;
+      const clamped = Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, Math.round(widthPx)));
+      writeStoredNumber('printstudio:sidebar-width-px', clamped);
+      set({ sidebarWidthPx: clamped });
+    },
+    setSidebarThumbnailSizePx: (sizePx) => {
+      if (!Number.isFinite(sizePx)) return;
+      const clamped = Math.max(THUMB_SIZE_MIN, Math.min(THUMB_SIZE_MAX, Math.round(sizePx)));
+      writeStoredNumber('printstudio:sidebar-thumb-px', clamped);
+      set({ sidebarThumbnailSizePx: clamped });
+    },
     setActiveSheetIndex: (idx) => set({ activeSheetIndex: Math.max(0, idx) }),
     setZoomPercent: (zoom) =>
       set({ zoomPercent: Math.max(5, Math.min(400, Math.round(zoom))) }),
@@ -3451,6 +4387,7 @@ export const useAppStore = create<AppState>((set, get) => {
       if (modal === 'split') set({ showSplitModal: open });
       if (modal === 'pageSetup') set({ showPageSetupModal: open });
       if (modal === 'tour') set({ showOnboardingTour: open });
+      if (modal === 'shortcuts') set({ showShortcutsModal: open });
     },
     openPageSetup: (tab = 'margins') => {
       set({ pageSetupInitialTab: tab, showPageSetupModal: true });

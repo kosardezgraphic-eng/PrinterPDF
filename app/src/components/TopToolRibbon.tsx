@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   BookOpen,
@@ -97,7 +97,37 @@ export const TopToolRibbon: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pictureInputRef = useRef<HTMLInputElement>(null);
+  const arrayMenuRef = useRef<HTMLDivElement>(null);
   const [arrayMenuOpen, setArrayMenuOpen] = useState(false);
+  const [customArrayCount, setCustomArrayCount] = useState('3');
+
+  useEffect(() => {
+    const onAddFilesTrigger = () => {
+      fileInputRef.current?.click();
+    };
+    window.addEventListener('printstudio:add-files', onAddFilesTrigger);
+    return () => window.removeEventListener('printstudio:add-files', onAddFilesTrigger);
+  }, []);
+
+  useEffect(() => {
+    if (!arrayMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (arrayMenuRef.current && !arrayMenuRef.current.contains(e.target as Node)) {
+        setArrayMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setArrayMenuOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [arrayMenuOpen]);
 
   const lang = settings.language;
   const isFa = lang === 'fa';
@@ -226,7 +256,11 @@ export const TopToolRibbon: React.FC = () => {
 
       {/* CLUSTER 1 (Start): Reset, SaveSheetProfile, & Document Quick Controls */}
       <div className="flex items-center gap-1.5 shrink-0">
-        <Tooltip label={isFa ? 'بازگردانی تمام تنظیمات به پیش‌فرض' : 'Reset all sheet settings to defaults'} side="bottom">
+        <Tooltip
+          label={isFa ? 'بازگردانی تمام تنظیمات به پیش‌فرض' : 'Reset all sheet settings to defaults'}
+          shortcut="Alt+F6"
+          side="bottom"
+        >
           <button
             type="button"
             data-ribbon-action="reset"
@@ -245,11 +279,12 @@ export const TopToolRibbon: React.FC = () => {
         {/* Document quick controls: 2 compact rows */}
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-1">
-            <Tooltip label={labels.add} side="bottom">
+            <Tooltip label={labels.add} shortcut="Ctrl+O" side="bottom">
               <button
                 type="button"
                 data-ribbon-action="add-files"
                 aria-label={labels.add}
+                title={`${labels.add} (Ctrl+O)`}
                 onClick={() => fileInputRef.current?.click()}
                 className={iconTileClass(false)}
               >
@@ -257,11 +292,12 @@ export const TopToolRibbon: React.FC = () => {
               </button>
             </Tooltip>
 
-            <Tooltip label={labels.blankPage} side="bottom">
+            <Tooltip label={labels.blankPage} shortcut="Shift+Insert" side="bottom">
               <button
                 type="button"
                 data-ribbon-action="blank-page"
                 aria-label={labels.blankPage}
+                title={`${labels.blankPage} (Shift+Insert)`}
                 onClick={() => insertBlankPagesAfter(targetPageIds)}
                 className={iconTileClass(false)}
               >
@@ -269,11 +305,12 @@ export const TopToolRibbon: React.FC = () => {
               </button>
             </Tooltip>
 
-            <div className="relative flex items-center">
-              <Tooltip label={labels.duplicatePage} side="bottom">
+            <div ref={arrayMenuRef} className="relative flex items-center">
+              <Tooltip label={labels.duplicatePage} shortcut="Ctrl+D" side="bottom">
                 <button
                   type="button"
                   data-ribbon-action="duplicate-page"
+                  title={`${labels.duplicatePage} (Ctrl+D)`}
                   disabled={targetPageIds.length === 0}
                   onClick={() => duplicatePages(targetPageIds)}
                   className="flex h-8 items-center gap-1 rounded-s-md border border-slate-200 bg-slate-50 px-2 text-[11px] font-medium text-slate-700 hover:bg-white disabled:opacity-45 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer whitespace-nowrap"
@@ -284,7 +321,10 @@ export const TopToolRibbon: React.FC = () => {
               </Tooltip>
               <button
                 type="button"
-                aria-label={isFa ? 'تکرار آرایه‌ای' : 'Make array copies'}
+                data-ribbon-action="duplicate-array-menu"
+                aria-label={isFa ? 'تکرار آرایه‌ای و تعداد سفارشی' : 'Array copies & custom count'}
+                aria-expanded={arrayMenuOpen}
+                title={isFa ? 'انتخاب تعداد تکرار یا عدد سفارشی' : 'Choose repeat presets or custom count'}
                 disabled={targetPageIds.length === 0}
                 onClick={() => setArrayMenuOpen((v) => !v)}
                 className="flex h-8 items-center justify-center rounded-e-md border border-s-0 border-slate-200 bg-slate-50 px-1 text-slate-600 hover:bg-white disabled:opacity-45 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer"
@@ -292,11 +332,15 @@ export const TopToolRibbon: React.FC = () => {
                 <ChevronDown className="h-3 w-3" aria-hidden="true" />
               </button>
               {arrayMenuOpen && (
-                <div className="absolute top-full start-0 z-50 mt-1 w-32 rounded-lg border border-slate-200 bg-white p-1 text-xs shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                <div
+                  data-duplicate-array-menu
+                  className="absolute top-full start-0 z-50 mt-1 w-48 rounded-lg border border-slate-200 bg-white p-1.5 text-xs shadow-xl dark:border-slate-700 dark:bg-slate-900"
+                >
                   {[2, 4, 8, 16].map((cnt) => (
                     <button
                       key={cnt}
                       type="button"
+                      data-duplicate-preset={cnt}
                       onClick={() => {
                         makePagesArray(targetPageIds, cnt);
                         setArrayMenuOpen(false);
@@ -309,17 +353,52 @@ export const TopToolRibbon: React.FC = () => {
                       </span>
                     </button>
                   ))}
+                  <div className="my-1 h-px bg-slate-200 dark:bg-slate-800" />
+                  <form
+                    className="flex flex-col gap-1.5 px-1 py-1"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const parsed = Number.parseInt(customArrayCount, 10);
+                      const clamped = Number.isFinite(parsed) ? Math.max(2, Math.min(100, parsed)) : 2;
+                      makePagesArray(targetPageIds, clamped);
+                      setArrayMenuOpen(false);
+                    }}
+                  >
+                    <label className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                      {isFa ? 'تعداد سفارشی (۲ تا ۱۰۰):' : 'Custom count (2–100):'}
+                    </label>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={2}
+                        max={100}
+                        data-duplicate-custom-input
+                        aria-label={isFa ? 'تعداد سفارشی تکثیر' : 'Custom duplicate count'}
+                        value={customArrayCount}
+                        onChange={(e) => setCustomArrayCount(e.target.value)}
+                        className="h-7 min-w-0 flex-1 rounded border border-slate-300 bg-white px-2 text-xs font-mono text-slate-900 focus:outline-none focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                      />
+                      <button
+                        type="submit"
+                        data-duplicate-custom-apply
+                        className="h-7 shrink-0 rounded bg-sky-600 px-2.5 text-[11px] font-bold text-white hover:bg-sky-500 cursor-pointer"
+                      >
+                        {isFa ? 'اعمال' : 'Apply'}
+                      </button>
+                    </div>
+                  </form>
                 </div>
               )}
             </div>
           </div>
 
           <div className="flex items-center gap-1">
-            <Tooltip label={labels.closeAll} side="bottom">
+            <Tooltip label={labels.closeAll} shortcut="Ctrl+W" side="bottom">
               <button
                 type="button"
                 data-ribbon-action="close-all"
                 aria-label={labels.closeAll}
+                title={`${labels.closeAll} (Ctrl+W)`}
                 disabled={documents.length === 0 && pages.length === 0}
                 onClick={() => clearWorkspace()}
                 className={`${iconTileClass(false)} disabled:opacity-45`}
@@ -328,11 +407,12 @@ export const TopToolRibbon: React.FC = () => {
               </button>
             </Tooltip>
 
-            <Tooltip label={labels.deletePage} side="bottom">
+            <Tooltip label={labels.deletePage} shortcut="Delete" side="bottom">
               <button
                 type="button"
                 data-ribbon-action="delete-page"
                 aria-label={labels.deletePage}
+                title={`${labels.deletePage} (Delete)`}
                 disabled={targetPageIds.length === 0}
                 onClick={() => deletePages(targetPageIds)}
                 className={`${iconTileClass(false)} disabled:opacity-45`}
@@ -549,40 +629,54 @@ export const TopToolRibbon: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1">
-            <button
-              type="button"
-              data-snap-toggle
-              aria-pressed={snapEnabled}
-              title={isFa ? 'فعال/غیرفعال کردن حالت آهن‌ربایی (Snap)' : 'Toggle magnetic snapping to guides and edges'}
-              onClick={() => setSnapEnabled(!snapEnabled)}
-              className={labeledMiniButtonClass(snapEnabled)}
+            <Tooltip
+              label={isFa ? 'فعال/غیرفعال کردن حالت آهن‌ربایی' : 'Toggle magnetic snapping to guides and edges'}
+              shortcut="Ctrl+M"
+              side="bottom"
             >
-              <Magnet className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" aria-hidden="true" />
-              <span>{labels.snap}</span>
-            </button>
+              <button
+                type="button"
+                data-snap-toggle
+                aria-pressed={snapEnabled}
+                title={isFa ? 'فعال/غیرفعال کردن حالت آهن‌ربایی (Ctrl+M)' : 'Toggle magnetic snapping (Ctrl+M)'}
+                onClick={() => setSnapEnabled(!snapEnabled)}
+                className={labeledMiniButtonClass(snapEnabled)}
+              >
+                <Magnet className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" aria-hidden="true" />
+                <span>{labels.snap}</span>
+              </button>
+            </Tooltip>
 
-            <button
-              type="button"
-              data-smart-guides-toggle
-              aria-pressed={smartGuidesEnabled}
-              title={isFa ? 'خطوط راهنمای بنفش (وسط، یک‌سوم و تقسیم فاصله)' : 'Toggle purple smart guides'}
-              onClick={() => setSmartGuidesEnabled(!smartGuidesEnabled)}
-              className={labeledMiniButtonClass(smartGuidesEnabled)}
+            <Tooltip
+              label={isFa ? 'خطوط راهنمای بنفش (وسط، یک‌سوم و تقسیم فاصله)' : 'Toggle purple smart guides'}
+              side="bottom"
             >
-              <Sparkles className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" aria-hidden="true" />
-              <span>{labels.smartGuides}</span>
-            </button>
+              <button
+                type="button"
+                data-smart-guides-toggle
+                aria-pressed={smartGuidesEnabled}
+                title={isFa ? 'خطوط راهنمای بنفش (وسط، یک‌سوم و تقسیم فاصله)' : 'Toggle purple smart guides'}
+                onClick={() => setSmartGuidesEnabled(!smartGuidesEnabled)}
+                className={labeledMiniButtonClass(smartGuidesEnabled)}
+              >
+                <Sparkles className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" aria-hidden="true" />
+                <span>{labels.smartGuides}</span>
+              </button>
+            </Tooltip>
 
-            <button
-              type="button"
-              data-ribbon-tool="rulers"
-              aria-pressed={showRulers}
-              onClick={() => setShowRulers(!showRulers)}
-              className={labeledMiniButtonClass(showRulers)}
-            >
-              <Scaling className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />
-              <span>{labels.rulers}</span>
-            </button>
+            <Tooltip label={labels.rulers} shortcut="Ctrl+G" side="bottom">
+              <button
+                type="button"
+                data-ribbon-tool="rulers"
+                aria-pressed={showRulers}
+                title={`${labels.rulers} (Ctrl+G)`}
+                onClick={() => setShowRulers(!showRulers)}
+                className={labeledMiniButtonClass(showRulers)}
+              >
+                <Scaling className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+                <span>{labels.rulers}</span>
+              </button>
+            </Tooltip>
           </div>
         </div>
 
@@ -601,6 +695,30 @@ export const TopToolRibbon: React.FC = () => {
           >
             <Hash className="h-4 w-4 text-slate-600 dark:text-slate-300" aria-hidden="true" />
             <span className="leading-tight text-center">{labels.pageNumber}</span>
+          </button>
+        </Tooltip>
+
+        {/* Auto-Pack by Image Dimensions quick tile */}
+        <Tooltip label={labels.autoPack} side="bottom">
+          <button
+            type="button"
+            data-ribbon-tool="auto-pack"
+            aria-label={labels.autoPack}
+            aria-pressed={isToolActive('layout')}
+            onClick={() => {
+              selectTool('layout');
+              requestAnimationFrame(() => {
+                document.querySelector<HTMLInputElement>('[data-auto-pack-width]')?.focus();
+              });
+            }}
+            className={`flex h-[68px] min-w-16 flex-col items-center justify-center gap-1 rounded-md border px-2 text-[10px] font-medium transition-colors cursor-pointer shrink-0 ${
+              isToolActive('layout')
+                ? 'border-sky-500 bg-sky-50 text-sky-700 dark:border-sky-400 dark:bg-sky-500/20 dark:text-sky-200'
+                : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+            }`}
+          >
+            <Grid2x2Plus className="h-4 w-4 text-sky-600 dark:text-sky-400" aria-hidden="true" />
+            <span className="leading-tight text-center">{isFa ? 'چیدمان ابعاد' : 'Auto-Pack'}</span>
           </button>
         </Tooltip>
 
@@ -725,11 +843,12 @@ export const TopToolRibbon: React.FC = () => {
               </button>
             </Tooltip>
 
-            <Tooltip label={labels.fitPage} side="bottom">
+            <Tooltip label={labels.fitPage} shortcut="Ctrl+0" side="bottom">
               <button
                 type="button"
                 data-ribbon-tool="fit-page"
                 aria-label={labels.fitPage}
+                title={`${labels.fitPage} (Ctrl+0)`}
                 onClick={() => triggerFitPage()}
                 className={iconTileClass(false)}
               >
@@ -754,27 +873,32 @@ export const TopToolRibbon: React.FC = () => {
 
       {/* CLUSTER 3 (End): Save As PDF File, View PDF File, Image Quality & Compression */}
       <div className="flex items-center gap-1.5 border-s border-slate-200 ps-2 dark:border-slate-700 shrink-0">
-        <button
-          type="button"
-          data-ribbon-action="save-as-pdf"
-          disabled={isExportingPdf}
-          onClick={() => void exportMergedOrImposedPdf(false)}
-          className="flex h-[68px] w-16 flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-1.5 text-slate-700 hover:border-slate-300 hover:bg-white disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
-        >
-          <FileDown className="h-6 w-6 text-rose-600 dark:text-rose-400" aria-hidden="true" />
-          <span className="text-[10px] font-semibold leading-tight text-center">{labels.saveAsPdf}</span>
-        </button>
+        <Tooltip label={labels.saveAsPdf} shortcut="Ctrl+S" side="bottom">
+          <button
+            type="button"
+            data-ribbon-action="save-as-pdf"
+            title={`${labels.saveAsPdf} (Ctrl+S)`}
+            disabled={isExportingPdf}
+            onClick={() => void exportMergedOrImposedPdf(false)}
+            className="flex h-[68px] w-16 flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-1.5 text-slate-700 hover:border-slate-300 hover:bg-white disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+          >
+            <FileDown className="h-6 w-6 text-rose-600 dark:text-rose-400" aria-hidden="true" />
+            <span className="text-[10px] font-semibold leading-tight text-center">{labels.saveAsPdf}</span>
+          </button>
+        </Tooltip>
 
-        <button
-          type="button"
-          data-ribbon-action="view-pdf"
-          disabled={isGeneratingPdfPreview}
-          onClick={() => void openPdfPreviewModal()}
-          className="flex h-[68px] w-16 flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-1.5 text-slate-700 hover:border-slate-300 hover:bg-white disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
-        >
-          <FileSearch className="h-6 w-6 text-red-600 dark:text-red-400" aria-hidden="true" />
-          <span className="text-[10px] font-semibold leading-tight text-center">{labels.viewPdf}</span>
-        </button>
+        <Tooltip label={labels.viewPdf} side="bottom">
+          <button
+            type="button"
+            data-ribbon-action="view-pdf"
+            disabled={isGeneratingPdfPreview}
+            onClick={() => void openPdfPreviewModal()}
+            className="flex h-[68px] w-16 flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-1.5 text-slate-700 hover:border-slate-300 hover:bg-white disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+          >
+            <FileSearch className="h-6 w-6 text-red-600 dark:text-red-400" aria-hidden="true" />
+            <span className="text-[10px] font-semibold leading-tight text-center">{labels.viewPdf}</span>
+          </button>
+        </Tooltip>
 
         <div className="flex flex-col gap-1.5">
           <select

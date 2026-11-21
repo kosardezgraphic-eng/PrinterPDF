@@ -16,13 +16,15 @@ import {
   Scissors,
   Layers,
   SlidersHorizontal,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { t } from '../i18n/translations';
 import { computeImpositionSheets } from '../engine/layoutEngine';
 import { effectiveInvert } from '../engine/effectsPipeline';
 import { PageThumbnail } from './PageThumbnail';
-import type { ComputedCellPlacement, PageItem, SourceDocument } from '@shared/models';
+import type { ComputedCellPlacement, ComputedSheetSide, PageItem, SourceDocument } from '@shared/models';
 import { formatLocalizedNumber } from '../i18n/shamsi';
 
 interface ContextMenuState {
@@ -38,6 +40,8 @@ export const SidebarPages: React.FC = () => {
     bookmarks,
     effects,
     layout,
+    watermark,
+    pageNumbering,
     sidebarReveal,
     settings,
     sidebarTab,
@@ -62,6 +66,9 @@ export const SidebarPages: React.FC = () => {
     toggleDocumentCollapse,
     togglePagesInvertOverride,
     exportMergedOrImposedPdf,
+    sidebarWidthPx,
+    sidebarThumbnailSizePx,
+    setSidebarThumbnailSizePx,
   } = useAppStore();
 
   const dragIdsRef = useRef<{ids:string[]; set:Set<string>} | null>(null);
@@ -107,22 +114,27 @@ export const SidebarPages: React.FC = () => {
 
   const listRef = useRef<HTMLDivElement>(null);
   const thumbnailRefs = useRef(new Map<string, HTMLDivElement>());
+  const pageIndices = useMemo(() => new Map(pages.map((p, index) => [p.id, index + 1])), [pages]);
   const placements = useMemo(() => {
-    const byPage = new Map<string, {cell:ComputedCellPlacement; width:number; height:number}>();
-    const byOccurrence = new Map<string, {cell:ComputedCellPlacement; width:number; height:number}>();
-    const add = (sheetPages: typeof pages) => {
-      for (const sheet of computeImpositionSheets(sheetPages, layout)) {
+    type PlacementInfo = { cell: ComputedCellPlacement; width: number; height: number; sheet: ComputedSheetSide; totalSheets: number };
+    const byPage = new Map<string, PlacementInfo>();
+    const byOccurrence = new Map<string, PlacementInfo>();
+    const add = (sheetPages: typeof pages, totalOverride?: number) => {
+      const sheets = computeImpositionSheets(sheetPages, layout);
+      const totalSheets = totalOverride ?? Math.max(1, sheets.length);
+      for (const sheet of sheets) {
         for (const cell of sheet.cells) if (cell.page) {
-          const placement = { cell, width:sheet.widthMm, height:sheet.heightMm };
+          const placement: PlacementInfo = { cell, width: sheet.widthMm, height: sheet.heightMm, sheet, totalSheets };
           if (!byPage.has(cell.page.id)) byPage.set(cell.page.id, placement);
           if (cell.occurrenceKey) byOccurrence.set(cell.occurrenceKey, placement);
         }
       }
+      return sheets.length;
     };
-    add(pages);
+    const realTotal = add(pages);
     // Excluded pages have no real placement; preview them using the same layout rules.
     const excluded = pages.filter(page => !page.selectedForPrint);
-    if (excluded.length) add(excluded.map(page => ({ ...page, selectedForPrint: true })));
+    if (excluded.length) add(excluded.map(page => ({ ...page, selectedForPrint: true })), Math.max(1, realTotal));
     return { byPage, byOccurrence };
   }, [pages, layout]);
 
@@ -174,9 +186,11 @@ export const SidebarPages: React.FC = () => {
 
   return (
     <aside
+      data-sidebar-pages
       dir={lang === 'fa' ? 'rtl' : 'ltr'}
       onClick={() => setContextMenu(null)}
-      className="flex w-72 shrink-0 flex-col border-r border-slate-200 bg-slate-100 text-slate-800 select-none dark:border-slate-800 dark:bg-slate-900/95 dark:text-slate-200"
+      style={{ width: `${sidebarWidthPx}px` }}
+      className="flex shrink-0 flex-col border-r border-slate-200 bg-slate-100 text-slate-800 select-none dark:border-slate-800 dark:bg-slate-900/95 dark:text-slate-200"
     >
       {/* Sidebar Tabs: Pages | Bookmarks */}
       <div className="flex border-b border-slate-200 bg-slate-200/60 p-1.5 gap-1 dark:border-slate-800 dark:bg-slate-950/60">
@@ -229,7 +243,7 @@ export const SidebarPages: React.FC = () => {
               <button
                 type="button"
                 onClick={() => selectAllForPrint(true)}
-                title={tr.sidebar.selectAll}
+                title={`${tr.sidebar.selectAll} (Ctrl+A)`}
                 className="rounded border border-slate-200 bg-white px-1.5 py-1 font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
               >
                 {lang === 'fa' ? 'همه' : 'All'}
@@ -275,7 +289,7 @@ export const SidebarPages: React.FC = () => {
                     90
                   )
                 }
-                title={tr.sidebar.rotateRight}
+                title={`${tr.sidebar.rotateRight} (Ctrl+R)`}
                 className="rounded border border-slate-200 bg-white p-1 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
               >
                 <RotateCw className="h-3.5 w-3.5" />
@@ -283,7 +297,7 @@ export const SidebarPages: React.FC = () => {
               <button
                 type="button"
                 onClick={() => duplicatePages(highlightedIds)}
-                title={tr.sidebar.duplicate}
+                title={`${tr.sidebar.duplicate} (Ctrl+D)`}
                 className="rounded border border-slate-200 bg-white p-1 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
               >
                 <Copy className="h-3.5 w-3.5" />
@@ -309,12 +323,49 @@ export const SidebarPages: React.FC = () => {
               <button
                 type="button"
                 onClick={() => deletePages(highlightedIds)}
-                title={tr.sidebar.deleteSelected}
+                title={`${tr.sidebar.deleteSelected} (Delete)`}
                 className="rounded border border-rose-200 bg-rose-50 p-1 text-rose-600 hover:bg-rose-100 dark:border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-400 dark:hover:bg-rose-500/25 cursor-pointer"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </div>
+          </div>
+
+          {/* Thumbnail Size Control */}
+          <div data-thumbnail-zoom-controls className="flex items-center gap-1.5 border-b border-slate-200 bg-white/50 px-2.5 py-1 text-[10px] text-slate-600 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300">
+            <button
+              type="button"
+              onClick={() => setSidebarThumbnailSizePx(sidebarThumbnailSizePx - 12)}
+              disabled={sidebarThumbnailSizePx <= 72}
+              aria-label={lang === 'fa' ? 'کوچک کردن تصاویر بندانگشتی' : 'Smaller thumbnails'}
+              title={lang === 'fa' ? 'کوچک کردن تصاویر بندانگشتی' : 'Smaller thumbnails'}
+              className="rounded border border-slate-200 bg-white p-0.5 text-slate-700 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+            >
+              <ZoomOut className="h-3 w-3" />
+            </button>
+            <input
+              type="range"
+              min={72}
+              max={240}
+              step={4}
+              value={sidebarThumbnailSizePx}
+              aria-label={lang === 'fa' ? 'اندازه تصاویر بندانگشتی' : 'Thumbnail size'}
+              onChange={(e) => setSidebarThumbnailSizePx(Number(e.target.value))}
+              className="min-w-0 flex-1 accent-sky-500 cursor-pointer"
+            />
+            <button
+              type="button"
+              onClick={() => setSidebarThumbnailSizePx(sidebarThumbnailSizePx + 12)}
+              disabled={sidebarThumbnailSizePx >= 240}
+              aria-label={lang === 'fa' ? 'بزرگ کردن تصاویر بندانگشتی' : 'Larger thumbnails'}
+              title={lang === 'fa' ? 'بزرگ کردن تصاویر بندانگشتی' : 'Larger thumbnails'}
+              className="rounded border border-slate-200 bg-white p-0.5 text-slate-700 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+            >
+              <ZoomIn className="h-3 w-3" />
+            </button>
+            <span className="w-9 text-end font-mono tabular-nums text-[10px] text-slate-500 dark:text-slate-400">
+              {sidebarThumbnailSizePx}px
+            </span>
           </div>
 
           <div className="border-b border-slate-200 bg-slate-50 px-3 py-1 text-[10px] text-slate-500 dark:border-slate-800 dark:bg-transparent dark:text-slate-400" aria-live="polite">
@@ -369,7 +420,12 @@ export const SidebarPages: React.FC = () => {
 
                   {/* Thumbnails inside Document Group */}
                   {!doc?.collapsed && (
-                    <div className="grid grid-cols-2 gap-2 p-2">
+                    <div
+                      className="grid gap-2 p-2"
+                      style={{
+                        gridTemplateColumns: `repeat(auto-fill, minmax(${Math.max(88, sidebarThumbnailSizePx + 14)}px, 1fr))`,
+                      }}
+                    >
                       {docPages.map(({ page, globalIdx }) => {
                         const placement = sidebarReveal?.pageId === page.id && sidebarReveal.occurrenceKey
                           ? placements.byOccurrence.get(sidebarReveal.occurrenceKey) ?? placements.byPage.get(page.id)
@@ -483,8 +539,25 @@ export const SidebarPages: React.FC = () => {
                               </div>
                             </div>
 
-                            {/* Thumbnail mirrors the actual cell placement, crop, rotation and effects. */}
-                            {placement && <PageThumbnail page={page} cell={placement.cell} sheetWidth={placement.width} sheetHeight={placement.height} effects={effects} />}
+                            {/* Thumbnail mirrors the actual cell placement, crop, rotation, effects, eraser, overlays and watermarks. */}
+                            {placement && (
+                              <PageThumbnail
+                                page={page}
+                                cell={placement.cell}
+                                sheetWidth={placement.width}
+                                sheetHeight={placement.height}
+                                effects={effects}
+                                sizePx={sidebarThumbnailSizePx}
+                                sheet={placement.sheet}
+                                totalSheets={placement.totalSheets}
+                                pages={pages}
+                                pageIndices={pageIndices}
+                                layout={layout}
+                                watermark={watermark}
+                                pageNumbering={pageNumbering}
+                                userName={settings.userName}
+                              />
+                            )}
 
                             {/* Bottom Info */}
                             <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 tabular-nums">

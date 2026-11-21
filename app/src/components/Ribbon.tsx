@@ -32,8 +32,10 @@ import {
   Eraser,
   SquareDashedMousePointer,
   Pipette,
+  Boxes,
 } from 'lucide-react';
 import { MatrixSizeFields } from './MatrixSizeFields';
+import { AutoPackPanel } from './AutoPackPanel';
 import { SegmentedControl } from './SegmentedControl';
 import { CrossMarginWidget } from './CrossMarginWidget';
 import { SettingsPresetMenu } from './SettingsPresets';
@@ -43,6 +45,7 @@ import { useAppStore, type RibbonTabId } from '../store/useAppStore';
 import { resolvePrinterMinMargins } from '../engine/sheetInteraction';
 import { getSheetDimensionsMm } from '../engine/layoutEngine';
 import { t } from '../i18n/translations';
+import { formatLocalizedNumber } from '../i18n/shamsi';
 import {
   STANDARD_PAPER_SIZES,
   type DuplexMode,
@@ -125,6 +128,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
     setSmartGuidesEnabled,
     setLoupeEnabled,
     setTransparentMode,
+    setAppMode,
   } = useAppStore();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -307,6 +311,8 @@ export const Ribbon: React.FC<RibbonProps> = ({
           {activeRibbonTab === 'layout' && (
             <>
               <MatrixSizeFields rows={layout.rows} cols={layout.cols} language={lang} onChange={setNUpMatrix} />
+
+              <AutoPackPanel compact={!panelMode} />
 
               {/* Group D2: Compact placement controls */}
               <div className="flex min-w-0 flex-col gap-2 border-e border-slate-200 pe-3 dark:border-slate-800">
@@ -671,6 +677,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
               {/* Scope & Reset */}
               <div className="flex flex-wrap items-center gap-2">
                 <select
+                  aria-label={lang === 'fa' ? 'دامنه افکت‌ها' : 'Effects scope'}
                   value={effects.scope}
                   onChange={(e) =>
                     updateEffects({ scope: e.target.value as 'all' | 'selected' })
@@ -684,6 +691,54 @@ export const Ribbon: React.FC<RibbonProps> = ({
                     {lang === 'fa' ? 'فقط صفحات انتخاب‌شده' : 'Selected Pages Only'}
                   </option>
                 </select>
+                {effects.scope === 'selected' && (() => {
+                  const targetSet = new Set(
+                    effects.targetPageIds !== undefined
+                      ? effects.targetPageIds
+                      : pages.filter((p) => p.isHighlighted).map((p) => p.id)
+                  );
+                  const targetNumbers = pages
+                    .map((p, idx) => (targetSet.has(p.id) ? idx + 1 : -1))
+                    .filter((n) => n > 0);
+                  const highlightedIds = pages.filter((p) => p.isHighlighted).map((p) => p.id);
+                  return (
+                    <div className="flex flex-wrap items-center gap-1.5" data-effects-targets>
+                      <span className="rounded border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-medium text-sky-800 dark:border-sky-800 dark:bg-sky-950/60 dark:text-sky-200">
+                        {targetNumbers.length > 0
+                          ? (lang === 'fa'
+                              ? `صفحات هدف: ${targetNumbers.map((n) => `#${formatLocalizedNumber(n, lang)}`).join('، ')}`
+                              : `Targets: ${targetNumbers.map((n) => `#${n}`).join(', ')}`)
+                          : (lang === 'fa' ? 'هیچ صفحه‌ای هدف نیست' : 'No target pages')}
+                      </span>
+                      <button
+                        type="button"
+                        data-effects-retarget
+                        disabled={highlightedIds.length === 0}
+                        onClick={() => updateEffects({ targetPageIds: highlightedIds }, true)}
+                        className="rounded-lg border border-sky-300 bg-white px-2 py-1 text-[11px] font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-40 dark:border-sky-700 dark:bg-slate-800 dark:text-sky-300 dark:hover:bg-slate-700 cursor-pointer"
+                      >
+                        {lang === 'fa' ? 'اعمال روی انتخاب فعلی' : 'Use selected thumbnails'}
+                      </button>
+                    </div>
+                  );
+                })()}
+                {effects.invert && (
+                  <select
+                    aria-label={lang === 'fa' ? 'روش خروجی PDF برای معکوس رنگ' : 'PDF invert method'}
+                    value={effects.invertPdfStrategy}
+                    onChange={(e) =>
+                      updateEffects({ invertPdfStrategy: e.target.value as 'vector-blend' | 'raster' }, true)
+                    }
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-[11px] text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                  >
+                    <option value="vector-blend">
+                      {lang === 'fa' ? 'PDF: برداری (Vector)' : 'PDF: Vector Blend'}
+                    </option>
+                    <option value="raster">
+                      {lang === 'fa' ? 'PDF: تصویری (Raster 300 DPI)' : 'PDF: Raster Bake'}
+                    </option>
+                  </select>
+                )}
                 <button
                   type="button"
                   onClick={resetEffects}
@@ -926,6 +981,20 @@ export const Ribbon: React.FC<RibbonProps> = ({
           {/* 7. BATCH PRINT TAB (H1 - H2) */}
           {activeRibbonTab === 'batch' && (
             <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                data-ribbon-open-batch
+                onClick={() => setAppMode('batch')}
+                className="flex items-center gap-2 rounded-xl bg-indigo-600 px-3.5 py-2 font-bold text-white shadow-xs hover:bg-indigo-500 cursor-pointer"
+              >
+                <Boxes className="h-4 w-4" />
+                <span>
+                  {lang === 'fa'
+                    ? 'باز کردن محیط مجزای چاپ دسته‌ای (Batch Print)'
+                    : 'Open Standalone Batch Print Workspace'}
+                </span>
+              </button>
+
               <button
                 type="button"
                 onClick={addCurrentWorkspaceToBatch}

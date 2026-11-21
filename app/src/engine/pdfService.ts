@@ -72,8 +72,41 @@ async function applyCmykDecode(doc: PDFDocument, image: Awaited<ReturnType<PDFDo
   stream.dict.set(PDFName.of('Decode'), decode);
 }
 
+/** Adds an RGB Page Transparency Group so PDF viewers composite BlendMode.Difference reliably. */
+function ensureTransparencyGroup(doc: PDFDocument, page: ReturnType<PDFDocument['addPage']>): void {
+  if (!page.node.get(PDFName.of('Group'))) {
+    page.node.set(
+      PDFName.of('Group'),
+      doc.context.obj({
+        Type: PDFName.of('Group'),
+        S: PDFName.of('Transparency'),
+        CS: PDFName.of('DeviceRGB'),
+      })
+    );
+  }
+}
+
 type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
 type PdfJsDocumentProxy = Awaited<ReturnType<PdfJsModule['getDocument']>['promise']>;
+
+const standardPdfFonts =
+  typeof import.meta.glob === 'function'
+    ? import.meta.glob<string>('../../../node_modules/pdfjs-dist/standard_fonts/*.{ttf,pfb}', {
+        eager: true,
+        query: '?url&inline',
+        import: 'default',
+      })
+    : {};
+
+class BundledStandardFontFactory {
+  async fetch({ filename }: { filename: string }) {
+    const entry = Object.entries(standardPdfFonts).find(([name]) => name.endsWith(`/${filename}`));
+    if (!entry) throw new Error(`PDF standard font unavailable: ${filename}`);
+    const response = await fetch(entry[1]);
+    if (!response.ok) throw new Error(`Failed to load PDF standard font: ${filename}`);
+    return new Uint8Array(await response.arrayBuffer());
+  }
+}
 
 interface Canvas2DSurface {
   canvas: HTMLCanvasElement | OffscreenCanvas;
@@ -844,10 +877,15 @@ export async function exportImposedPdf(params: {
                 }
               }
             : undefined;
+        const useBundledStandardFonts =
+          typeof window !== 'undefined' &&
+          typeof fetch === 'function' &&
+          Object.keys(standardPdfFonts).length > 0;
         const task = pdfjsLib.getDocument({
           data: new Uint8Array(rawBytes),
           useSystemFonts: true,
           isEvalSupported: false,
+          ...(useBundledStandardFonts ? { StandardFontDataFactory: BundledStandardFontFactory as never } : {}),
           ...(canvasFactory ? { CanvasFactory: canvasFactory as never } : {}),
         });
         loadedPdfJsTasks.set(docId, task);
@@ -907,6 +945,7 @@ export async function exportImposedPdf(params: {
       outPage.pushOperators(pushGraphicsState());
       if (!cell.allowOverflow) outPage.pushOperators(rectangle(cellXPt, cellYPt, cellWPt, cellHPt), clip(), endPath());
       rotateContent();
+      let bakedSrcImageInvert = false;
       if (srcPdf && cell.page.sourcePageNumber > 0) {
         const pageIdxZero = cell.page.sourcePageNumber - 1;
         if (pageIdxZero >= srcPdf.getPageCount()) {
@@ -1020,7 +1059,7 @@ export async function exportImposedPdf(params: {
         }
       } else if (srcImage && cell.page.sourcePageNumber > 0) {
         let imageToDraw = srcImage;
-        if (resolved.hasPixelEffects && sourceDoc?.rawBytes) {
+        if ((resolved.hasPixelEffects || resolved.effectiveInvert) && sourceDoc?.rawBytes) {
           const imgEffectKey = `${cell.page.documentId}|${buildResolvedEffectsKey(resolved)}|${imageHandling}|${compression}`;
           let processedImg = processedImages.get(imgEffectKey);
           if (!processedImg) {
@@ -1050,6 +1089,7 @@ export async function exportImposedPdf(params: {
             }
           }
           imageToDraw = processedImg;
+          if (resolved.effectiveInvert) bakedSrcImageInvert = true;
         }
         const crop = rotateInsets(pageCropFractions(cell.page), rotation);
         const fullW = contentWPt / (1 - crop.left - crop.right);
@@ -1141,8 +1181,9 @@ export async function exportImposedPdf(params: {
         }
       }
 
-      // E1: Vector Invert via PDF BlendMode.Difference over the cell (when pixel effects already ran, Step 6 inverted pixels directly)
-      if (resolved.effectiveInvert && !resolved.hasPixelEffects) {
+      // E1: Vector Invert via PDF BlendMode.Difference over the cell (when pixel effects or image baking already ran, Step 6 inverted pixels directly)
+      if (resolved.effectiveInvert && !resolved.hasPixelEffects && !bakedSrcImageInvert) {
+        ensureTransparencyGroup(outPdf, outPage);
         outPage.pushOperators(pushGraphicsState());
         if (!cell.allowOverflow) outPage.pushOperators(rectangle(cellXPt, cellYPt, cellWPt, cellHPt), clip(), endPath());
         rotateContent();
@@ -1259,7 +1300,7 @@ export async function exportImposedPdf(params: {
       let image=textImages.get(key);
       if(!image){
         if(document.fonts){const font=`${item.italic?'italic ':''}${item.bold?'bold':'normal'} 18px "${item.fontFamily.replace(/["\\]/g,'')}"`;
-          const fontKey=JSON.stringify([font,item.text]);if(!loadedTextFonts.has(fontKey)){await document.fonts.load(font,item.text);loadedTextFonts.add(fontKey);}}
+          const fontKey=JSON.stringify([font,item.text]);if(!loadedTextFonts.has(fontKey)){try{await document.fonts.load(font,item.text);}catch{/* local system fonts may resolve natively */}loadedTextFonts.add(fontKey);}}
 
         const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.ceil(w*scale));canvas.height=Math.max(1,Math.ceil(h*scale));
         const ctx=canvas.getContext('2d');if(!ctx)throw new Error('Text overlay Canvas 2D is unavailable');

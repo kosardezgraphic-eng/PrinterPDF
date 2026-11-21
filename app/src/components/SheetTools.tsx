@@ -118,7 +118,7 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit
   };
   const fa = language === 'fa';
   const margins = effectiveLayout.marginsMm;
-  const rows = Math.max(1,Math.min(10,Math.floor(effectiveLayout.rows))), cols = Math.max(1,Math.min(10,Math.floor(effectiveLayout.cols)));
+  const rows = Math.max(1,Math.min(50,Math.floor(effectiveLayout.rows))), cols = Math.max(1,Math.min(50,Math.floor(effectiveLayout.cols)));
   const hGutterMm = Math.max(0, effectiveLayout.horizontalGutterMm);
   const vGutterMm = Math.max(0, effectiveLayout.verticalGutterMm);
   const cellW = Math.max(5, (Math.max(10,sheet.widthMm-margins.left-margins.right)-(cols-1)*hGutterMm)/cols);

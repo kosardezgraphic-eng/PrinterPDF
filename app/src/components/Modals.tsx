@@ -15,11 +15,13 @@ import {
   Loader2,
   ArrowUp,
   FileText,
+  Keyboard,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { PrinterRetryButton, PrinterServiceStatus } from './PrinterStatus';
 import { SettingsPresetPanel } from './SettingsPresets';
 import { PageSetupModal } from './PageSetupModal';
+import { SHORTCUT_GROUPS, getShortcutDescription } from '../engine/shortcutsCatalog';
 import { computeCounterSummary } from '../engine/counterEngine';
 import {
   computeImpositionSheets,
@@ -49,6 +51,7 @@ export const ModalsAndToasts: React.FC = () => {
     showManualDuplexModal,
     showSplitModal,
     showOnboardingTour,
+    showShortcutsModal,
     pendingDuplexPrint,
     printProgress,
     pdfPreviewModal,
@@ -75,15 +78,20 @@ export const ModalsAndToasts: React.FC = () => {
   const summary = computeCounterSummary(documents, pages, layout, settings);
 
   useEffect(() => {
-    if (!pdfPreviewModal) return;
+    if (!pdfPreviewModal && !showShortcutsModal) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        closePdfPreviewModal();
+        if (showShortcutsModal) {
+          setModalState('shortcuts', false);
+        }
+        if (pdfPreviewModal) {
+          closePdfPreviewModal();
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [pdfPreviewModal, closePdfPreviewModal]);
+  }, [pdfPreviewModal, closePdfPreviewModal, showShortcutsModal, setModalState]);
 
   const fieldCls =
     'w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white';
@@ -1360,7 +1368,19 @@ export const ModalsAndToasts: React.FC = () => {
 
             </div>
 
-            <div className="mt-3 flex shrink-0 justify-end border-t border-slate-200 pt-3 dark:border-slate-800">
+            <div className="mt-3 flex shrink-0 items-center justify-between gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+              <button
+                type="button"
+                data-open-shortcuts-from-settings
+                onClick={() => {
+                  setModalState('settings', false);
+                  setModalState('shortcuts', true);
+                }}
+                className="flex items-center gap-1.5 rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+              >
+                <Keyboard className="h-4 w-4 text-sky-600 dark:text-sky-400" aria-hidden="true" />
+                <span>{isFa ? 'راهنمای میانبرهای کیبورد (F1)' : 'Keyboard Shortcuts (F1)'}</span>
+              </button>
               <button
                 type="button"
                 onClick={() => setModalState('settings', false)}
@@ -1951,6 +1971,98 @@ export const ModalsAndToasts: React.FC = () => {
                 title={pdfPreviewModal.fileName}
                 className="h-full w-full rounded-lg border border-slate-200 bg-white dark:border-slate-700"
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 11. KEYBOARD SHORTCUTS MODAL */}
+      {showShortcutsModal && (
+        <div
+          data-shortcuts-modal
+          role="dialog"
+          aria-modal="true"
+          aria-label={isFa ? 'میانبرهای صفحه‌کلید' : 'Keyboard Shortcuts'}
+          onClick={() => setModalState('shortcuts', false)}
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 p-4 backdrop-blur-xs dark:bg-black/70"
+        >
+          <div
+            dir={isFa ? 'rtl' : 'ltr'}
+            onClick={(e) => e.stopPropagation()}
+            className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-slate-900 shadow-2xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          >
+            <div className="mb-4 flex shrink-0 items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <Keyboard className="h-5 w-5 text-sky-600 dark:text-sky-400" aria-hidden="true" />
+                <div>
+                  <h2 className="text-base font-extrabold">
+                    {isFa ? 'میانبرهای کیبورد PrintStudio Pro' : 'PrintStudio Pro Keyboard Shortcuts'}
+                  </h2>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {isFa
+                      ? 'برای دسترسی سریع‌تر به ابزارها و مدیریت صفحات از کلیدهای ترکیبی زیر استفاده کنید.'
+                      : 'Use these keyboard shortcuts for fast document navigation, editing, and printing.'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                data-shortcuts-close
+                aria-label={isFa ? 'بستن' : 'Close'}
+                onClick={() => setModalState('shortcuts', false)}
+                className={closeBtnCls}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto overscroll-contain pe-1 md:grid-cols-2">
+              {SHORTCUT_GROUPS.map((group) => (
+                <section
+                  key={group.id}
+                  data-shortcut-group={group.id}
+                  className={`${subCardCls} flex flex-col gap-2 p-3.5 ${
+                    group.id === 'view-tools' ? 'md:col-span-2' : ''
+                  }`}
+                >
+                  <h3 className="border-b border-slate-200 pb-1.5 text-xs font-extrabold text-sky-700 dark:border-slate-800 dark:text-sky-300">
+                    {isFa ? group.titleFa : group.titleEn}
+                  </h3>
+                  <ul className={`grid gap-1.5 text-xs ${group.id === 'view-tools' ? 'sm:grid-cols-2 sm:gap-x-4' : ''}`}>
+                    {group.items.map((item) => (
+                      <li
+                        key={item.id}
+                        className="flex items-center justify-between gap-2 rounded-lg px-1.5 py-1 hover:bg-slate-100/80 dark:hover:bg-slate-900/60"
+                      >
+                        <span className="text-slate-700 dark:text-slate-200">
+                          {getShortcutDescription(item, lang)}
+                        </span>
+                        <kbd
+                          dir="ltr"
+                          className="shrink-0 rounded-md border border-slate-300 bg-white px-2 py-0.5 font-mono text-[11px] font-bold text-slate-800 shadow-2xs dark:border-slate-700 dark:bg-slate-800 dark:text-sky-300"
+                        >
+                          {item.keys}
+                        </kbd>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+
+            <div className="mt-4 flex shrink-0 items-center justify-between border-t border-slate-200 pt-3 text-[11px] text-slate-500 dark:border-slate-800 dark:text-slate-400">
+              <span>
+                {isFa
+                  ? 'نکته: می‌توانید از بخش «تنظیمات ← پروفایل شیت» برای پروفایل‌های آماده هم میانبر دلخواه تعریف کنید.'
+                  : 'Tip: You can also record custom shortcuts for your saved sheet profiles in Settings.'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setModalState('shortcuts', false)}
+                className="rounded-xl bg-sky-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-sky-500 cursor-pointer"
+              >
+                {isFa ? 'بستن' : 'Close'}
+              </button>
             </div>
           </div>
         </div>

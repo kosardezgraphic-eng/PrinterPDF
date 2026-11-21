@@ -10,6 +10,8 @@ import type {
   PrintJobRequest,
   PspProjectFile,
   SettingsPreset,
+  VirtualPrinterConfig,
+  VirtualPrinterIncomingPayload,
 } from '../shared/models';
 
 /**
@@ -57,6 +59,28 @@ const api: PrintStudioElectronAPI = {
   purgePrinterQueue: (printerName: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SPOOLER_PURGE_QUEUE, printerName),
 
+  getVirtualPrinterStatus: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.VIRTUAL_PRINTER_GET_STATUS),
+
+  updateVirtualPrinterConfig: (patch: Partial<VirtualPrinterConfig>) =>
+    ipcRenderer.invoke(IPC_CHANNELS.VIRTUAL_PRINTER_UPDATE_CONFIG, patch),
+
+  installVirtualPrinter: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.VIRTUAL_PRINTER_INSTALL),
+
+  uninstallVirtualPrinter: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.VIRTUAL_PRINTER_UNINSTALL),
+
+  onVirtualPrinterJob: (callback: (payload: VirtualPrinterIncomingPayload) => void) => {
+    const listener = (_event: unknown, payload: VirtualPrinterIncomingPayload) => {
+      if (payload) callback(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.VIRTUAL_PRINTER_JOB_RECEIVED, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.VIRTUAL_PRINTER_JOB_RECEIVED, listener);
+    };
+  },
+
   saveAutoSaveSession: (project: PspProjectFile) =>
     ipcRenderer.invoke(IPC_CHANNELS.PROJECT_WRITE_AUTOSAVE, project),
 
@@ -72,6 +96,9 @@ const api: PrintStudioElectronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_PRESETS_SAVE, presets),
 
   loadSettingsPresets: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_PRESETS_LOAD),
+
+  listSystemFonts: (forceRefresh?: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_LIST_FONTS, forceRefresh),
 
   clearCache: () => ipcRenderer.invoke(IPC_CHANNELS.CACHE_CLEAR),
 

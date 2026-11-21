@@ -15,8 +15,13 @@ import type {
   PrintJobRequest,
   SpoolerJobInfo,
   SpoolerJobStatus,
+  VirtualPrinterConfig,
 } from '../shared/models';
-import { STANDARD_PAPER_SIZES, sanitizeDriverText } from '../shared/models';
+import {
+  STANDARD_PAPER_SIZES,
+  VIRTUAL_PRINTER_DEFAULT_NAME,
+  sanitizeDriverText,
+} from '../shared/models';
 
 export { sanitizeDriverText };
 
@@ -1635,4 +1640,77 @@ export async function setWindowsDefaultPrinterViaPowerShell(
     { timeout: 6000, windowsHide: true }
   );
   return true;
+}
+
+export function enrichVirtualPrinterInfo(
+  printer: PrinterInfo,
+  virtualConfig?: VirtualPrinterConfig
+): PrinterInfo {
+  const isTargetVirtual =
+    printer.name.toLowerCase() ===
+      (virtualConfig?.printerName || VIRTUAL_PRINTER_DEFAULT_NAME).toLowerCase() ||
+    printer.name.toLowerCase() === VIRTUAL_PRINTER_DEFAULT_NAME.toLowerCase();
+  if (!isTargetVirtual) return printer;
+
+  const standardIds: Array<Exclude<PaperSizeId, 'Custom'>> = [
+    'A3',
+    'A4',
+    'A5',
+    'B4',
+    'B5',
+    'Letter',
+    'Legal',
+  ];
+  const mergedPapers: PaperSizeId[] = [...printer.capabilities.supportedPapers];
+  for (const id of standardIds) {
+    if (!mergedPapers.includes(id)) mergedPapers.push(id);
+  }
+  if (!mergedPapers.includes('Custom')) mergedPapers.push('Custom');
+
+  const existingOptions = printer.capabilities.paperOptions ?? [];
+  const mergedOptions: PrinterPaperOption[] = [...existingOptions];
+  for (const id of standardIds) {
+    if (!mergedOptions.some((o) => o.id === id)) {
+      const dims = STANDARD_PAPER_SIZES[id];
+      mergedOptions.push({
+        id,
+        name: id,
+        widthMm: dims.widthMm,
+        heightMm: dims.heightMm,
+      });
+    }
+  }
+
+  const dpiSet = new Set<number>([...(printer.capabilities.supportedDpi ?? []), 150, 300, 600, 1200]);
+  if (virtualConfig?.dpi) dpiSet.add(virtualConfig.dpi);
+  const supportedDpi = Array.from(dpiSet).sort((a, b) => a - b);
+
+  return {
+    ...printer,
+    isVirtual: true,
+    capabilities: {
+      ...printer.capabilities,
+      supportedPapers: mergedPapers,
+      paperOptions: mergedOptions,
+      supportedDpi,
+      supportsColor: true,
+      supportsCollate: true,
+    },
+    activeProfile: {
+      ...printer.activeProfile,
+      ...(virtualConfig
+        ? {
+            paperSize: virtualConfig.paperSize,
+            paperName:
+              virtualConfig.paperSize !== 'Custom'
+                ? virtualConfig.paperSize
+                : printer.activeProfile.paperName || 'Custom',
+            paperWidthMm: virtualConfig.paperWidthMm,
+            paperHeightMm: virtualConfig.paperHeightMm,
+            orientation: virtualConfig.orientation,
+            dpi: virtualConfig.dpi,
+          }
+        : {}),
+    },
+  };
 }

@@ -248,6 +248,8 @@ export type EffectScope = 'all' | 'selected';
 export interface EffectsSettings {
   enabled: boolean;
   scope: EffectScope;
+  /** Pinned thumbnail page IDs captured when scope === 'selected' so scrolling preview never moves effects to other pages */
+  targetPageIds?: string[];
   /** E1: Invert colors (Preview via GPU/CSS, Print via Raster, PDF via Vector BlendMode Difference or Raster) */
   invert: boolean;
   /** Vector vs Raster strategy for PDF Export when Invert is active */
@@ -510,6 +512,9 @@ export type BatchJobStatus =
   | 'failed'
   | 'canceled';
 
+export type BatchPageRangeMode = 'all' | 'custom';
+export type BatchOddEvenFilter = 'all' | 'odd' | 'even';
+
 export interface BatchJobItem {
   id: string;
   fileName: string;
@@ -517,15 +522,96 @@ export interface BatchJobItem {
   pageCount: number;
   printerName: string;
   copies: number;
-  nUp: number; // e.g., 1, 2, 4
+  collate?: boolean;
+  pageRangeMode?: BatchPageRangeMode;
+  customRangeText?: string;
+  oddEvenFilter?: BatchOddEvenFilter;
+  reverseOrder?: boolean;
+  nUp: number; // e.g., 1, 2, 4, 6, 9
+  scaleMode?: 'fit' | 'actual';
+  paperSize?: PaperSizeId;
+  paperName?: string;
+  paperWidthMm?: number;
+  paperHeightMm?: number;
+  orientation?: PageOrientation;
+  tray?: string;
+  mediaType?: string;
+  dpi?: number;
+  quality?: 'draft' | 'normal' | 'high';
+  colorMode?: 'color' | 'bw';
   duplexMode: DuplexMode;
+  staple?: string;
+  holePunch?: string;
+  fold?: string;
+  outputBin?: string;
+  borderless?: boolean;
   invert: boolean;
+  /** When true, follows the active batch printer hardware profile dynamically; when false, keeps per-file overrides */
+  useGlobalPrinterSettings?: boolean;
+  /** Deep workspace/document snapshot so Batch Print executes independently from Studio */
+  snapshotDocuments?: SourceDocument[];
+  snapshotPages?: PageItem[];
+  snapshotLayout?: LayoutSettings;
+  snapshotEffects?: EffectsSettings;
+  snapshotWatermark?: WatermarkSettings;
+  snapshotPageNumbering?: PageNumberSettings;
+  snapshotOverlays?: PageOverlay[];
   status: BatchJobStatus;
   progressPercent: number;
   retryCount: number;
+  spoolerJobId?: number;
   errorMessage?: string;
   addedAt: string;
   completedAt?: string;
+}
+
+/**
+ * Windows Virtual Printer Models
+ */
+export const VIRTUAL_PRINTER_DEFAULT_NAME = 'PrintStudio Pro Virtual Printer';
+
+export interface VirtualPrinterConfig {
+  enabled: boolean;
+  printerName: string;
+  paperSize: PaperSizeId;
+  paperWidthMm: number;
+  paperHeightMm: number;
+  orientation: PageOrientation;
+  dpi: number;
+  autoImportToStudio: boolean;
+  switchToStudioOnReceive: boolean;
+}
+
+export interface VirtualPrinterCapturedJob {
+  id: string;
+  jobTitle: string;
+  fileName: string;
+  pageCount: number;
+  sizeBytes: number;
+  paperSize: PaperSizeId;
+  orientation: PageOrientation;
+  dpi: number;
+  receivedAt: string;
+  source: 'windows-spool' | 'in-app' | 'inbox-drop';
+}
+
+export interface VirtualPrinterStatus {
+  supportedOnOs: boolean;
+  installedInWindows: boolean;
+  driverName: string | null;
+  portName: string | null;
+  spoolDir: string;
+  watcherActive: boolean;
+  lastError: string | null;
+  config: VirtualPrinterConfig;
+  recentJobs: VirtualPrinterCapturedJob[];
+}
+
+export interface VirtualPrinterIncomingPayload {
+  job: VirtualPrinterCapturedJob;
+  fileName: string;
+  mimeType: string;
+  bytes: Uint8Array;
 }
 
 /**
