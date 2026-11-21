@@ -6,6 +6,7 @@ import type {PageItem,PageOverlayImage,PageOverlayNumbering} from '@shared/model
 import {PreviewWorkspace} from '../components/PreviewWorkspace';
 import {ImageControlPanel} from '../components/ImageControlPanel';
 import {Ribbon} from '../components/Ribbon';
+import {TopToolRibbon} from '../components/TopToolRibbon';
 import {DEFAULT_LAYOUT,DEFAULT_SETTINGS,useAppStore} from '../store/useAppStore';
 import {getDefaultPageNumberSettings} from './watermarkEngine';
 import {computeImpositionSheets} from './layoutEngine';
@@ -53,7 +54,7 @@ beforeEach(()=>{
 afterEach(()=>{act(()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
 
 function render(){act(()=>root.render(React.createElement(React.Fragment,null,
-  React.createElement(PreviewWorkspace,{onCursorMoveMm:()=>{}}),React.createElement(ImageControlPanel))));rect(canvas(),200,300);}
+  React.createElement(TopToolRibbon),React.createElement(PreviewWorkspace,{onCursorMoveMm:()=>{}}),React.createElement(ImageControlPanel))));rect(canvas(),200,300);}
 
 describe('picture format line',()=>{
  it('shows what the file is and how the export will handle it',()=>{
@@ -276,7 +277,8 @@ describe('picture panel',()=>{
   act(()=>{[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.getAttribute('aria-label')==='Crop')!.click();});
   expect(host.querySelector('[aria-label="Crop"]')!.getAttribute('aria-pressed')).toBe('true');
   act(()=>eraseButton('brush').click());
-  expect(host.querySelector('[aria-label="Select / move / resize"]')!.getAttribute('aria-pressed')).toBe('true');
+  expect(host.querySelector('[aria-label="Crop"]')!.getAttribute('aria-pressed')).toBe('false');
+  expect(useAppStore.getState().canvasTool).toBe('move');
   pointer(node(),'pointerdown',9,4.5);pointer(node(),'pointermove',45,22.5);pointer(node(),'pointerup',45,22.5);
   expect(picture().erase).toHaveLength(1);
  });

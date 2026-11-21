@@ -22,7 +22,7 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
   };
   const patch = (value: Partial<BookletSettings>) =>
     updateLayout({ booklet: { ...booklet, ...value } });
-  const input = 'w-full rounded border border-slate-600 bg-slate-800 p-1.5 text-xs text-white';
+  const input = 'w-full rounded border border-slate-300 bg-white p-1.5 text-xs text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white';
   const label = 'block space-y-1';
   const marginSides: Array<{ side: 'top' | 'right' | 'bottom' | 'left'; faLabel: string; enLabel: string }> = [
     { side: 'top', faLabel: 'حاشیه بالا', enLabel: 'Top margin' },
@@ -33,24 +33,24 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <aside data-booklet-control-panel aria-label={isFa ? 'تنظیمات بوکلت' : 'Booklet controls'}
-      className="w-72 max-w-[min(18rem,45vw)] shrink-0 overflow-y-auto border-s border-slate-700 bg-slate-900 p-3 text-xs text-slate-200 space-y-3">
+      className="w-full bg-white p-3 text-xs text-slate-800 dark:bg-slate-900 dark:text-slate-200 space-y-3">
       <div className="flex items-center justify-between">
-        <strong className="flex items-center gap-1.5">
-          <BookOpen className="h-4 w-4 text-amber-300" />
+        <strong className="flex items-center gap-1.5 text-slate-900 dark:text-slate-100">
+          <BookOpen className="h-4 w-4 text-amber-600 dark:text-amber-300" />
           {isFa ? 'تنظیمات چاپ بوکلت' : 'Booklet setup'}
         </strong>
         <button type="button" onClick={onClose} title={isFa ? 'بستن پنل' : 'Close panel'}
-          className="rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-white"><X className="h-4 w-4" /></button>
+          className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-white cursor-pointer"><X className="h-4 w-4" /></button>
       </div>
 
-      <label className="flex items-center gap-2 rounded border border-slate-700 bg-slate-800 p-2">
+      <label className="flex items-center gap-2 rounded border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800">
         <input type="checkbox" checked={booklet.enabled} onChange={e => patch({ enabled: e.target.checked })}
           className="accent-amber-500" />
-        <span className="font-semibold text-slate-100">{isFa ? 'فعال‌سازی چیدمان بوکلت' : 'Enable booklet imposition'}</span>
+        <span className="font-semibold text-slate-900 dark:text-slate-100">{isFa ? 'فعال‌سازی چیدمان بوکلت' : 'Enable booklet imposition'}</span>
       </label>
 
       <label className={label}>
-        <span className="text-slate-400">{isFa ? 'جهت صحافی و ترتیب صفحات' : 'Reading / binding direction'}</span>
+        <span className="text-slate-600 dark:text-slate-400">{isFa ? 'جهت صحافی و ترتیب صفحات' : 'Reading / binding direction'}</span>
         <select value={booklet.direction} onChange={e => patch({ direction: e.target.value as BookletSettings['direction'] })} className={input}>
           <option value="rtl">{isFa ? 'راست به چپ (فارسی)' : 'Right to left'}</option>
           <option value="ltr">{isFa ? 'چپ به راست (لاتین)' : 'Left to right'}</option>
@@ -58,7 +58,7 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
       </label>
 
       <label className={label}>
-        <span className="text-slate-400">{isFa ? 'اندازه کاغذ هر برگ چاپی' : 'Printed sheet size'}</span>
+        <span className="text-slate-600 dark:text-slate-400">{isFa ? 'اندازه کاغذ هر برگ چاپی' : 'Printed sheet size'}</span>
         <select
           value={layout.paperSize}
           onChange={e => {
@@ -102,11 +102,11 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
 
       {layout.paperSize === 'Custom' && (
         <div className="grid grid-cols-2 gap-2">
-          <label className={label}><span className="text-slate-400">{isFa ? 'عرض (mm)' : 'Width (mm)'}</span>
+          <label className={label}><span className="text-slate-600 dark:text-slate-400">{isFa ? 'عرض (mm)' : 'Width (mm)'}</span>
             <input type="number" min="80" max="1000" value={layout.customWidthMm}
               onChange={e => updateLayout({ customWidthMm: Math.max(80, Number(e.target.value) || 80) })} className={input} />
           </label>
-          <label className={label}><span className="text-slate-400">{isFa ? 'ارتفاع (mm)' : 'Height (mm)'}</span>
+          <label className={label}><span className="text-slate-600 dark:text-slate-400">{isFa ? 'ارتفاع (mm)' : 'Height (mm)'}</span>
             <input type="number" min="80" max="1400" value={layout.customHeightMm}
               onChange={e => updateLayout({ customHeightMm: Math.max(80, Number(e.target.value) || 80) })} className={input} />
           </label>
@@ -114,17 +114,17 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
       )}
 
       <label className={label}>
-        <span className="text-slate-400">{isFa ? 'تعداد صفحات در هر دسته صحافی' : 'Pages per signature'}</span>
+        <span className="text-slate-600 dark:text-slate-400">{isFa ? 'تعداد صفحات در هر دسته صحافی' : 'Pages per signature'}</span>
         <select value={booklet.signatureSize} onChange={e => patch({ signatureSize: Number(e.target.value) as BookletSettings['signatureSize'] })} className={input}>
           <option value="0">{isFa ? 'خودکار؛ کل سند' : 'Automatic; whole document'}</option>
           {[4,8,12,16,24,32].map(size => <option key={size} value={size}>{size} {isFa ? 'صفحه' : 'pages'}</option>)}
         </select>
       </label>
 
-      <div className="border-t border-slate-700 pt-3 space-y-3">
-        <p className="font-semibold text-slate-300">{isFa ? 'شیرازه و عطف' : 'Spine and fold'}</p>
+      <div className="border-t border-slate-200 pt-3 space-y-3 dark:border-slate-700">
+        <p className="font-semibold text-slate-700 dark:text-slate-300">{isFa ? 'شیرازه و عطف' : 'Spine and fold'}</p>
         <label className={label}>
-          <span className="flex justify-between text-slate-400"><span>{isFa ? 'عرض فضای شیرازه (mm)' : 'Spine gap (mm)'}</span><span>{booklet.spineWidthMm} mm</span></span>
+          <span className="flex justify-between text-slate-600 dark:text-slate-400"><span>{isFa ? 'عرض فضای شیرازه (mm)' : 'Spine gap (mm)'}</span><span>{booklet.spineWidthMm} mm</span></span>
           <input type="range" min="0" max="30" step="0.5" value={booklet.spineWidthMm}
             onChange={e => patch({ spineWidthMm: Number(e.target.value) })} className="w-full accent-amber-500" />
           <input type="number" min="0" max="30" step="0.1" value={booklet.spineWidthMm}
@@ -135,7 +135,7 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
           </span>
         </label>
         <label className={label}>
-          <span className="flex justify-between text-slate-400"><span>{isFa ? 'جبران ضخامت کاغذ / Creep (mm)' : 'Creep compensation (mm)'}</span><span>{booklet.creepMm} mm</span></span>
+          <span className="flex justify-between text-slate-600 dark:text-slate-400"><span>{isFa ? 'جبران ضخامت کاغذ / Creep (mm)' : 'Creep compensation (mm)'}</span><span>{booklet.creepMm} mm</span></span>
           <input type="number" min="0" max="5" step="0.05" value={booklet.creepMm}
             onChange={e => patch({ creepMm: Math.max(0, Math.min(5, Number(e.target.value) || 0)) })} className={input} />
         </label>
@@ -145,10 +145,10 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
         </label>
       </div>
 
-      <div className="border-t border-slate-700 pt-3 space-y-3">
-        <p className="font-semibold text-slate-300">{isFa ? 'چاپ و حاشیه‌ها' : 'Printing and margins'}</p>
+      <div className="border-t border-slate-200 pt-3 space-y-3 dark:border-slate-700">
+        <p className="font-semibold text-slate-700 dark:text-slate-300">{isFa ? 'چاپ و حاشیه‌ها' : 'Printing and margins'}</p>
         <label className={label}>
-          <span className="text-slate-400">{isFa ? 'حالت پشت‌ورو پرینتر' : 'Duplex flip edge'}</span>
+          <span className="text-slate-600 dark:text-slate-400">{isFa ? 'حالت پشت‌ورو پرینتر' : 'Duplex flip edge'}</span>
           <select value={booklet.duplexMode} onChange={e => patch({ duplexMode: e.target.value as BookletSettings['duplexMode'] })} className={input}>
             <option value="short-edge">{isFa ? 'برگشت از لبه کوتاه' : 'Flip on short edge'}</option>
             <option value="long-edge">{isFa ? 'برگشت از لبه بلند' : 'Flip on long edge'}</option>
@@ -161,7 +161,7 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
             const valSide = Math.max(minSide, layout.marginsMm[side]);
             return (
               <label key={side} className={label} title={minSide > 0 ? (isFa ? `حداقل حاشیه سخت‌افزار پرینتر: ${minSide} mm` : `Printer hardware min: ${minSide} mm`) : undefined}>
-                <span className="flex justify-between text-[11px] text-slate-400">
+                <span className="flex justify-between text-[11px] text-slate-600 dark:text-slate-400">
                   <span>{isFa ? faLabel : enLabel}</span>
                   <span>{valSide} mm</span>
                 </span>
@@ -188,7 +188,7 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
                   className={input}
                 />
                 {minSide > 0 && (
-                  <span className="block text-[10px] text-rose-300/80">
+                  <span className="block text-[10px] text-rose-600 dark:text-rose-300/80">
                     {isFa ? `حداقل پرینتر: ${minSide} mm` : `Min: ${minSide} mm`}
                   </span>
                 )}
@@ -208,7 +208,7 @@ export function BookletControlPanel({ onClose }: { onClose: () => void }) {
         </label>
       </div>
 
-      <div className="rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] leading-5 text-amber-100">
+      <div className="rounded border border-amber-300 bg-amber-50 p-2 text-[11px] leading-5 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
         <div className="mb-1 flex items-center gap-1 font-semibold"><Info className="h-3.5 w-3.5" />{isFa ? 'نکته چاپ' : 'Print note'}</div>
         {isFa
           ? 'بوکلت به چاپ دورو نیاز دارد. تعداد صفحات هر دسته به مضرب ۴ تکمیل می‌شود و صفحات خالی لازم به‌صورت خودکار ایجاد می‌شوند. جهت لبه برگردان را مطابق درایور پرینتر انتخاب کنید.'

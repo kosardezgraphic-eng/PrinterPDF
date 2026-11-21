@@ -4,19 +4,12 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { AppShell } from './components/AppShell';
 import { t } from './i18n/translations';
 import { QuickBar } from './components/QuickBar';
-import { ToolRail } from './components/ToolRail';
-import { PropertiesDock, type PropertiesPanelId } from './components/PropertiesDock';
+import { TopToolRibbon } from './components/TopToolRibbon';
 import { ToolPanel } from './components/ToolPanel';
 import { SidebarPages } from './components/SidebarPages';
 import { PreviewWorkspace } from './components/PreviewWorkspace';
 import { StatusBar } from './components/StatusBar';
 import { ModalsAndToasts } from './components/Modals';
-import { TextControlPanel } from './components/TextControlPanel';
-import { NumberingControlPanel } from './components/NumberingControlPanel';
-import { ImageControlPanel } from './components/ImageControlPanel';
-import { ShapeControlPanel } from './components/ShapeControlPanel';
-import { WatermarkControlPanel } from './components/WatermarkControlPanel';
-import { BookletControlPanel } from './components/BookletControlPanel';
 import { routeDroppedFiles } from './engine/imageImport';
 import { buildSheetPresetRows, findPresetIdByShortcut } from './engine/sheetPresets';
 import { formatShortcut } from '@shared/models';
@@ -28,9 +21,6 @@ let preferencesRestored = false;
 export const App: React.FC = () => {
   const {
     settings,
-    selectedOverlayId,
-    overlays,
-    watermark,
     pages,
     zoomPercent,
     initializeWorkspace,
@@ -40,7 +30,6 @@ export const App: React.FC = () => {
     duplicatePages,
     deletePages,
     removeOverlay,
-    selectOverlay,
     selectAllForPrint,
     setZoomPercent,
     setModalState,
@@ -51,8 +40,6 @@ export const App: React.FC = () => {
   } = useAppStore();
 
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
-  const [propertiesDockOpen, setPropertiesDockOpen] = useState(false);
-  const [activePropertyPanel, setActivePropertyPanel] = useState<PropertiesPanelId | null>(null);
 
   useEffect(() => {
     void initializeWorkspace();
@@ -72,43 +59,19 @@ export const App: React.FC = () => {
   // through the desktop bridge. In a browser there is no bridge and nothing subscribes at all.
   useEffect(() => {
     const stop = listenForNativeOpenFiles(
-      files => {
-        const { documents } = routeDroppedFiles(files, false); // a file from Explorer is a new document, never an overlay
+      (files) => {
+        const { documents } = routeDroppedFiles(files, false);
         if (documents.length) void importFiles(documents);
       },
-      error =>
+      (error) =>
         addToast({
           type: 'warning',
           title: settings.language === 'fa' ? 'فایل باز نشد' : 'Cannot open the file',
           message: error instanceof Error ? error.message : String(error),
-        }),
+        })
     );
     return stop;
   }, [importFiles, addToast, settings.language]);
-
-  // Selecting an editable overlay opens the one shared properties dock.
-  useEffect(() => {
-    if (!selectedOverlayId) return;
-    const selected = overlays.find(item => item.id === selectedOverlayId);
-    if (!selected) return;
-    if (selected.kind === 'text' || selected.kind === 'numbering' || selected.kind === 'image' || selected.kind === 'shape') {
-      setActivePropertyPanel(selected.kind);
-      setPropertiesDockOpen(true);
-    }
-  }, [selectedOverlayId]);
-
-  // Watermark and booklet still dismiss on outside click; the whole shared dock is treated as inside.
-  useEffect(() => {
-    if (!propertiesDockOpen || (activePropertyPanel !== 'watermark' && activePropertyPanel !== 'booklet')) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.closest('[data-properties-dock],[data-watermark-panel-trigger],[data-booklet-panel-trigger]')) return;
-      setPropertiesDockOpen(false);
-      setActivePropertyPanel(null);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [propertiesDockOpen, activePropertyPanel]);
 
   // Synchronize HTML dir (RTL/LTR) and lang
   useEffect(() => {
@@ -138,16 +101,9 @@ export const App: React.FC = () => {
   // Comprehensive Keyboard Shortcuts & Clipboard Paste (A1)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      // Chords are resolved against the profile list, so `Alt+F6` is not a special case any more — it is
-      // the chord the built-in defaults row owns, and a recorded profile behaves the same way. The lookup
-      // runs above the "ignore keys typed into a field" guard because a chord carrying Alt or Ctrl is
-      // never text input, and a shortcut that only works when the caret happens to be on a button is not
-      // a shortcut. Nothing that does not match is swallowed: an unassigned `Ctrl+Alt+Q` still belongs to
-      // the browser.
       const chord = formatShortcut(e);
       if (chord) {
         const state = useAppStore.getState();
-        // While the panel is waiting for a key to learn, no chord fires — the press is being recorded.
         if (!state.shortcutRecordingFor) {
           const rows = buildSheetPresetRows(state.settingsPresets, state.settings.language === 'fa');
           const presetId = findPresetIdByShortcut(rows, chord);
@@ -210,9 +166,6 @@ export const App: React.FC = () => {
         selectAllForPrint(true);
         return;
       }
-      // The region tool is a two-step verb: drag the marquee, then `Delete` to spend it on the picture, `Escape`
-      // to drop it. Both would otherwise act on the selected layer or the highlighted pages, so the waiting
-      // marquee is asked first and eats the key when there is one.
       if (e.key === 'Delete' || e.key === 'Backspace' || e.key === 'Escape') {
         if (useAppStore.getState().spendEraseKey(e.key)) {
           e.preventDefault();
@@ -242,7 +195,6 @@ export const App: React.FC = () => {
       }
     };
 
-    // A picture dropped on a sheet becomes an editable overlay; dropped anywhere else it is a new document/page.
     const onWindowDragOver = (e: DragEvent) => {
       if (e.dataTransfer?.types && Array.from(e.dataTransfer.types).includes('Files')) {
         e.preventDefault();
@@ -250,17 +202,14 @@ export const App: React.FC = () => {
       }
     };
     const onWindowDrop = (e: DragEvent) => {
-      const alreadyRouted = e.defaultPrevented; // the preview already took this drop onto a page
+      const alreadyRouted = e.defaultPrevented;
       const files = e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : [];
       const hasFiles =
         files.length > 0 ||
         (!!e.dataTransfer && Array.from(e.dataTransfer.types ?? []).includes('Files'));
-      // The browser default for a file drop is navigation: the window would be replaced by the
-      // dropped file itself (and in a packaged app it would simply look like the UI fell apart).
-      // That has to be stopped even when the app cannot use the file, hence before the early return.
       if (hasFiles) e.preventDefault();
       if (alreadyRouted || files.length === 0) return;
-      const { documents } = routeDroppedFiles(files, false); // outside the sheet even a picture is a new document
+      const { documents } = routeDroppedFiles(files, false);
       if (documents.length === 0) return;
       void importFiles(documents);
     };
@@ -301,88 +250,18 @@ export const App: React.FC = () => {
     importFiles,
   ]);
 
-  const selectedOverlay = selectedOverlayId
-    ? overlays.find(item => item.id === selectedOverlayId)
-    : undefined;
-  const overlayPropertyKinds: PropertiesPanelId[] = ['text', 'numbering', 'image', 'shape'];
-  const activeOverlayProperty = selectedOverlay && overlayPropertyKinds.includes(selectedOverlay.kind as PropertiesPanelId)
-    ? selectedOverlay.kind as PropertiesPanelId
-    : null;
-  const resolvedPropertyPanel = activePropertyPanel ?? activeOverlayProperty;
-
-  const openWatermarkProperties = () => {
-    selectOverlay(null);
-    setActivePropertyPanel('watermark');
-    setPropertiesDockOpen(true);
-  };
-  const openBookletProperties = () => {
-    selectOverlay(null);
-    setActivePropertyPanel('booklet');
-    setPropertiesDockOpen(true);
-  };
-  const openSelectedProperties = () => {
-    setActivePropertyPanel(activeOverlayProperty ?? 'text');
-    setPropertiesDockOpen(true);
-  };
-  const closePropertiesDock = () => {
-    setPropertiesDockOpen(false);
-    setActivePropertyPanel(null);
-    selectOverlay(null);
-  };
-  const showToolPanel = () => {
-    setPropertiesDockOpen(false);
-    setActivePropertyPanel(null);
-  };
-  const selectPropertiesPanel = (panel: PropertiesPanelId) => {
-    setActivePropertyPanel(panel);
-    setPropertiesDockOpen(true);
-    if (panel === 'watermark' || panel === 'booklet') {
-      selectOverlay(null);
-    } else {
-      const target = overlays.find(item => item.kind === panel);
-      if (target) selectOverlay(target.id);
-    }
-  };
-
   return (
     <ErrorBoundary>
       <AppShell
         theme={settings.theme}
         labels={t(settings.language).shell}
         topbar={<QuickBar />}
-        navigation={
-          <ToolRail onNavigate={() => {
-            setPropertiesDockOpen(false);
-            setActivePropertyPanel(null);
-          }} />
-        }
+        navigation={<TopToolRibbon />}
         workspace={
-          <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+          <div dir="ltr" className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
             <SidebarPages />
             <PreviewWorkspace onCursorMoveMm={setCursorPos} />
-            {propertiesDockOpen && resolvedPropertyPanel ? (
-              <PropertiesDock
-                activePanel={resolvedPropertyPanel}
-                onSelectPanel={selectPropertiesPanel}
-                onShowTools={showToolPanel}
-                onClose={closePropertiesDock}
-                labels={t(settings.language).shell.propertiesDock}
-              >
-                {resolvedPropertyPanel === 'text' && <TextControlPanel />}
-                {resolvedPropertyPanel === 'numbering' && <NumberingControlPanel />}
-                {resolvedPropertyPanel === 'image' && <ImageControlPanel />}
-                {resolvedPropertyPanel === 'shape' && <ShapeControlPanel />}
-                {resolvedPropertyPanel === 'watermark' && <WatermarkControlPanel onClose={closePropertiesDock} />}
-                {resolvedPropertyPanel === 'booklet' && <BookletControlPanel onClose={closePropertiesDock} />}
-              </PropertiesDock>
-            ) : (
-              <ToolPanel
-                onOpenWatermarkPanel={openWatermarkProperties}
-                onOpenBookletPanel={openBookletProperties}
-                onOpenProperties={openSelectedProperties}
-                hasSelectedOverlay={!!selectedOverlayId}
-              />
-            )}
+            <ToolPanel />
           </div>
         }
         statusBar={<StatusBar cursorPos={cursorPos} />}

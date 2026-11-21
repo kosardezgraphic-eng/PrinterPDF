@@ -52,8 +52,8 @@ describe('interactive page numbers',()=>{
   act(()=>field('Add editable page number').click());const scope=field('Number scope') as HTMLSelectElement;
   act(()=>{scope.value='even';scope.dispatchEvent(new Event('change',{bubbles:true}));});expect(number().targetScope).toBe('even');
   setValue(field('Numbering range') as HTMLInputElement,'1, 3');act(()=>[...host.querySelectorAll('button')].find(b=>b.textContent==='Apply range')!.click());
-  expect(number()).toMatchObject({targetScope:'selected',targetPageIds:['p1','p3']});expect(useAppStore.getState().pages.every(p=>p.selectedForPrint)).toBe(true);
-  setValue(field('Numbering range') as HTMLInputElement,'4');act(()=>[...host.querySelectorAll('button')].find(b=>b.textContent==='Apply range')!.click());expect(number().targetPageIds).toEqual(['p1','p3']);expect(host.querySelector('[role="alert"]')).toBeTruthy();
+  expect(number()).toMatchObject({targetScope:'selected',targetSheetIndices:[1,3]});expect(useAppStore.getState().pages.every(p=>p.selectedForPrint)).toBe(true);
+  setValue(field('Numbering range') as HTMLInputElement,'4');act(()=>[...host.querySelectorAll('button')].find(b=>b.textContent==='Apply range')!.click());expect(number().targetSheetIndices).toEqual([1,3]);expect(host.querySelector('[role="alert"]')).toBeTruthy();
  });
  it('converts legacy numbering explicitly and undo restores it',()=>{
   act(()=>useAppStore.setState({pageNumbering:{...getDefaultPageNumberSettings(),enabled:true,format:'bates',startNumber:42,batesDigits:9,batesPrefix:'X-'}}));

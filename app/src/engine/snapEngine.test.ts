@@ -7,6 +7,7 @@ import { DEFAULT_LAYOUT, DEFAULT_SETTINGS, useAppStore } from '../store/useAppSt
 import { computeImpositionSheets } from './layoutEngine';
 import { computeSnapAndGuides, type SnapContext } from './snapEngine';
 import { PreviewWorkspace } from '../components/PreviewWorkspace';
+import { TopToolRibbon } from '../components/TopToolRibbon';
 
 function baseCtx(overrides: Partial<SnapContext> = {}): SnapContext {
   return {
@@ -185,7 +186,7 @@ describe('Magnetic Snap & Purple Smart Guides UI integration', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-    act(() => root.render(React.createElement(PreviewWorkspace, { onCursorMoveMm: () => {} })));
+    act(() => root.render(React.createElement(React.Fragment, null, React.createElement(TopToolRibbon), React.createElement(PreviewWorkspace, { onCursorMoveMm: () => {} }))));
   });
 
   afterEach(() => {

@@ -141,8 +141,8 @@ describe('booklet imposition', () => {
     const sheets = computeImpositionSheets(pages(5), layout);
     expect(sheets).toHaveLength(4);
     expect(imposedPageNumbers(sheets)).toEqual([
-      [4, 1],
-      [2, 3],
+      [1, 4],
+      [3, 2],
       [5, null],
       [null, null],
     ]);

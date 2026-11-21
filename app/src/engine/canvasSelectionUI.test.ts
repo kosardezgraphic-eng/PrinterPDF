@@ -7,6 +7,7 @@ import { DEFAULT_LAYOUT, DEFAULT_SETTINGS, useAppStore } from '../store/useAppSt
 import { computeImpositionSheets, sortCellsByLayer } from './layoutEngine';
 import { PreviewWorkspace } from '../components/PreviewWorkspace';
 import { SidebarPages } from '../components/SidebarPages';
+import { TopToolRibbon } from '../components/TopToolRibbon';
 
 const page=(id:string,highlighted=true):PageItem => ({id,documentId:'d',documentName:'d',sourcePageNumber:1,widthMm:50,heightMm:100,rotation:0,
   selectedForPrint:true,isHighlighted:highlighted,isBlankPage:false,colorProfile:'color',inkCoveragePercent:0,thumbnailDataUrl:'data:image/png;base64,AA=='});
@@ -27,13 +28,13 @@ beforeEach(() => {
     layout:{...DEFAULT_LAYOUT,paperSize:'Custom',customWidthMm:100,customHeightMm:100,rows:1,cols:2,sheetOrder:'ltr',duplexMode:'none',autoRotateToFit:false,
       marginsMm:{top:0,bottom:0,left:0,right:0},horizontalGutterMm:0,verticalGutterMm:0}});
   container=document.createElement('div'); document.body.appendChild(container);root=createRoot(container);
-  act(() => root.render(React.createElement(React.Fragment,null,React.createElement(SidebarPages),React.createElement(PreviewWorkspace,{onCursorMoveMm:()=>{}}))));
+  act(() => root.render(React.createElement(React.Fragment,null,React.createElement(TopToolRibbon),React.createElement(SidebarPages),React.createElement(PreviewWorkspace,{onCursorMoveMm:()=>{}}))));
 });
 afterEach(() => {act(() => root.unmount());container.remove();vi.useRealTimers();vi.restoreAllMocks();});
 
 describe('combined selection and layer context menu', () => {
   it('starts in combined mode without handles, selects only a clicked cell and hides handles on empty space', () => {
-    const combined=container.querySelector('[aria-label="Select / move / resize"]');
+    const combined=container.querySelector('[aria-label="Select / Move / Resize"]');
     expect(combined?.getAttribute('aria-pressed')).toBe('true');
     expect(Array.from(container.querySelectorAll('button')).some(b => b.textContent?.trim()==='Select')).toBe(false);
     expect(handles('red')).toHaveLength(0); expect(handles('blue')).toHaveLength(0);

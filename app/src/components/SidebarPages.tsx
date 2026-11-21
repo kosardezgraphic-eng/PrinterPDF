@@ -174,23 +174,28 @@ export const SidebarPages: React.FC = () => {
 
   return (
     <aside
+      dir={lang === 'fa' ? 'rtl' : 'ltr'}
       onClick={() => setContextMenu(null)}
-      className="flex w-76 shrink-0 flex-col border-e border-slate-800 bg-slate-900/95 select-none"
+      className="flex w-72 shrink-0 flex-col border-r border-slate-200 bg-slate-100 text-slate-800 select-none dark:border-slate-800 dark:bg-slate-900/95 dark:text-slate-200"
     >
       {/* Sidebar Tabs: Pages | Bookmarks */}
-      <div className="flex border-b border-slate-800 bg-slate-950/60 p-1.5 gap-1">
+      <div className="flex border-b border-slate-200 bg-slate-200/60 p-1.5 gap-1 dark:border-slate-800 dark:bg-slate-950/60">
         <button
           type="button"
           onClick={() => setSidebarTab('pages')}
           className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-bold transition cursor-pointer ${
             sidebarTab === 'pages'
-              ? 'bg-sky-600 text-white shadow'
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'bg-sky-600 text-white shadow-xs'
+              : 'text-slate-600 hover:bg-white/60 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-200'
           }`}
         >
           <FileText className="h-3.5 w-3.5" />
           <span>{tr.sidebar.pagesTab}</span>
-          <span className="rounded-full bg-black/25 px-1.5 py-0.2 text-[10px]">
+          <span className={`rounded-full px-1.5 py-0.2 text-[10px] ${
+            sidebarTab === 'pages'
+              ? 'bg-black/20 text-white'
+              : 'bg-slate-300/70 text-slate-700 dark:bg-black/25 dark:text-slate-300'
+          }`}>
             {formatLocalizedNumber(pages.length, lang)}
           </span>
         </button>
@@ -200,13 +205,17 @@ export const SidebarPages: React.FC = () => {
           onClick={() => setSidebarTab('bookmarks')}
           className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-bold transition cursor-pointer ${
             sidebarTab === 'bookmarks'
-              ? 'bg-sky-600 text-white shadow'
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'bg-sky-600 text-white shadow-xs'
+              : 'text-slate-600 hover:bg-white/60 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-200'
           }`}
         >
           <Bookmark className="h-3.5 w-3.5" />
           <span>{tr.sidebar.bookmarksTab}</span>
-          <span className="rounded-full bg-black/25 px-1.5 py-0.2 text-[10px]">
+          <span className={`rounded-full px-1.5 py-0.2 text-[10px] ${
+            sidebarTab === 'bookmarks'
+              ? 'bg-black/20 text-white'
+              : 'bg-slate-300/70 text-slate-700 dark:bg-black/25 dark:text-slate-300'
+          }`}>
             {formatLocalizedNumber(bookmarks.length, lang)}
           </span>
         </button>
@@ -215,13 +224,13 @@ export const SidebarPages: React.FC = () => {
       {sidebarTab === 'pages' ? (
         <>
           {/* Quick Page Action Toolbar (A3 / A4) */}
-          <div className="flex flex-wrap items-center justify-between gap-1 border-b border-slate-800 bg-slate-900 px-2.5 py-1.5 text-[11px]">
+          <div className="flex flex-wrap items-center justify-between gap-1 border-b border-slate-200 bg-white/70 px-2.5 py-1.5 text-[11px] dark:border-slate-800 dark:bg-slate-900">
             <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={() => selectAllForPrint(true)}
                 title={tr.sidebar.selectAll}
-                className="rounded bg-slate-800 px-1.5 py-1 text-slate-300 hover:bg-slate-700 cursor-pointer"
+                className="rounded border border-slate-200 bg-white px-1.5 py-1 font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
               >
                 {lang === 'fa' ? 'همه' : 'All'}
               </button>
@@ -229,21 +238,21 @@ export const SidebarPages: React.FC = () => {
                 type="button"
                 onClick={() => selectAllForPrint(false)}
                 title={tr.sidebar.selectNone}
-                className="rounded bg-slate-800 px-1.5 py-1 text-slate-300 hover:bg-slate-700 cursor-pointer"
+                className="rounded border border-slate-200 bg-white px-1.5 py-1 font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
               >
                 {lang === 'fa' ? 'هیچ' : 'None'}
               </button>
               <button
                 type="button"
                 onClick={() => selectOddEvenForPrint('odd')}
-                className="rounded bg-slate-800 px-1.5 py-1 text-slate-300 hover:bg-slate-700 cursor-pointer"
+                className="rounded border border-slate-200 bg-white px-1.5 py-1 font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
               >
                 {lang === 'fa' ? 'فرد' : 'Odd'}
               </button>
               <button
                 type="button"
                 onClick={() => selectOddEvenForPrint('even')}
-                className="rounded bg-slate-800 px-1.5 py-1 text-slate-300 hover:bg-slate-700 cursor-pointer"
+                className="rounded border border-slate-200 bg-white px-1.5 py-1 font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
               >
                 {lang === 'fa' ? 'زوج' : 'Even'}
               </button>
@@ -251,7 +260,7 @@ export const SidebarPages: React.FC = () => {
                 type="button"
                 onClick={invertPrintSelection}
                 title={lang === 'fa' ? 'معکوس کردن انتخاب چاپ' : 'Invert print selection'}
-                className="rounded bg-slate-800 px-1.5 py-1 text-slate-300 hover:bg-slate-700 cursor-pointer"
+                className="rounded border border-slate-200 bg-white px-1.5 py-1 font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
               >{lang === 'fa' ? 'معکوس' : 'Invert'}</button>
             </div>
 
@@ -267,7 +276,7 @@ export const SidebarPages: React.FC = () => {
                   )
                 }
                 title={tr.sidebar.rotateRight}
-                className="rounded bg-slate-800 p-1 text-slate-300 hover:bg-slate-700 cursor-pointer"
+                className="rounded border border-slate-200 bg-white p-1 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
               >
                 <RotateCw className="h-3.5 w-3.5" />
               </button>
@@ -275,7 +284,7 @@ export const SidebarPages: React.FC = () => {
                 type="button"
                 onClick={() => duplicatePages(highlightedIds)}
                 title={tr.sidebar.duplicate}
-                className="rounded bg-slate-800 p-1 text-slate-300 hover:bg-slate-700 cursor-pointer"
+                className="rounded border border-slate-200 bg-white p-1 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
               >
                 <Copy className="h-3.5 w-3.5" />
               </button>
@@ -284,7 +293,7 @@ export const SidebarPages: React.FC = () => {
                 onClick={() => moveHighlightedPages('up')}
                 title={lang === 'fa' ? 'انتقال صفحات انتخاب‌شده به بالا' : 'Move selected pages up'}
                 aria-label={lang === 'fa' ? 'انتقال صفحات انتخاب‌شده به بالا' : 'Move selected pages up'}
-                className="rounded bg-slate-800 p-1 text-slate-300 hover:bg-slate-700 cursor-pointer"
+                className="rounded border border-slate-200 bg-white p-1 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
               >
                 <ArrowUp className="h-3.5 w-3.5" />
               </button>
@@ -293,7 +302,7 @@ export const SidebarPages: React.FC = () => {
                 onClick={() => moveHighlightedPages('down')}
                 title={lang === 'fa' ? 'انتقال صفحات انتخاب‌شده به پایین' : 'Move selected pages down'}
                 aria-label={lang === 'fa' ? 'انتقال صفحات انتخاب‌شده به پایین' : 'Move selected pages down'}
-                className="rounded bg-slate-800 p-1 text-slate-300 hover:bg-slate-700 cursor-pointer"
+                className="rounded border border-slate-200 bg-white p-1 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
               >
                 <ArrowDown className="h-3.5 w-3.5" />
               </button>
@@ -301,14 +310,14 @@ export const SidebarPages: React.FC = () => {
                 type="button"
                 onClick={() => deletePages(highlightedIds)}
                 title={tr.sidebar.deleteSelected}
-                className="rounded bg-rose-500/15 p-1 text-rose-400 hover:bg-rose-500/25 cursor-pointer"
+                className="rounded border border-rose-200 bg-rose-50 p-1 text-rose-600 hover:bg-rose-100 dark:border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-400 dark:hover:bg-rose-500/25 cursor-pointer"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </div>
           </div>
 
-          <div className="border-b border-slate-800 px-3 py-1 text-[10px] text-slate-400" aria-live="polite">
+          <div className="border-b border-slate-200 bg-slate-50 px-3 py-1 text-[10px] text-slate-500 dark:border-slate-800 dark:bg-transparent dark:text-slate-400" aria-live="polite">
             {dragIds.length ? (lang === 'fa' ? `در حال جابه‌جایی ${formatLocalizedNumber(dragIds.length,lang)} صفحه؛ روی نیمهٔ قبل یا بعد مقصد رها کنید.` : `Moving ${dragIds.length} page(s); drop on the before or after half of a thumbnail.`)
               : (lang === 'fa' ? 'برای جابه‌جایی بکشید؛ انتخاب چندتایی با Ctrl یا Shift.' : 'Drag to reorder; use Ctrl or Shift to select multiple pages.')}
           </div>
@@ -319,10 +328,10 @@ export const SidebarPages: React.FC = () => {
               return (
                 <div
                   key={`${documentId}:${docPages[0].page.id}`}
-                  className="rounded-xl border border-slate-800 bg-slate-950/60 overflow-hidden"
+                  className="rounded-xl border border-slate-200 bg-white shadow-xs overflow-hidden dark:border-slate-800 dark:bg-slate-950/60"
                 >
                   {/* Collapsible Document Group Header */}
-                  <div className="flex items-center justify-between bg-slate-900/90 px-2.5 py-2 border-b border-slate-800/80">
+                  <div className="flex items-center justify-between bg-slate-50 px-2.5 py-2 border-b border-slate-200 dark:bg-slate-900/90 dark:border-slate-800/80">
                     <button
                       type="button"
                       onClick={() => { if (doc) toggleDocumentCollapse(doc.id); }}
@@ -330,15 +339,15 @@ export const SidebarPages: React.FC = () => {
                       className="flex items-center gap-1.5 text-start min-w-0 flex-1 cursor-pointer"
                     >
                       {doc?.collapsed ? (
-                        <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        <ChevronRight className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400 shrink-0" />
                       ) : (
-                        <ChevronDown className="h-3.5 w-3.5 text-sky-400 shrink-0" />
+                        <ChevronDown className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
                       )}
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-xs font-bold text-slate-200">
+                        <div className="truncate text-xs font-bold text-slate-800 dark:text-slate-200">
                           {doc?.name ?? name}
                         </div>
-                        <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                        <div className="flex items-center gap-2 text-[10px] text-slate-500 dark:text-slate-400">
                           <span>
                             {formatLocalizedNumber(docPages.length, lang)}{' '}
                             {lang === 'fa' ? 'صفحه' : 'pages'}
@@ -352,7 +361,7 @@ export const SidebarPages: React.FC = () => {
                       type="button"
                       onClick={() => removeDocument(documentId)}
                       title={lang === 'fa' ? 'حذف این فایل از پروژه' : 'Remove file'}
-                      className="rounded-lg p-1 text-slate-400 hover:bg-rose-500/20 hover:text-rose-400 cursor-pointer"
+                      className="rounded-lg p-1 text-slate-500 hover:bg-rose-50 hover:text-rose-600 dark:text-slate-400 dark:hover:bg-rose-500/20 dark:hover:text-rose-400 cursor-pointer"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -422,8 +431,8 @@ export const SidebarPages: React.FC = () => {
                             }}
                             className={`group relative flex flex-col rounded-xl border p-1.5 transition cursor-pointer ${
                               page.isHighlighted
-                                ? 'border-sky-500 bg-sky-500/10 ring-1 ring-sky-500/40'
-                                : 'border-slate-800 bg-slate-900/70 hover:border-slate-700'
+                                ? 'border-sky-500 bg-sky-50 ring-1 ring-sky-500/40 dark:bg-sky-500/10'
+                                : 'border-slate-200 bg-slate-50/70 hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900/70 dark:hover:border-slate-700'
                             } ${draggingSet.has(page.id) ? 'opacity-50' : !page.selectedForPrint ? 'opacity-45' : ''}`}
                           >
                             {/* Top Row: Checkbox + Global Page Index */}
@@ -440,31 +449,31 @@ export const SidebarPages: React.FC = () => {
                                   e.stopPropagation();
                                   togglePageSelectedForPrint(page.id);
                                 }}
-                                className="flex items-center gap-1 text-[11px] font-bold text-slate-200 cursor-pointer"
+                                className="flex items-center gap-1 text-[11px] font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
                               >
                                 {page.selectedForPrint ? (
-                                  <CheckSquare className="h-3.5 w-3.5 text-sky-400" />
+                                  <CheckSquare className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" />
                                 ) : (
-                                  <Square className="h-3.5 w-3.5 text-slate-500" />
+                                  <Square className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" />
                                 )}
                                 <span>#{formatLocalizedNumber(globalIdx + 1, lang)}</span>
                               </button>
 
                               <div className="flex items-center gap-1">
                                 {page.rotation !== 0 && (
-                                  <span className="rounded bg-amber-500/20 px-1 text-[9px] font-bold text-amber-300">
+                                  <span className="rounded bg-amber-100 px-1 text-[9px] font-bold text-amber-800 dark:bg-amber-500/20 dark:text-amber-300">
                                     {page.rotation}°
                                   </span>
                                 )}
                                 {page.overrides?.invert && (
-                                  <span className="rounded bg-fuchsia-500/25 px-1 text-[9px] font-bold text-fuchsia-300">
+                                  <span className="rounded bg-fuchsia-100 px-1 text-[9px] font-bold text-fuchsia-700 dark:bg-fuchsia-500/25 dark:text-fuchsia-300">
                                     INV
                                   </span>
                                 )}
                                 <span
                                   className={`h-2 w-2 rounded-full ${
                                     page.colorProfile === 'color'
-                                      ? 'bg-sky-400'
+                                      ? 'bg-sky-500 dark:bg-sky-400'
                                       : page.colorProfile === 'grayscale'
                                         ? 'bg-slate-400'
                                         : 'bg-slate-700'
@@ -478,7 +487,7 @@ export const SidebarPages: React.FC = () => {
                             {placement && <PageThumbnail page={page} cell={placement.cell} sheetWidth={placement.width} sheetHeight={placement.height} effects={effects} />}
 
                             {/* Bottom Info */}
-                            <div className="mt-1 flex items-center justify-between text-[10px] text-slate-400">
+                            <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 tabular-nums">
                               <span>
                                 {Math.round(page.widthMm)}×{Math.round(page.heightMm)}
                               </span>
@@ -511,13 +520,13 @@ export const SidebarPages: React.FC = () => {
                 highlightPage(bm.targetPageId);
                 setSidebarTab('pages');
               }}
-              className="flex w-full items-center justify-between rounded-xl border border-slate-800 bg-slate-950/70 px-3 py-2 text-start text-xs text-slate-200 hover:border-sky-500/40 hover:bg-slate-800/60 cursor-pointer"
+              className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-start text-xs text-slate-800 hover:border-sky-400 hover:bg-sky-50/50 dark:border-slate-800 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:border-sky-500/40 dark:hover:bg-slate-800/60 cursor-pointer"
             >
               <div className="flex items-center gap-2 truncate">
-                <Bookmark className="h-3.5 w-3.5 text-sky-400 shrink-0" />
+                <Bookmark className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
                 <span className="truncate font-semibold">{bm.title}</span>
               </div>
-              <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">
+              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-400 tabular-nums">
                 #{formatLocalizedNumber(bm.pageIndex + 1, lang)}
               </span>
             </button>
@@ -537,11 +546,11 @@ export const SidebarPages: React.FC = () => {
             left: Math.max(8, Math.min(window.innerWidth - 232, contextMenu.x)),
             maxHeight: 'calc(100vh - 16px)',
           }}
-          className="fixed z-50 w-56 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-1.5 text-xs text-slate-200 shadow-2xl"
+          className="fixed z-50 w-56 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 text-xs text-slate-800 shadow-2xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
         >
           <div
             data-context-menu-scope
-            className="px-2.5 pb-1.5 pt-0.5 text-[10px] font-semibold text-sky-300"
+            className="px-2.5 pb-1.5 pt-0.5 text-[10px] font-semibold text-sky-700 dark:text-sky-300"
           >
             {scopeNote}
           </div>
@@ -549,9 +558,9 @@ export const SidebarPages: React.FC = () => {
             type="button"
             data-context-action="invert-print-selection"
             onClick={() => { invertPagesPrintSelection(contextTargets); setContextMenu(null); }}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 cursor-pointer"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
           >
-            <CheckSquare className="h-3.5 w-3.5 text-sky-400" aria-hidden="true" />
+            <CheckSquare className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" aria-hidden="true" />
             <span>
               {lang === 'fa'
                 ? `معکوس کردن وضعیت چاپ (${contextLabel})`
@@ -562,9 +571,9 @@ export const SidebarPages: React.FC = () => {
             type="button"
             data-context-action="invert-print-all"
             onClick={() => { invertAllPrintSelection(); setContextMenu(null); }}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 cursor-pointer"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
           >
-            <CheckSquare className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
+            <CheckSquare className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" aria-hidden="true" />
             <span>{lang === 'fa' ? 'معکوس کردن وضعیت چاپ همهٔ صفحات' : 'Invert print selection of all pages'}</span>
           </button>
           <button
@@ -574,9 +583,9 @@ export const SidebarPages: React.FC = () => {
               rotatePages(contextTargets, 90);
               setContextMenu(null);
             }}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 cursor-pointer"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
           >
-            <RotateCw className="h-3.5 w-3.5 text-sky-400" />
+            <RotateCw className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" />
             <span>
               {lang === 'fa' ? `چرخش ۹۰° راست (${contextLabel})` : `Rotate 90° CW (${contextLabel})`}
             </span>
@@ -588,9 +597,9 @@ export const SidebarPages: React.FC = () => {
               duplicatePages(contextTargets);
               setContextMenu(null);
             }}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 cursor-pointer"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
           >
-            <Copy className="h-3.5 w-3.5 text-emerald-400" />
+            <Copy className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
             <span>
               {lang === 'fa' ? `تکثیر صفحات (${contextLabel})` : `Duplicate (${contextLabel})`}
             </span>
@@ -602,9 +611,9 @@ export const SidebarPages: React.FC = () => {
               makePagesArray(contextTargets, 4);
               setContextMenu(null);
             }}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 cursor-pointer"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
           >
-            <Layers className="h-3.5 w-3.5 text-amber-400" />
+            <Layers className="h-3.5 w-3.5 text-amber-500 dark:text-amber-400" />
             <span>
               {lang === 'fa'
                 ? `تکرار آرایه‌ای ۴تایی (${contextLabel})`
@@ -618,9 +627,9 @@ export const SidebarPages: React.FC = () => {
               insertBlankPagesAfter(contextTargets);
               setContextMenu(null);
             }}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 cursor-pointer"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
           >
-            <FilePlus className="h-3.5 w-3.5 text-indigo-400" />
+            <FilePlus className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
             <span>
               {lang === 'fa'
                 ? `درج صفحه خالی بعد از هر صفحه (${contextLabel})`
@@ -634,9 +643,9 @@ export const SidebarPages: React.FC = () => {
               togglePagesInvertOverride(contextTargets);
               setContextMenu(null);
             }}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 cursor-pointer"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
           >
-            <Contrast className="h-3.5 w-3.5 text-fuchsia-400" />
+            <Contrast className="h-3.5 w-3.5 text-fuchsia-600 dark:text-fuchsia-400" />
             <span>
               {invertArmed
                 ? lang === 'fa'
@@ -654,14 +663,14 @@ export const SidebarPages: React.FC = () => {
               void exportMergedOrImposedPdf(true);
               setContextMenu(null);
             }}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 cursor-pointer"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
           >
-            <Scissors className="h-3.5 w-3.5 text-sky-400" />
+            <Scissors className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" />
             <span>
               {lang === 'fa' ? 'استخراج صفحات انتخابی به PDF' : 'Extract the selection to PDF'}
             </span>
           </button>
-          <div className="my-1 h-px bg-slate-800" />
+          <div className="my-1 h-px bg-slate-200 dark:bg-slate-800" />
           <button
             type="button"
             data-context-action="delete"
@@ -669,14 +678,14 @@ export const SidebarPages: React.FC = () => {
               deletePages(contextTargets);
               setContextMenu(null);
             }}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-rose-400 hover:bg-rose-500/15 cursor-pointer"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/15 cursor-pointer"
           >
             <Trash2 className="h-3.5 w-3.5" />
             <span>
               {lang === 'fa' ? `حذف صفحات انتخابی (${contextLabel})` : `Delete the selection (${contextLabel})`}
             </span>
           </button>
-          <div className="my-1 h-px bg-slate-800" />
+          <div className="my-1 h-px bg-slate-200 dark:bg-slate-800" />
           <button
             type="button"
             data-context-action="page-setup"
@@ -684,7 +693,7 @@ export const SidebarPages: React.FC = () => {
               setContextMenu(null);
               openPageSetup('margins');
             }}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-sky-300 hover:bg-slate-800 cursor-pointer"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-sky-700 hover:bg-slate-100 dark:text-sky-300 dark:hover:bg-slate-800 cursor-pointer"
           >
             <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
             <span>{lang === 'fa' ? 'تنظیمات صفحه...' : 'Page Setup...'}</span>

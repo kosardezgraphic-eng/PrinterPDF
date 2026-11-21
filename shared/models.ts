@@ -555,6 +555,14 @@ export interface AppSettings {
 /** `fast` = stored bitmap only, `crisp` = render the source page at display resolution. */
 export type PreviewFidelity = 'fast' | 'crisp';
 
+export type PdfImageHandling = 'preserve' | 'downsample-300' | 'downsample-150';
+export type PdfCompressionMode = 'lossless' | 'balanced' | 'compact';
+
+export interface PdfExportOptions {
+  imageHandling: PdfImageHandling;
+  compression: PdfCompressionMode;
+}
+
 /**
  * A named, reusable snapshot of the **sheet** settings: what happens to the pages — imposition and
  * placement, colour and effects, watermark, page numbering.

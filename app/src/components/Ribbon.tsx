@@ -73,6 +73,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
     printerMargins,
     effects,
     watermark,
+    pageNumbering,
     settings,
     pages,
     batchQueue,
@@ -106,6 +107,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
     addTextOverlay,
     addShapeOverlay,
     addNumberingOverlay,
+    updatePageNumbering,
     addImageOverlayFiles,
     exportMergedOrImposedPdf,
     insertBlankPageAfter,
@@ -171,8 +173,8 @@ export const Ribbon: React.FC<RibbonProps> = ({
 
   return (
     <section className={panelMode
-      ? "psp-tool-panel-ribbon flex h-full min-h-0 min-w-0 flex-col bg-slate-900/90 select-none"
-      : "shrink-0 border-b border-slate-800 bg-slate-900/90 select-none"
+      ? "psp-tool-panel-ribbon flex h-full min-h-0 min-w-0 flex-col bg-slate-50/70 text-slate-800 dark:bg-slate-900/90 dark:text-slate-100 select-none"
+      : "shrink-0 border-b border-slate-200 bg-white text-slate-800 dark:border-slate-800 dark:bg-slate-900/90 dark:text-slate-100 select-none"
     }>
       {/* Hidden File Input */}
       <input
@@ -191,7 +193,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
       {!panelMode && (
         <>
           {/* Ribbon Tab Header Strip */}
-        <div className="flex items-center justify-between border-b border-slate-800/80 px-3 pt-1">
+        <div className="flex items-center justify-between border-b border-slate-200 px-3 pt-1 dark:border-slate-800/80">
           <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
             {tabs.map((tab) => {
               const active = activeRibbonTab === tab.id;
@@ -208,17 +210,17 @@ export const Ribbon: React.FC<RibbonProps> = ({
                   }}
                   className={`flex items-center gap-1.5 rounded-t-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
                     active
-                      ? 'bg-slate-800 text-sky-400 border-t-2 border-sky-500'
-                      : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+                      ? 'border-t-2 border-sky-500 bg-sky-50 text-sky-700 dark:bg-slate-800 dark:text-sky-400'
+                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-slate-200'
                   }`}
                 >
                   {tab.icon}
                   <span className="sr-only">{tab.label}</span>
                   {tab.id === 'effects' && effects.invert && (
-                    <span className="h-2 w-2 rounded-full bg-fuchsia-400" />
+                    <span className="h-2 w-2 rounded-full bg-fuchsia-500 dark:bg-fuchsia-400" />
                   )}
                   {tab.id === 'batch' && (
-                    <span className="rounded-full bg-sky-500/20 px-1.5 text-[10px] text-sky-300">
+                    <span className="rounded-full bg-sky-100 px-1.5 text-[10px] text-sky-700 dark:bg-sky-500/20 dark:text-sky-300">
                       {batchQueue.length}
                     </span>
                   )}
@@ -231,7 +233,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
             type="button"
             onClick={() => setRibbonCollapsed(!ribbonCollapsed)}
             title={lang === 'fa' ? 'جمع‌کردن / بازکردن ریبون ابزارها' : 'Collapse / Expand Ribbon'}
-            className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-200 cursor-pointer"
+            className="rounded-lg p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200 cursor-pointer"
           >
             {ribbonCollapsed ? (
               <ChevronDown className="h-4 w-4" />
@@ -252,12 +254,12 @@ export const Ribbon: React.FC<RibbonProps> = ({
           {/* 1. FILE TAB */}
           {activeRibbonTab === 'file' && (
             <>
-              <div className="flex items-center gap-2 border-e border-slate-800 pe-4">
+              <div className="flex items-center gap-2 border-e border-slate-200 pe-4 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   title={lang === 'fa' ? 'افزودن فایل PDF / عکس' : 'Add PDF / Images'}
-                  className="flex flex-col items-center gap-1 rounded-xl bg-sky-600/20 border border-sky-500/40 px-3.5 py-2 text-sky-300 hover:bg-sky-600/30 cursor-pointer"
+                  className="flex flex-col items-center gap-1 rounded-xl border border-sky-300 bg-sky-50 px-3.5 py-2 text-sky-700 hover:bg-sky-100 dark:border-sky-500/40 dark:bg-sky-600/20 dark:text-sky-300 dark:hover:bg-sky-600/30 cursor-pointer"
                 >
                   <FilePlus2 className="h-5 w-5" />
                   <span className="sr-only">
@@ -268,9 +270,9 @@ export const Ribbon: React.FC<RibbonProps> = ({
                   type="button"
                   onClick={() => insertBlankPageAfter()}
                   title={tr.sidebar.insertBlank}
-                  className="flex flex-col items-center gap-1 rounded-xl border border-slate-700 bg-slate-800/80 px-3 py-2 text-slate-200 hover:bg-slate-700 cursor-pointer"
+                  className="flex flex-col items-center gap-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
                 >
-                  <Copy className="h-5 w-5 text-emerald-400" />
+                  <Copy className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
                   <span className="sr-only">{tr.sidebar.insertBlank}</span>
                 </button>
               </div>
@@ -280,7 +282,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
                   type="button"
                   onClick={() => void exportMergedOrImposedPdf(false)}
                   title={lang === 'fa' ? 'ذخیره خروجی PDF' : 'Export Final PDF'}
-                  className="flex flex-col items-center gap-1 rounded-xl border border-emerald-500/40 bg-emerald-600/15 px-3.5 py-2 text-emerald-300 hover:bg-emerald-600/25 cursor-pointer"
+                  className="flex flex-col items-center gap-1 rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-600/15 dark:text-emerald-300 dark:hover:bg-emerald-600/25 cursor-pointer"
                 >
                   <FileDown className="h-5 w-5" />
                   <span className="sr-only">
@@ -292,7 +294,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
                   type="button"
                   onClick={clearWorkspace}
                   title={lang === 'fa' ? 'بستن همه اسناد' : 'Close All'}
-                  className="flex flex-col items-center gap-1 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-rose-300 hover:bg-rose-500/20 cursor-pointer"
+                  className="flex flex-col items-center gap-1 rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-rose-700 hover:bg-rose-100 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-500/20 cursor-pointer"
                 >
                   <Trash2 className="h-5 w-5" />
                   <span className="sr-only">{lang === 'fa' ? 'بستن همه اسناد' : 'Close All'}</span>
@@ -307,8 +309,8 @@ export const Ribbon: React.FC<RibbonProps> = ({
               <MatrixSizeFields rows={layout.rows} cols={layout.cols} language={lang} onChange={setNUpMatrix} />
 
               {/* Group D2: Compact placement controls */}
-              <div className="flex min-w-0 flex-col gap-2 border-e border-slate-800 pe-3">
-                <span className="text-[10px] font-semibold text-slate-400">
+              <div className="flex min-w-0 flex-col gap-2 border-e border-slate-200 pe-3 dark:border-slate-800">
+                <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400">
                   {lang === 'fa' ? 'حالت چیدمان خانه‌ها' : 'Cell placement'}
                 </span>
                 <SegmentedControl
@@ -320,7 +322,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
                     { value: 'step-and-repeat', label: lang === 'fa' ? 'تکرار' : 'Repeat', icon: <Copy className="h-3.5 w-3.5" /> },
                   ]}
                 />
-                <label className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-[10px] text-slate-200 cursor-pointer">
+                <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[10px] text-slate-700 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-200 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={layout.uniqueScale}
@@ -332,11 +334,11 @@ export const Ribbon: React.FC<RibbonProps> = ({
               </div>
 
               {/* Group D4: Paper Size & Orientation */}
-              <div className="flex flex-col gap-1 border-e border-slate-800 pe-3">
-                <span className="text-[10px] font-semibold text-slate-400">
+              <div className="flex flex-col gap-1 border-e border-slate-200 pe-3 dark:border-slate-800">
+                <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400">
                   {lang === 'fa' ? 'سایز کاغذ و جهت (D4)' : 'Paper Size & Orientation'}
                 </span>
-                <div className="flex items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <select
                     aria-label={lang === 'fa' ? 'سایز کاغذ شیت' : 'Sheet Paper Size'}
                     value={selectedPaperOptionValue}
@@ -375,7 +377,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
                         });
                       }
                     }}
-                    className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-100 tabular-nums"
+                    className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 tabular-nums"
                   >
                     {driverPaperOptions.map((opt) => (
                       <option key={`${opt.id}-${opt.name}`} value={opt.name}>
@@ -389,11 +391,11 @@ export const Ribbon: React.FC<RibbonProps> = ({
                     )}
                     {!driverPaperOptions.some((o) => o.id === 'Custom') && <option value="Custom">Custom</option>}
                   </select>
-                  <span className="rounded border border-slate-700/80 bg-slate-950/70 px-1.5 py-1 text-[10px] font-mono text-sky-300 tabular-nums whitespace-nowrap">
+                  <span className="rounded border border-slate-200 bg-white px-1.5 py-1 text-[10px] font-mono text-sky-700 dark:border-slate-700/80 dark:bg-slate-950/70 dark:text-sky-300 tabular-nums whitespace-nowrap">
                     {Math.round(sheetDims.widthMm)}×{Math.round(sheetDims.heightMm)} mm
                   </span>
                   {layout.paperSize === 'Custom' && (['customWidthMm', 'customHeightMm'] as const).map((field) => (
-                    <label key={field} className="flex items-center gap-1 text-slate-300">
+                    <label key={field} className="flex items-center gap-1 text-slate-700 dark:text-slate-300">
                       <span>{field === 'customWidthMm' ? (lang === 'fa' ? 'عرض' : 'W') : (lang === 'fa' ? 'ارتفاع' : 'H')} mm</span>
                       <input type="number" min={10} max={2000} value={layout[field]}
                         onChange={(e) => {
@@ -408,7 +410,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
                             });
                           }
                         }}
-                        className="w-16 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-xs text-white tabular-nums" />
+                        className="w-16 rounded border border-slate-300 bg-white px-1 py-1 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white tabular-nums" />
                     </label>
                   ))}
 
@@ -430,9 +432,9 @@ export const Ribbon: React.FC<RibbonProps> = ({
               </div>
 
               {/* Group D3: Cross margins, gutters and scale */}
-              <div className="flex min-w-0 flex-col gap-2 border-e border-slate-800 pe-3">
+              <div className="flex min-w-0 flex-col gap-2 border-e border-slate-200 pe-3 dark:border-slate-800">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-semibold text-slate-400">
+                  <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400">
                     {lang === 'fa' ? 'حاشیه و فاصله‌ها' : 'Margins & gutters'}
                   </span>
                   <MarginPresetsMenu compact />
@@ -457,7 +459,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
                   }}
                 />
                 <div className="flex min-w-0 flex-col gap-1">
-                  <span className="text-[10px] font-semibold text-slate-400">
+                  <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400">
                     {lang === 'fa' ? 'مقیاس محتوا' : 'Content scale'}
                   </span>
                   <SegmentedControl
@@ -472,7 +474,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
                     ]}
                   />
                   {layout.scaleMode === 'custom' && (
-                    <label className="flex items-center gap-2 text-[10px] text-slate-300">
+                    <label className="flex items-center gap-2 text-[10px] text-slate-700 dark:text-slate-300">
                       <span>%</span>
                       <input
                         type="number"
@@ -481,7 +483,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
                         aria-label={lang === 'fa' ? 'درصد مقیاس دلخواه' : 'Custom scale percentage'}
                         value={layout.customScalePercent}
                         onChange={(e) => updateLayout({ customScalePercent: Math.max(10, Math.min(400, Number(e.target.value) || 10)) })}
-                        className="w-16 rounded border border-slate-700 bg-slate-800 px-1.5 py-1 text-xs text-white"
+                        className="w-16 rounded border border-slate-300 bg-white px-1.5 py-1 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                       />
                     </label>
                   )}
@@ -490,7 +492,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
 
               {/* Group D5: Duplex & sheet order */}
               <div className="flex min-w-0 flex-col gap-2">
-                <span className="text-[10px] font-semibold text-slate-400">
+                <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400">
                   {lang === 'fa' ? 'چاپ دورو و ترتیب چیدمان' : 'Duplex & sheet order'}
                 </span>
                 <div className="flex min-w-0 flex-col gap-1.5">
@@ -530,7 +532,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
                   <button
                     type="button"
                     onClick={() => setModalState('manualDuplex', true)}
-                    className="flex items-center justify-center gap-1 rounded-lg border border-indigo-500/40 bg-indigo-500/15 px-2.5 py-1.5 text-[10px] font-semibold text-indigo-300 hover:bg-indigo-500/25 cursor-pointer"
+                    className="flex items-center justify-center gap-1 rounded-lg border border-indigo-300 bg-indigo-50 px-2.5 py-1.5 text-[10px] font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-500/40 dark:bg-indigo-500/15 dark:text-indigo-300 dark:hover:bg-indigo-500/25 cursor-pointer"
                   >
                     <FlipHorizontal2 className="h-3.5 w-3.5" />
                     <span>{lang === 'fa' ? 'راهنمای ۳بعدی دوروی دستی' : '3D Manual Duplex'}</span>
@@ -544,14 +546,14 @@ export const Ribbon: React.FC<RibbonProps> = ({
           {activeRibbonTab === 'effects' && (
             <>
               {/* E1: Prominent Invert Toggle */}
-              <div className="flex items-center gap-2 border-e border-slate-800 pe-4">
+              <div className="flex items-center gap-2 border-e border-slate-200 pe-4 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={toggleGlobalInvert}
-                  className={`flex items-center gap-2.5 rounded-xl border px-4 py-2.5 font-bold transition cursor-pointer ${
+                  className={`flex w-full items-center gap-2.5 rounded-xl border px-4 py-2.5 font-bold transition cursor-pointer ${
                     effects.invert
                       ? 'border-fuchsia-400 bg-fuchsia-600 text-white shadow-lg shadow-fuchsia-600/30'
-                      : 'border-slate-700 bg-slate-800 text-slate-200 hover:border-fuchsia-500/50'
+                      : 'border-slate-300 bg-white text-slate-800 hover:border-fuchsia-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-fuchsia-500/50'
                   }`}
                 >
                   <Contrast className="h-5 w-5" />
@@ -573,8 +575,8 @@ export const Ribbon: React.FC<RibbonProps> = ({
               </div>
 
               {/* E2: Grayscale, B&W Threshold, Black Text */}
-              <div className="flex items-center gap-2 border-e border-slate-800 pe-4">
-                <label className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1.5 text-slate-200 cursor-pointer">
+              <div className="flex flex-wrap items-center gap-2 border-e border-slate-200 pe-4 dark:border-slate-800">
+                <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-slate-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={effects.grayscale}
@@ -586,7 +588,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
                   <span>{lang === 'fa' ? 'سیاه‌وسفید (Grayscale)' : 'Grayscale'}</span>
                 </label>
 
-                <label className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1.5 text-slate-200 cursor-pointer">
+                <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-slate-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={effects.blackAndWhite}
@@ -610,13 +612,13 @@ export const Ribbon: React.FC<RibbonProps> = ({
                       }
                       className="w-20 accent-sky-500"
                     />
-                    <span className="w-8 font-mono text-[11px] text-sky-300">
+                    <span className="w-8 font-mono text-[11px] text-sky-700 dark:text-sky-300">
                       {effects.threshold}
                     </span>
                   </div>
                 )}
 
-                <label className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1.5 text-slate-200 cursor-pointer">
+                <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-slate-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={effects.blackText}
@@ -630,9 +632,9 @@ export const Ribbon: React.FC<RibbonProps> = ({
               </div>
 
               {/* E2: compact icon-led brightness, contrast and gamma sliders */}
-              <div data-icon-effect-sliders className="flex min-w-0 flex-col gap-2 border-e border-slate-800 pe-3">
-                <label className="flex min-w-0 items-center gap-2 text-[10px] text-slate-300">
-                  <SunMedium className="h-4 w-4 shrink-0 text-amber-300" aria-hidden="true" />
+              <div data-icon-effect-sliders className="flex min-w-0 flex-col gap-2 border-e border-slate-200 pe-3 dark:border-slate-800">
+                <label className="flex min-w-0 items-center gap-2 text-[10px] text-slate-700 dark:text-slate-300">
+                  <SunMedium className="h-4 w-4 shrink-0 text-amber-500 dark:text-amber-300" aria-hidden="true" />
                   <span className="w-16 shrink-0">{lang === 'fa' ? 'روشنایی' : 'Brightness'}</span>
                   <input
                     aria-label={lang === 'fa' ? 'روشنایی' : 'Brightness'}
@@ -640,10 +642,10 @@ export const Ribbon: React.FC<RibbonProps> = ({
                     onChange={(e) => updateEffects({ brightness: Number(e.target.value) })}
                     className="min-w-0 flex-1 accent-sky-500"
                   />
-                  <output className="w-8 shrink-0 text-end font-mono tabular-nums text-sky-300">{effects.brightness}</output>
+                  <output className="w-8 shrink-0 text-end font-mono tabular-nums text-sky-700 dark:text-sky-300">{effects.brightness}</output>
                 </label>
-                <label className="flex min-w-0 items-center gap-2 text-[10px] text-slate-300">
-                  <Contrast className="h-4 w-4 shrink-0 text-violet-300" aria-hidden="true" />
+                <label className="flex min-w-0 items-center gap-2 text-[10px] text-slate-700 dark:text-slate-300">
+                  <Contrast className="h-4 w-4 shrink-0 text-violet-500 dark:text-violet-300" aria-hidden="true" />
                   <span className="w-16 shrink-0">{lang === 'fa' ? 'کنتراست' : 'Contrast'}</span>
                   <input
                     aria-label={lang === 'fa' ? 'کنتراست' : 'Contrast'}
@@ -651,10 +653,10 @@ export const Ribbon: React.FC<RibbonProps> = ({
                     onChange={(e) => updateEffects({ contrast: Number(e.target.value) })}
                     className="min-w-0 flex-1 accent-sky-500"
                   />
-                  <output className="w-8 shrink-0 text-end font-mono tabular-nums text-sky-300">{effects.contrast}</output>
+                  <output className="w-8 shrink-0 text-end font-mono tabular-nums text-sky-700 dark:text-sky-300">{effects.contrast}</output>
                 </label>
-                <label className="flex min-w-0 items-center gap-2 text-[10px] text-slate-300">
-                  <Droplets className="h-4 w-4 shrink-0 text-cyan-300" aria-hidden="true" />
+                <label className="flex min-w-0 items-center gap-2 text-[10px] text-slate-700 dark:text-slate-300">
+                  <Droplets className="h-4 w-4 shrink-0 text-cyan-600 dark:text-cyan-300" aria-hidden="true" />
                   <span className="w-16 shrink-0">{lang === 'fa' ? 'گاما' : 'Gamma'}</span>
                   <input
                     aria-label={lang === 'fa' ? 'گاما' : 'Gamma'}
@@ -662,18 +664,18 @@ export const Ribbon: React.FC<RibbonProps> = ({
                     onChange={(e) => updateEffects({ gamma: Number(e.target.value) })}
                     className="min-w-0 flex-1 accent-sky-500"
                   />
-                  <output className="w-8 shrink-0 text-end font-mono tabular-nums text-sky-300">{effects.gamma.toFixed(1)}</output>
+                  <output className="w-8 shrink-0 text-end font-mono tabular-nums text-sky-700 dark:text-sky-300">{effects.gamma.toFixed(1)}</output>
                 </label>
               </div>
 
               {/* Scope & Reset */}
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <select
                   value={effects.scope}
                   onChange={(e) =>
                     updateEffects({ scope: e.target.value as 'all' | 'selected' })
                   }
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-100"
+                  className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
                 >
                   <option value="all">
                     {lang === 'fa' ? 'اعمال روی کل سند' : 'Apply to Entire Document'}
@@ -685,7 +687,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
                 <button
                   type="button"
                   onClick={resetEffects}
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-700 cursor-pointer"
+                  className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer"
                 >
                   {lang === 'fa' ? 'بازنشانی افکت‌ها' : 'Reset'}
                 </button>
@@ -697,59 +699,54 @@ export const Ribbon: React.FC<RibbonProps> = ({
           {activeRibbonTab === 'insert' && (
             <>
               <button type="button" aria-label={lang==='fa'?'افزودن متن':'Add text'} disabled={!pages.length}
-                onClick={addTextOverlay} className="flex items-center gap-1 rounded-lg border border-sky-500 bg-sky-700 px-3 py-2 font-semibold text-white disabled:opacity-40">
+                onClick={addTextOverlay} className="flex items-center gap-1 rounded-lg border border-sky-500 bg-sky-600 px-3 py-2 font-semibold text-white hover:bg-sky-500 disabled:opacity-40 cursor-pointer">
                 <Type className="h-4 w-4" aria-hidden="true" />{lang==='fa'?'افزودن متن':'Add text'}
               </button>
               {/* Shapes: one click per outline, and the settings panel opens on what was inserted. */}
-              <div className="flex items-center gap-1 border-e border-slate-800 pe-3">
+              <div className="flex items-center gap-1 border-e border-slate-200 pe-3 dark:border-slate-800">
                 <ShapePicker onPick={(type) => { addShapeOverlay(type); }} />
               </div>
-              {/* The eraser belongs to the Insert tab because it edits what Insert puts on the sheet: pick a
-                  mode, then drag on the picture. Pressing the lit button again is the way out — a tool that
-                  could only be switched on would trap the pointer in a mode the operator has left. */}
-              <div className="flex items-center gap-1 border-e border-slate-800 pe-3" data-erase-tools>
+              <div className="flex flex-wrap items-center gap-1 border-e border-slate-200 pe-3 dark:border-slate-800" data-erase-tools>
                 <button type="button" data-erase-tool="brush" aria-pressed={eraseTool === 'brush'}
                   onClick={() => setEraseTool(eraseTool === 'brush' ? 'off' : 'brush')}
                   title={lang === 'fa' ? 'با قلم‌مو روی صفحه PDF یا تصویر بکشید تا همان قسمت پاک شود' : 'Drag a brush over a PDF page or picture to erase that area'}
-                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 font-bold ${eraseTool === 'brush' ? 'bg-rose-600 text-white' : 'border border-slate-700 bg-slate-800 text-slate-200 hover:border-rose-500/50'}`}>
+                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 font-bold cursor-pointer ${eraseTool === 'brush' ? 'bg-rose-600 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:border-rose-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-rose-500/50'}`}>
                   <Eraser className="h-4 w-4" aria-hidden="true" />
                   <span>{lang === 'fa' ? 'پاک‌کن: قلم‌مو' : 'Eraser: brush'}</span>
                 </button>
                 <button type="button" data-erase-tool="region" aria-pressed={eraseTool === 'region'}
                   onClick={() => setEraseTool(eraseTool === 'region' ? 'off' : 'region')}
                   title={lang === 'fa' ? 'روی صفحه PDF یا تصویر کادر بکشید؛ با Delete داخل آن پاک می‌شود' : 'Drag a rectangle on a PDF page or picture, then press Delete'}
-                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 font-bold ${eraseTool === 'region' ? 'bg-rose-600 text-white' : 'border border-slate-700 bg-slate-800 text-slate-200 hover:border-rose-500/50'}`}>
+                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 font-bold cursor-pointer ${eraseTool === 'region' ? 'bg-rose-600 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:border-rose-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-rose-500/50'}`}>
                   <SquareDashedMousePointer className="h-4 w-4" aria-hidden="true" />
                   <span>{lang === 'fa' ? 'پاک‌کن: ناحیه' : 'Eraser: region'}</span>
                 </button>
-                {/* The eyedropper is not a mode you stay in: one click on the artwork, and the brush is armed
-                    with that colour. That is the shortest path from "this exact grey" to "paint over there". */}
                 <button type="button" data-erase-tool="picker" aria-pressed={eraseTool === 'picker'}
                   onClick={() => setEraseTool(eraseTool === 'picker' ? 'off' : 'picker')}
                   title={lang === 'fa' ? 'روی صفحه PDF یا تصویر کلیک کنید تا رنگ همان نقطه قلم‌مو شود' : 'Click a PDF page or picture to pick its colour for the brush'}
-                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 font-bold ${eraseTool === 'picker' ? 'bg-amber-500 text-slate-950' : 'border border-slate-700 bg-slate-800 text-slate-200 hover:border-amber-400/60'}`}>
+                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 font-bold cursor-pointer ${eraseTool === 'picker' ? 'bg-amber-500 text-slate-950' : 'border border-slate-300 bg-white text-slate-700 hover:border-amber-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-amber-400/60'}`}>
                   <Pipette className="h-4 w-4" aria-hidden="true" />
                   <span>{lang === 'fa' ? 'قطره‌چکان' : 'Eyedropper'}</span>
                 </button>
                 {eraseTool !== 'off' && (
-                  <label className="flex items-center gap-1 text-[10px] text-slate-300">
+                  <label className="flex items-center gap-1 text-[10px] text-slate-700 dark:text-slate-300">
                     <span>{lang === 'fa' ? 'قطر (mm)' : 'Ø (mm)'}</span>
                     <input data-erase-size aria-label={lang === 'fa' ? 'قطر پاک‌کن بر حسب میلی‌متر' : 'Eraser diameter in millimetres'}
                       type="number" min="0.2" max="500" step="0.1" value={Number(eraseBrushMm.toFixed(2))}
                       onChange={(e) => setEraseBrushMm(Number(e.target.value))}
-                      className="w-16 rounded border border-slate-600 bg-slate-800 px-1 py-0.5 text-xs text-white" />
+                      className="w-16 rounded border border-slate-300 bg-white px-1 py-0.5 text-xs text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white" />
                   </label>
                 )}
                 {eraseTool !== 'off' && (
-                  <label className="flex items-center gap-1 text-[10px] text-slate-300" title={lang === 'fa'
+                  <label className="flex items-center gap-1 text-[10px] text-slate-700 dark:text-slate-300" title={lang === 'fa'
                     ? 'اگر رنگی انتخاب شود، قلم‌مو آن رنگ را می‌گذارد نه اینکه سوراخ کند'
                     : 'A colour makes the brush lay that colour down instead of cutting a hole'}>
                     <span>{lang === 'fa' ? 'رنگ' : 'Colour'}</span>
                     <input data-erase-color type="color" aria-label={lang === 'fa' ? 'رنگ قلم‌مو' : 'Brush colour'} value={eraseColor ?? '#ffffff'}
                       onChange={(e) => setEraseColor(e.target.value)}
-                      className="h-6 w-8 cursor-pointer rounded border border-slate-600 bg-slate-800 p-0.5" />
+                      className="h-6 w-8 cursor-pointer rounded border border-slate-300 bg-white p-0.5 dark:border-slate-600 dark:bg-slate-800" />
                     <button type="button" data-erase-color="hole" onClick={() => setEraseColor(null)}
-                      className={`rounded px-1.5 py-0.5 ${!eraseColor ? 'bg-rose-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>
+                      className={`rounded px-1.5 py-0.5 cursor-pointer ${!eraseColor ? 'bg-rose-600 text-white' : 'text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700'}`}>
                       {lang === 'fa' ? 'بدون رنگ' : 'No colour'}
                     </button>
                   </label>
@@ -758,33 +755,53 @@ export const Ribbon: React.FC<RibbonProps> = ({
               
               <button type="button" data-watermark-panel-trigger aria-pressed={watermark.enabled}
                 onClick={onOpenWatermarkPanel}
-                className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 font-semibold transition-colors ${watermark.enabled ? 'border-sky-400 bg-sky-600 text-white' : 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'}`}>
+                className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 font-semibold transition-colors cursor-pointer ${watermark.enabled ? 'border-sky-400 bg-sky-600 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'}`}>
                 <Droplets className="h-4 w-4" />
                 {lang === 'fa' ? 'واترمارک' : 'Watermark'}
               </button>
 
               <button type="button" data-booklet-panel-trigger aria-pressed={!!layout.booklet?.enabled}
                 onClick={onOpenBookletPanel}
-                className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 font-semibold transition-colors ${layout.booklet?.enabled ? 'border-amber-400 bg-amber-600 text-white' : 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'}`}>
+                className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 font-semibold transition-colors cursor-pointer ${layout.booklet?.enabled ? 'border-amber-400 bg-amber-600 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'}`}>
                 <FileStack className="h-4 w-4" />
                 {lang === 'fa' ? 'بوکلت' : 'Booklet'}
               </button>
 
               <div className="flex items-center gap-2">
-                <button type="button" disabled={!pages.length} onClick={()=>imageInputRef.current?.click()} aria-label={lang==='fa'?'افزودن تصویر روی صفحه':'Add picture on the page'} className="rounded-lg border border-sky-500 bg-sky-700 px-3 py-2 font-semibold text-white disabled:opacity-40">{lang==='fa'?'افزودن تصویر':'Add picture'}</button>
+                <button type="button" disabled={!pages.length} onClick={()=>imageInputRef.current?.click()} aria-label={lang==='fa'?'افزودن تصویر روی صفحه':'Add picture on the page'} className="rounded-lg border border-sky-500 bg-sky-600 px-3 py-2 font-semibold text-white hover:bg-sky-500 disabled:opacity-40 cursor-pointer">{lang==='fa'?'افزودن تصویر':'Add picture'}</button>
                 <input ref={imageInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e=>{const files=e.target.files?Array.from(e.target.files):[];if(files.length)void addImageOverlayFiles(files);e.target.value='';}}/>
-                <span className="text-[11px] text-slate-400">{lang==='fa'?'یا فایل تصویر را مستقیم روی برگه در پیش‌نمایش رها کنید.' : 'Or drop an image file straight onto a sheet in the preview.'}</span>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">{lang==='fa'?'یا فایل تصویر را مستقیم روی برگه در پیش‌نمایش رها کنید.' : 'Or drop an image file straight onto a sheet in the preview.'}</span>
               </div>
-              <button type="button" disabled={!pages.length} onClick={()=>addNumberingOverlay()} aria-label={lang==='fa'?'افزودن شماره صفحه قابل ویرایش':'Add editable page number'} className="rounded-lg border border-emerald-500 bg-emerald-700 px-3 py-2 font-semibold text-white disabled:opacity-40">{lang==='fa'?'افزودن شماره صفحه':'Add page number'}</button>
-              <p className="text-xs text-slate-400">{lang === 'fa' ? 'شماره قابل ویرایش را روی صفحه بکشید و برای زوج/فرد و فرمول از پنل استفاده کنید.' : 'Drag the editable number on the page; use the panel for odd/even scopes and formulas.'}</p>
+              <button type="button" disabled={!pages.length} onClick={()=>addNumberingOverlay()} aria-label={lang==='fa'?'افزودن شماره صفحه قابل ویرایش':'Add editable page number'} className="rounded-lg border border-emerald-500 bg-emerald-600 px-3 py-2 font-semibold text-white hover:bg-emerald-500 disabled:opacity-40 cursor-pointer">{lang==='fa'?'افزودن شماره صفحه':'Add page number'}</button>
+              <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  aria-label={lang === 'fa' ? 'شماره‌گذاری قدیمی (خروجی ثابت)' : 'Legacy numbering (fixed output only)'}
+                  checked={pageNumbering.enabled}
+                  onChange={(e) => updatePageNumbering({ enabled: e.target.checked })}
+                  className="accent-sky-500"
+                />
+                <span>{lang === 'fa' ? 'شماره قدیمی (Page / Bates)' : 'Page / Bates'}</span>
+              </label>
+              {pageNumbering.enabled && (
+                <button
+                  type="button"
+                  disabled={!pages.length}
+                  onClick={() => addNumberingOverlay(true)}
+                  className="rounded-lg border border-amber-400 bg-amber-50 px-2.5 py-1.5 font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-40 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300 cursor-pointer"
+                >
+                  {lang === 'fa' ? 'تبدیل شماره‌گذاری قدیمی به قابل ویرایش' : 'Convert legacy numbering to editable'}
+                </button>
+              )}
+              <p className="text-xs text-slate-500 dark:text-slate-400">{lang === 'fa' ? 'شماره قابل ویرایش را روی صفحه بکشید و برای زوج/فرد و فرمول از پنل استفاده کنید.' : 'Drag the editable number on the page; use the panel for odd/even scopes and formulas.'}</p>
 
             </>
           )}
 
           {/* 5. CROP BOX & MARKS TAB */}
           {activeRibbonTab === 'crop' && (
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-slate-200 cursor-pointer">
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={layout.showCellBorders}
@@ -796,7 +813,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
                 <span>{lang === 'fa' ? 'نمایش خطوط کادر هر خانه (Cell Borders)' : 'Show Cell Borders'}</span>
               </label>
 
-              <label className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-slate-200 cursor-pointer">
+              <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={layout.showCropMarks}
@@ -808,9 +825,9 @@ export const Ribbon: React.FC<RibbonProps> = ({
                 <span>{lang === 'fa' ? 'علائم برش چاپخانه (Crop Marks)' : 'Print Crop Marks'}</span>
               </label>
 
-              <div className="flex flex-col gap-1 border-e border-slate-800 pe-3 text-[11px]">
-                <span className="font-semibold text-slate-300">{lang === 'fa' ? 'حاشیه واقعی پرینتر' : 'Driver imageable margins'}</span>
-                <span className={printerMargins.status === 'available' ? 'text-emerald-300' : 'text-amber-300'}>
+              <div className="flex flex-col gap-1 border-e border-slate-200 pe-3 text-[11px] dark:border-slate-800">
+                <span className="font-semibold text-slate-700 dark:text-slate-300">{lang === 'fa' ? 'حاشیه واقعی پرینتر' : 'Driver imageable margins'}</span>
+                <span className={printerMargins.status === 'available' ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}>
                   {printerMargins.status === 'available'
                     ? (lang === 'fa'
                       ? `بالا ${printerMargins.marginsMm.top} · راست ${printerMargins.marginsMm.right} · پایین ${printerMargins.marginsMm.bottom} · چپ ${printerMargins.marginsMm.left} میلی‌متر`
@@ -820,23 +837,23 @@ export const Ribbon: React.FC<RibbonProps> = ({
                       : (lang === 'fa' ? 'اطلاعات محدوده چاپ در دسترس نیست' : 'Driver imageable area unavailable'))}
                 </span>
                 <div className="flex gap-1">
-                  <button type="button" onClick={refreshPrinterMargins} className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-slate-200">
+                  <button type="button" onClick={refreshPrinterMargins} className="rounded border border-slate-300 bg-white px-2 py-1 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer">
                     {lang === 'fa' ? 'به‌روزرسانی' : 'Refresh'}
                   </button>
                   <button type="button" disabled={printerMargins.status !== 'available'} onClick={resetMarginsToPrinter}
-                    className="rounded border border-emerald-600/50 bg-emerald-600/15 px-2 py-1 text-emerald-300 disabled:opacity-40">
+                    className="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-emerald-700 hover:bg-emerald-100 disabled:opacity-40 dark:border-emerald-600/50 dark:bg-emerald-600/15 dark:text-emerald-300 cursor-pointer">
                     {lang === 'fa' ? 'اعمال حاشیه درایور' : 'Use driver margins'}
                   </button>
                 </div>
               </div>
-              <div className="flex items-center gap-2 text-slate-300">
+              <div className="flex flex-wrap items-center gap-2 text-slate-700 dark:text-slate-300">
                 <span>{lang === 'fa' ? 'حاشیه‌های چهارگانه شیت (mm):' : 'Sheet Margins (mm):'}</span>
                 {(['top', 'right', 'bottom', 'left'] as const).map((side) => {
                   const activePrinterObj = printers.find((p) => p.name === selectedPrinterName);
                   const minSide = Math.max(0, resolvePrinterMinMargins(printerMargins, activePrinterObj)?.[side] ?? 0);
                   return (
                     <label key={side} className="flex items-center gap-1" title={minSide > 0 ? (lang === 'fa' ? `حداقل پرینتر: ${minSide} mm` : `Printer min: ${minSide} mm`) : undefined}>
-                      <span className="uppercase text-[10px] text-slate-400">{side}:</span>
+                      <span className="uppercase text-[10px] text-slate-500 dark:text-slate-400">{side}:</span>
                       <input
                         type="number"
                         min={minSide}
@@ -846,7 +863,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
                         onChange={(e) =>
                           updateMargins({ [side]: Math.max(minSide, Number(e.target.value) || 0) })
                         }
-                        className="w-12 rounded border border-slate-700 bg-slate-800 px-1.5 py-1 text-center text-white"
+                        className="w-12 rounded border border-slate-300 bg-white px-1.5 py-1 text-center text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                       />
                     </label>
                   );
@@ -857,7 +874,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
 
           {/* 6. PDF MERGE & SPLIT TAB (C1 - C2, A4) */}
           {activeRibbonTab === 'pdf' && (
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <button
                 type="button"
                 onClick={() => void exportMergedOrImposedPdf(false)}
@@ -876,7 +893,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
               <button
                 type="button"
                 onClick={() => void exportMergedOrImposedPdf(true)}
-                className="flex items-center gap-2 rounded-xl border border-sky-500/40 bg-sky-500/15 px-3.5 py-2 font-semibold text-sky-300 hover:bg-sky-500/25 cursor-pointer"
+                className="flex items-center gap-2 rounded-xl border border-sky-300 bg-sky-50 px-3.5 py-2 font-semibold text-sky-700 hover:bg-sky-100 dark:border-sky-500/40 dark:bg-sky-500/15 dark:text-sky-300 dark:hover:bg-sky-500/25 cursor-pointer"
               >
                 <Scissors className="h-4 w-4" />
                 <span>{tr.sidebar.extractPdf}</span>
@@ -885,7 +902,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
               <button
                 type="button"
                 onClick={() => setModalState('split', true)}
-                className="flex items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3.5 py-2 font-semibold text-amber-300 hover:bg-amber-500/25 cursor-pointer"
+                className="flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-2 font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300 dark:hover:bg-amber-500/25 cursor-pointer"
               >
                 <FileStack className="h-4 w-4" />
                 <span>
@@ -898,7 +915,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
               <button
                 type="button"
                 onClick={reversePageOrder}
-                className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-slate-200 hover:bg-slate-700 cursor-pointer"
+                className="flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
               >
                 <RotateCw className="h-4 w-4" />
                 <span>{tr.sidebar.reverseOrder}</span>
@@ -908,7 +925,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
 
           {/* 7. BATCH PRINT TAB (H1 - H2) */}
           {activeRibbonTab === 'batch' && (
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <button
                 type="button"
                 onClick={addCurrentWorkspaceToBatch}
@@ -945,7 +962,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
               <button
                 type="button"
                 onClick={retryFailedBatchJobs}
-                className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-slate-200 hover:bg-slate-700 cursor-pointer"
+                className="flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
               >
                 <RefreshCw className="h-4 w-4" />
                 <span>{lang === 'fa' ? 'تلاش مجدد خطاها (Retry)' : 'Retry Failed'}</span>
@@ -972,23 +989,23 @@ export const Ribbon: React.FC<RibbonProps> = ({
                 type="button"
                 disabled={!selectedPrinterName}
                 onClick={() => void openPrinterPreferences(selectedPrinterName)}
-                className="flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-600/15 px-3.5 py-2 font-semibold text-emerald-300 hover:bg-emerald-600/25 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer whitespace-nowrap shrink-0"
+                className="flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2 font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-emerald-500/40 dark:bg-emerald-600/15 dark:text-emerald-300 dark:hover:bg-emerald-600/25 cursor-pointer whitespace-nowrap shrink-0"
               >
                 {lang === 'fa' ? 'تنظیمات درایور ویندوز و همگام‌سازی شیت' : 'Windows Driver Preferences'}
               </button>
               {selectedPrinter && (
-                <div className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/70 px-3 py-1.5 text-[11px] text-slate-300 tabular-nums">
-                  <span className="font-bold text-sky-300">{selectedPrinter.activeProfile.paperName || selectedPrinter.activeProfile.paperSize}</span>
+                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/70 dark:text-slate-300 tabular-nums">
+                  <span className="font-bold text-sky-700 dark:text-sky-300">{selectedPrinter.activeProfile.paperName || selectedPrinter.activeProfile.paperSize}</span>
                   <span>({Math.round(sheetDims.widthMm)}×{Math.round(sheetDims.heightMm)} mm)</span>
-                  <span className="text-slate-600">|</span>
-                  <span>{lang === 'fa' ? 'سینی:' : 'Tray:'} <strong className="text-slate-100">{selectedPrinter.activeProfile.tray}</strong></span>
-                  <span className="text-slate-600">|</span>
+                  <span className="text-slate-300 dark:text-slate-600">|</span>
+                  <span>{lang === 'fa' ? 'سینی:' : 'Tray:'} <strong className="text-slate-900 dark:text-slate-100">{selectedPrinter.activeProfile.tray}</strong></span>
+                  <span className="text-slate-300 dark:text-slate-600">|</span>
                   <span>{selectedPrinter.activeProfile.dpi} DPI</span>
-                  <span className="text-slate-600">|</span>
+                  <span className="text-slate-300 dark:text-slate-600">|</span>
                   <span>{selectedPrinter.activeProfile.duplexMode}</span>
                 </div>
               )}
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-slate-500 dark:text-slate-400">
                 {lang === 'fa'
                   ? 'پنل کامل امکانات سخت‌افزاری، درایور و صف Spooler در پایین باز شده است.'
                   : 'Full Hardware & Driver Capabilities Inspector and Spooler Queue are open below.'}
@@ -998,8 +1015,8 @@ export const Ribbon: React.FC<RibbonProps> = ({
 
           {/* 9. VIEW TAB (J1) */}
           {activeRibbonTab === 'view' && (
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-950 p-1">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1 dark:border-slate-800 dark:bg-slate-950">
                 {(['single', 'continuous', 'double', 'grid'] as const).map((m) => (
                   <button
                     key={m}
@@ -1008,7 +1025,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
                     className={`rounded-lg px-2.5 py-1 text-xs font-semibold cursor-pointer ${
                       viewMode === m
                         ? 'bg-sky-600 text-white'
-                        : 'text-slate-400 hover:text-slate-200'
+                        : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
                     }`}
                   >
                     {m === 'single'
@@ -1028,41 +1045,41 @@ export const Ribbon: React.FC<RibbonProps> = ({
                 ))}
               </div>
 
-              <label className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-slate-200 cursor-pointer">
+              <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={showRulers}
                   onChange={(e) => setShowRulers(e.target.checked)}
                   className="accent-sky-500"
                 />
-                <Ruler className="h-3.5 w-3.5 text-sky-400" />
+                <Ruler className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" />
                 <span>{lang === 'fa' ? 'نمایش خط‌کش دقیق' : 'Rulers'}</span>
               </label>
 
-              <label className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-slate-200 cursor-pointer">
+              <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={snapEnabled}
                   onChange={(e) => setSnapEnabled(e.target.checked)}
                   className="accent-purple-500"
                 />
-                <Magnet className="h-3.5 w-3.5 text-purple-400" />
+                <Magnet className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
                 <span>{lang === 'fa' ? 'چسبندگی آهن‌ربایی' : 'Magnetic Snap'}</span>
               </label>
 
-              <label className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-slate-200 cursor-pointer">
+              <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={smartGuidesEnabled}
                   onChange={(e) => setSmartGuidesEnabled(e.target.checked)}
                   className="accent-purple-500"
                 />
-                <Sparkles className="h-3.5 w-3.5 text-purple-400" />
+                <Sparkles className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
                 <span>{lang === 'fa' ? 'خطوط راهنمای بنفش' : 'Purple Smart Guides'}</span>
               </label>
 
               <label
-                className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-slate-200 cursor-pointer"
+                className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
                 title={lang === 'fa'
                   ? 'صفحه‌های PDF را با رندر دوباره در اندازهٔ نمایش نشان می‌دهد تا خط‌های نازک و متن در زوم تار نشوند؛ فقط صفحات دیدنی رندر می‌شوند و کش، محدود است.'
                   : 'Re-renders each PDF page at the size it is displayed, so hairlines and small text stay sharp while zooming. Only visible pages are rendered and the cache is bounded.'}
@@ -1074,7 +1091,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
                   onChange={(e) => updateSettings({ previewFidelity: e.target.checked ? 'crisp' : 'fast' })}
                   className="accent-emerald-500"
                 />
-                <VectorSquare className="h-3.5 w-3.5 text-emerald-400" />
+                <VectorSquare className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
                 <span>{lang === 'fa' ? 'پیش‌نمایش دقیق وکتور' : 'Crisp vector preview'}</span>
               </label>
 
@@ -1085,30 +1102,30 @@ export const Ribbon: React.FC<RibbonProps> = ({
                   ? 'تصویرهای رندرشدهٔ پیش‌نمایش از حافظه پاک می‌شوند؛ صفحات دوباره در زمان لازم رندر می‌شوند.'
                   : 'Frees every preview bitmap held in memory; pages that are looked at again are re-rendered on demand.'}
                 onClick={() => clearCrispPreviewCacheNow()}
-                className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-[11px] text-slate-300 hover:bg-slate-700 cursor-pointer"
+                className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer"
               >
                 {lang === 'fa' ? 'خالی‌کردن کش پیش‌نمایش' : 'Free the preview cache'}
               </button>
 
-              <label className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-slate-200 cursor-pointer">
+              <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={loupeEnabled}
                   onChange={(e) => setLoupeEnabled(e.target.checked)}
                   className="accent-sky-500"
                 />
-                <Search className="h-3.5 w-3.5 text-amber-400" />
+                <Search className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
                 <span>{tr.preview.loupeMode}</span>
               </label>
 
-              <label className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-slate-200 cursor-pointer">
+              <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={transparentMode}
                   onChange={(e) => setTransparentMode(e.target.checked)}
                   className="accent-sky-500"
                 />
-                <SunMedium className="h-3.5 w-3.5 text-emerald-400" />
+                <SunMedium className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
                 <span>{tr.preview.transparentMode}</span>
               </label>
 

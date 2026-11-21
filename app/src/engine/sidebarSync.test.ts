@@ -6,6 +6,7 @@ import type { PageItem, SourceDocument } from '@shared/models';
 import { DEFAULT_LAYOUT, DEFAULT_SETTINGS, useAppStore } from '../store/useAppStore';
 import { PreviewWorkspace } from '../components/PreviewWorkspace';
 import { SidebarPages } from '../components/SidebarPages';
+import { TopToolRibbon } from '../components/TopToolRibbon';
 import { computeImpositionSheets } from './layoutEngine';
 import { pageImageStyle } from '../components/PageContentImage';
 
@@ -26,6 +27,7 @@ beforeEach(() => {
     activeSheetIndex:0, viewMode:'single', sidebarTab:'pages', sidebarReveal:null, previewPageRequest:null });
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   act(() => root.render(React.createElement(React.Fragment, null,
+    React.createElement(TopToolRibbon),
     React.createElement(SidebarPages), React.createElement(PreviewWorkspace, {onCursorMoveMm:()=>{}}))));
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); });
@@ -56,17 +58,20 @@ describe('preview and thumbnails', () => {
     expect(viewport.scrollTop).toBe(0);
     measure.mockRestore();
   });
-  it('follows scrolling in continuous view and clears selection for a blank duplex side', () => {
+  it('hides trailing blank duplex padding side and follows scrolling in continuous view', () => {
     act(() => useAppStore.setState({ viewMode:'continuous', layout:{...useAppStore.getState().layout,duplexMode:'long-edge'}, pages:[makePage('p1','d1',true)] }));
+    expect(container.querySelectorAll('[data-sheet-index]')).toHaveLength(1);
+    act(() => useAppStore.setState({ pages:[makePage('p1','d1',true), makePage('p2','d2')] }));
     const viewport = container.querySelector('[data-preview-viewport]') as HTMLElement;
     Object.defineProperty(viewport,'clientHeight',{value:100,configurable:true});
     vi.spyOn(viewport,'getBoundingClientRect').mockReturnValue({top:0,bottom:100,left:0,right:100,width:100,height:100,x:0,y:0,toJSON:()=>({})});
     const sides = container.querySelectorAll<HTMLElement>('[data-sheet-index]');
+    expect(sides).toHaveLength(2);
     vi.spyOn(sides[0],'getBoundingClientRect').mockReturnValue({top:-200,bottom:-100,left:0,right:100,width:100,height:100,x:0,y:-200,toJSON:()=>({})});
     vi.spyOn(sides[1],'getBoundingClientRect').mockReturnValue({top:0,bottom:100,left:0,right:100,width:100,height:100,x:0,y:0,toJSON:()=>({})});
     act(() => viewport.dispatchEvent(new Event('scroll',{bubbles:true})));
     expect(useAppStore.getState().activeSheetIndex).toBe(1);
-    expect(highlights()).toEqual([]);
+    expect(highlights()).toEqual(['p2']);
   });
   it('follows the nearest sheet while scrolling in grid view', () => {
     act(() => useAppStore.setState({viewMode:'grid'}));

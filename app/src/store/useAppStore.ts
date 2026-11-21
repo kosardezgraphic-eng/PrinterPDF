@@ -23,6 +23,7 @@ import type {
   PageNumberSettings,
   PageRotation,
   PageTransform,
+  PdfExportOptions,
   PrinterInfo,
   RulerGuide,
   PrinterMarginResult,
@@ -99,11 +100,38 @@ export type RibbonTabId =
   | 'printers'
   | 'view';
 
+export type InspectorToolId =
+  | 'layout'
+  | 'margins'
+  | 'crop'
+  | 'effects'
+  | 'text'
+  | 'numbering'
+  | 'image'
+  | 'shape'
+  | 'eraser'
+  | 'watermark'
+  | 'booklet'
+  | 'pdf'
+  | 'batch'
+  | 'printers'
+  | 'view'
+  | 'file';
+
+export type CanvasTool = 'move' | 'crop' | 'layout' | 'measure';
+
 export type WorkspaceDrawerState = 'batch' | 'printers' | 'closed' | null;
 
 export type PageEditScope = 'current' | 'selected' | 'all';
 
 export type PreviewViewMode = 'single' | 'double' | 'grid' | 'continuous';
+
+export interface PdfPreviewModalState {
+  url: string;
+  fileName: string;
+  pageCount: number;
+  byteLength: number;
+}
 
 export interface ToastNotification {
   id: string;
@@ -213,7 +241,7 @@ export const DEFAULT_EFFECTS: EffectsSettings = {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   language: 'fa',
-  theme: 'dark',
+  theme: 'light',
   unit: 'mm',
   calendar: 'shamsi',
   userName: 'اپراتور چاپخانه مرکزی',
@@ -315,6 +343,14 @@ interface AppState {
   // UI & Workspace State
   activeRibbonTab: RibbonTabId;
   ribbonCollapsed: boolean;
+  activeInspectorTool: InspectorToolId;
+  inspectorCollapsed: boolean;
+  canvasTool: CanvasTool;
+  showPreflight: boolean;
+  fitPageNonce: number;
+  pdfExportOptions: PdfExportOptions;
+  pdfPreviewModal: PdfPreviewModalState | null;
+  isGeneratingPdfPreview: boolean;
   workspaceDrawer: WorkspaceDrawerState;
   sidebarTab: 'pages' | 'bookmarks';
   activeSheetIndex: number;
@@ -466,7 +502,10 @@ interface AppState {
   updateSettings: (patch: Partial<AppSettings>) => void;
 
   // Export & Print & Project
+  setPdfExportOptions: (patch: Partial<PdfExportOptions>) => void;
   exportMergedOrImposedPdf: (onlyHighlighted?: boolean) => Promise<void>;
+  openPdfPreviewModal: () => Promise<void>;
+  closePdfPreviewModal: () => void;
   savePspProject: () => void;
   openPspProjectFile: (file: File) => Promise<void>;
 
@@ -505,6 +544,11 @@ interface AppState {
   // UI Helpers
   setActiveRibbonTab: (tab: RibbonTabId) => void;
   setRibbonCollapsed: (collapsed: boolean) => void;
+  setActiveInspectorTool: (tool: InspectorToolId) => void;
+  setInspectorCollapsed: (collapsed: boolean) => void;
+  setCanvasTool: (tool: CanvasTool) => void;
+  setShowPreflight: (show: boolean) => void;
+  triggerFitPage: () => void;
   setWorkspaceDrawer: (drawer: WorkspaceDrawerState) => void;
   setSidebarTab: (tab: 'pages' | 'bookmarks') => void;
   setActiveSheetIndex: (idx: number) => void;
@@ -732,6 +776,14 @@ export const useAppStore = create<AppState>((set, get) => {
 
     activeRibbonTab: 'layout',
     ribbonCollapsed: false,
+    activeInspectorTool: 'layout',
+    inspectorCollapsed: false,
+    canvasTool: 'move',
+    showPreflight: false,
+    fitPageNonce: 0,
+    pdfExportOptions: { imageHandling: 'preserve', compression: 'lossless' },
+    pdfPreviewModal: null,
+    isGeneratingPdfPreview: false,
     workspaceDrawer: null,
     sidebarTab: 'pages',
     activeSheetIndex: 0,
@@ -1918,7 +1970,13 @@ export const useAppStore = create<AppState>((set, get) => {
     },
     selectOverlay: id => {
       if (get().textEdit && get().textEdit?.overlayId !== id) get().finishTextEdit();
-      set({selectedOverlayId:id});
+      const overlay = id ? get().overlays.find(item => item.id === id) : undefined;
+      set(() => ({
+        selectedOverlayId: id,
+        ...(overlay && (overlay.kind === 'text' || overlay.kind === 'numbering' || overlay.kind === 'image' || overlay.kind === 'shape')
+          ? { activeInspectorTool: overlay.kind, inspectorCollapsed: false }
+          : {}),
+      }));
     },
     addImageOverlayFiles: async (files, sheet, point) => {
       if(get().textEdit)get().finishTextEdit();
@@ -1943,7 +2001,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const state=get();
       const before=captureSnapshot(state);
       const first=created[0];
-      set({overlays:[...state.overlays,...created],selectedOverlayId:first.id,
+      set({overlays:[...state.overlays,...created],selectedOverlayId:first.id,activeInspectorTool:'image',inspectorCollapsed:false,
         ...(first.target==='page'&&first.targetPageIds[0]?{activePageId:first.targetPageIds[0]}:{})});
       pushUndo(created.length>1?`افزودن ${created.length} تصویر`:'افزودن تصویر روی صفحه',
         created.length>1?`Add ${created.length} pictures to the page`:'Add picture to page',before,captureSnapshot(get()));
@@ -1954,7 +2012,12 @@ export const useAppStore = create<AppState>((set, get) => {
     },
     setEraseTool: (tool) => {
       // Leaving the eraser also hands the pointer back: a half-finished gesture must not survive a mode flip.
-      set({ eraseTool: tool, textEdit: null, erasePending: null });
+      set({
+        eraseTool: tool,
+        textEdit: null,
+        erasePending: null,
+        ...(tool !== 'off' ? { canvasTool: 'move' as const, activeInspectorTool: 'eraser' as const, inspectorCollapsed: false } : {}),
+      });
     },
     setEraseColor: (color) => {
       set({ eraseColor: sanitizeEraseColor(color ?? undefined) ?? null });
@@ -2338,6 +2401,11 @@ export const useAppStore = create<AppState>((set, get) => {
       clearCrispPreviewCache();
     },
 
+    setPdfExportOptions: (patch) =>
+      set((state) => ({
+        pdfExportOptions: { ...state.pdfExportOptions, ...patch },
+      })),
+
     exportMergedOrImposedPdf: async (onlyHighlighted = false) => {
       if(get().textEdit)get().finishTextEdit();
       const state = get();
@@ -2368,6 +2436,7 @@ export const useAppStore = create<AppState>((set, get) => {
           overlays: state.overlays,
           allPages: state.pages,
           userName: state.settings.userName,
+          exportOptions: state.pdfExportOptions,
           onProgress: (percent) => set({ exportProgress: percent }),
         });
 
@@ -2390,6 +2459,72 @@ export const useAppStore = create<AppState>((set, get) => {
       } finally {
         set({ isExportingPdf: false, exportProgress: 0 });
       }
+    },
+
+    openPdfPreviewModal: async () => {
+      if (get().textEdit) get().finishTextEdit();
+      const state = get();
+      const targetPages = state.pages.filter((p) => p.selectedForPrint);
+      if (targetPages.length === 0) {
+        state.addToast({
+          type: 'warning',
+          title:
+            state.settings.language === 'fa'
+              ? 'هیچ صفحه‌ای برای پیش‌نمایش PDF انتخاب نشده است'
+              : 'No pages selected for PDF preview',
+        });
+        return;
+      }
+      const prevUrl = state.pdfPreviewModal?.url;
+      set({ isGeneratingPdfPreview: true, isExportingPdf: true, exportProgress: 15 });
+      try {
+        const pdfBytes = await exportImposedPdf({
+          documents: state.documents,
+          pages: targetPages.map((p) => ({ ...p, selectedForPrint: true })),
+          layout: state.layout,
+          effects: state.effects,
+          watermark: state.watermark,
+          pageNumbering: state.pageNumbering,
+          overlays: state.overlays,
+          allPages: state.pages,
+          userName: state.settings.userName,
+          exportOptions: state.pdfExportOptions,
+          onProgress: (percent) => set({ exportProgress: percent }),
+        });
+        const loaded = await PDFDocument.load(pdfBytes);
+        const blob = new Blob([pdfBytes.buffer as ArrayBuffer], { type: 'application/pdf' });
+        const url =
+          typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
+            ? URL.createObjectURL(blob)
+            : `data:application/pdf;base64,${btoa(Array.from(pdfBytes, (b) => String.fromCharCode(b)).join(''))}`;
+        if (prevUrl && prevUrl.startsWith('blob:') && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+          URL.revokeObjectURL(prevUrl);
+        }
+        set({
+          pdfPreviewModal: {
+            url,
+            fileName: `PrintStudio-Preview-${state.layout.rows}x${state.layout.cols}.pdf`,
+            pageCount: loaded.getPageCount(),
+            byteLength: pdfBytes.byteLength,
+          },
+        });
+      } catch (error) {
+        state.addToast({
+          type: 'error',
+          title: state.settings.language === 'fa' ? 'ساخت پیش‌نمایش PDF ناموفق بود' : 'PDF preview failed',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        set({ isGeneratingPdfPreview: false, isExportingPdf: false, exportProgress: 0 });
+      }
+    },
+
+    closePdfPreviewModal: () => {
+      const prevUrl = get().pdfPreviewModal?.url;
+      if (prevUrl && prevUrl.startsWith('blob:') && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+        URL.revokeObjectURL(prevUrl);
+      }
+      set({ pdfPreviewModal: null });
     },
 
     savePspProject: () => {
@@ -3262,6 +3397,40 @@ export const useAppStore = create<AppState>((set, get) => {
 
     setActiveRibbonTab: (tab) => set({ activeRibbonTab: tab, workspaceDrawer: null }),
     setRibbonCollapsed: (collapsed) => set({ ribbonCollapsed: collapsed }),
+    setActiveInspectorTool: (tool) =>
+      set((state) => {
+        const nextRibbon: Partial<AppState> =
+          tool === 'file' ||
+          tool === 'layout' ||
+          tool === 'effects' ||
+          tool === 'crop' ||
+          tool === 'pdf' ||
+          tool === 'batch' ||
+          tool === 'printers' ||
+          tool === 'view'
+            ? { activeRibbonTab: tool, workspaceDrawer: null, ribbonCollapsed: false }
+            : tool === 'margins'
+              ? { activeRibbonTab: 'layout', workspaceDrawer: null, ribbonCollapsed: false }
+              : {};
+        let nextSelectedOverlayId = state.selectedOverlayId;
+        if (tool === 'text' || tool === 'numbering' || tool === 'image' || tool === 'shape') {
+          const current = state.overlays.find((o) => o.id === state.selectedOverlayId);
+          if (!current || current.kind !== tool) {
+            const firstMatch = state.overlays.find((o) => o.kind === tool);
+            if (firstMatch) nextSelectedOverlayId = firstMatch.id;
+          }
+        }
+        return {
+          ...nextRibbon,
+          activeInspectorTool: tool,
+          inspectorCollapsed: false,
+          selectedOverlayId: nextSelectedOverlayId,
+        };
+      }),
+    setInspectorCollapsed: (collapsed) => set({ inspectorCollapsed: collapsed }),
+    setCanvasTool: (tool) => set({ canvasTool: tool }),
+    setShowPreflight: (show) => set({ showPreflight: show }),
+    triggerFitPage: () => set((state) => ({ fitPageNonce: state.fitPageNonce + 1 })),
     setWorkspaceDrawer: (drawer) => set({ workspaceDrawer: drawer }),
     setSidebarTab: (tab) => set({ sidebarTab: tab }),
     setActiveSheetIndex: (idx) => set({ activeSheetIndex: Math.max(0, idx) }),

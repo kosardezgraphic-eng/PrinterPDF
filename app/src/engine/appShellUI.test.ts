@@ -43,7 +43,7 @@ describe('application shell UI', () => {
     expect(markup.indexOf('workspace-content')).toBeLessThan(markup.indexOf('status-content'));
   });
 
-  it('retains the light theme class at the shell boundary', () => {
+  it('retains the native light theme class without legacy CSS invert filters', () => {
     const markup = renderToStaticMarkup(
       React.createElement(AppShell, {
         theme: 'light',
@@ -55,7 +55,9 @@ describe('application shell UI', () => {
       }),
     );
 
-    expect(markup).toContain('theme-light invert hue-rotate-180');
+    expect(markup).toContain('theme-light');
+    expect(markup).not.toContain('invert');
+    expect(markup).not.toContain('hue-rotate-180');
   });
 });
 
@@ -119,7 +121,7 @@ describe('workspace drawer state', () => {
 });
 
 describe('topbar and status bar roles', () => {
-  it('keeps the Counter trigger in QuickBar and leaves StatusBar informational', () => {
+  it('keeps the Counter trigger in QuickBar and places the zoom slider toolbar inside StatusBar', () => {
     const quickBarMarkup = renderToStaticMarkup(React.createElement(QuickBar));
     const statusMarkup = renderToStaticMarkup(
       React.createElement(StatusBar, { cursorPos: null }),
@@ -127,9 +129,9 @@ describe('topbar and status bar roles', () => {
 
     expect((quickBarMarkup.match(/data-counter-trigger/g) ?? []).length).toBe(1);
     expect(statusMarkup).toContain('data-status-bar-info');
+    expect(statusMarkup).toContain('data-zoom-toolbar');
+    expect(statusMarkup).toContain('type="range"');
     expect(statusMarkup).not.toContain('data-counter-trigger');
-    expect(statusMarkup).not.toContain('type="range"');
-    expect(statusMarkup).not.toContain('Zoom Slider');
   });
 });
 

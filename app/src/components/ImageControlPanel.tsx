@@ -10,7 +10,7 @@ import {sanitizeEraseShapes} from '@shared/models';
 import {useAppStore} from '../store/useAppStore';
 import { describePictureFormat, planPictureEmbedding } from '../engine/imageFormat';
 
-const input='w-full rounded border border-slate-600 bg-slate-800 p-1 text-xs text-white';
+const input='w-full rounded border border-slate-300 bg-white p-1 text-xs text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white';
 const MM_TO_PT=72/25.4;
 export function ImageControlPanel(){
  const {settings,pages,layout,activePageId,activeSheetIndex,overlays,selectedOverlayId,updateOverlay,removeOverlay,addOverlay,eraseTool,eraseBrushMm,setEraseTool,setEraseBrushMm,setOverlayErase,toggleOverlayInvert}=useAppStore();
@@ -80,18 +80,18 @@ export function ImageControlPanel(){
  };
  const labels=fa?['همه','فرد','زوج','اول','آخر','صفحه / برگه جاری','انتخاب دلخواه']:['All','Odd','Even','First','Last','Current','Custom selection'];
  const scopes:OverlayScope[]=['all','odd','even','first','last','current','selected'];
- return <aside data-text-control-panel aria-label={fa?'تنظیمات تصویر روی صفحه':'Picture overlay controls'} className="w-64 shrink-0 overflow-y-auto border-s border-slate-700 bg-slate-900 p-3 text-xs text-slate-200 space-y-2">
+ return <aside data-text-control-panel aria-label={fa?'تنظیمات تصویر روی صفحه':'Picture overlay controls'} className="w-full bg-white p-3 text-xs text-slate-800 dark:bg-slate-900 dark:text-slate-200 space-y-2">
    <div className="flex items-center justify-between"><strong>{fa?'تنظیمات تصویر':'Picture'}</strong>
-     <button type="button" onClick={()=>addOverlay({...item,id:newOverlayId(),xPercent:item.xPercent+5,yPercent:item.yPercent+5})} className="rounded bg-slate-700 px-2 py-1">{fa?'+ نسخه':'+ Copy'}</button></div>
-   <div role="tablist" aria-label={fa?'تصویرها':'Pictures'} className="flex gap-1 overflow-x-auto">{numbers.map((n,i)=><button key={n.id} role="tab" type="button" aria-selected={n.id===item.id} onClick={()=>useAppStore.getState().selectOverlay(n.id)} className={`shrink-0 rounded px-2 py-1 ${n.id===item.id?'bg-sky-700':'bg-slate-700'}`}>{fa?`تصویر ${i+1}`:`Picture ${i+1}`}</button>)}</div>
-   <p className="truncate text-slate-400" title={item.name}>{item.name} · {item.naturalWidth}×{item.naturalHeight}px</p>
+     <button type="button" onClick={()=>addOverlay({...item,id:newOverlayId(),xPercent:item.xPercent+5,yPercent:item.yPercent+5})} className="rounded border border-slate-300 bg-slate-100 px-2 py-1 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 cursor-pointer">{fa?'+ نسخه':'+ Copy'}</button></div>
+   <div role="tablist" aria-label={fa?'تصویرها':'Pictures'} className="flex gap-1 overflow-x-auto">{numbers.map((n,i)=><button key={n.id} role="tab" type="button" aria-selected={n.id===item.id} onClick={()=>useAppStore.getState().selectOverlay(n.id)} className={`shrink-0 rounded px-2 py-1 cursor-pointer ${n.id===item.id?'bg-sky-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{fa?`تصویر ${i+1}`:`Picture ${i+1}`}</button>)}</div>
+   <p className="truncate text-slate-500 dark:text-slate-400" title={item.name}>{item.name} · {item.naturalWidth}×{item.naturalHeight}px</p>
    <label className="block">{fa?'جایگزینی تصویر':'Replace picture'}<input data-image-source type="file" accept="image/*" className={input} onChange={e=>void replace(e.target.files?.[0])}/></label>
    <div className="flex gap-1">
      <label className="flex-1">{fa?'عرض (میلی‌متر)':'Width (mm)'}<input aria-label={fa?'عرض تصویر':'Image width'} type="number" min="1" max="2000" step="0.1" className={input} value={Number(widthMm.toFixed(2))} onChange={e=>setMm('width',Number(e.target.value))}/></label>
      <label className="flex-1">{fa?'ارتفاع (میلی‌متر)':'Height (mm)'}<input aria-label={fa?'ارتفاع تصویر':'Image height'} type="number" min="1" max="2000" step="0.1" className={input} value={Number(heightMm.toFixed(2))} onChange={e=>setMm('height',Number(e.target.value))}/></label>
    </div>
    <label className="flex items-center gap-1.5"><input type="checkbox" aria-label={fa?'قفل نسبت ابعاد':'Lock aspect ratio'} checked={!!item.lockAspect} onChange={e=>patch({lockAspect:e.target.checked})}/>
-     {fa?'قفل نسبت ابعاد':'Lock aspect ratio'} <span className="text-slate-400">({fa?'Shift هنگام کشیدن':'Shift while dragging'})</span></label>
+     {fa?'قفل نسبت ابعاد':'Lock aspect ratio'} <span className="text-slate-500 dark:text-slate-400">({fa?'Shift هنگام کشیدن':'Shift while dragging'})</span></label>
    <div className="flex gap-1">
      <label className="flex-1">{fa?'X (میلی‌متر)':'X (mm)'}<input aria-label={fa?'مختصاف X تصویر':'Image X'} data-image-x type="number" step="0.1" className={input} value={Number((item.xPercent*box.width/100).toFixed(2))} onChange={e=>setPosition('x',Number(e.target.value))}/></label>
      <label className="flex-1">{fa?'Y (میلی‌متر)':'Y (mm)'}<input aria-label={fa?'مختصاف Y تصویر':'Image Y'} data-image-y type="number" step="0.1" className={input} value={Number((item.yPercent*box.height/100).toFixed(2))} onChange={e=>setPosition('y',Number(e.target.value))}/></label>
@@ -99,7 +99,7 @@ export function ImageControlPanel(){
    <div className="grid grid-cols-3 gap-1">
      {(['left','hcenter','right','top','vcenter','bottom'] as const).map(where=>
        <button key={where} type="button" data-image-align={where} title={where} onClick={()=>align(where)}
-         className="rounded bg-slate-700 px-1 py-1 hover:bg-slate-600 cursor-pointer">{where==='left'?(fa?'چپ':'Left'):where==='hcenter'?(fa?'وسط':'Centre'):where==='right'?(fa?'راست':'Right')
+         className="rounded border border-slate-300 bg-slate-100 px-1 py-1 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600 cursor-pointer">{where==='left'?(fa?'چپ':'Left'):where==='hcenter'?(fa?'وسط':'Centre'):where==='right'?(fa?'راست':'Right')
          :where==='top'?(fa?'بالا':'Top'):where==='vcenter'?(fa?'میانه':'Middle'):(fa?'پایین':'Bottom')}</button>)}
    </div>
    <p className="text-[10px] leading-4 text-slate-500">
@@ -109,54 +109,51 @@ export function ImageControlPanel(){
    </p>
    <label className="block">{fa?'نحوهٔ پر کردن کادر':'Fit'}<select aria-label={fa?'نحوهٔ پر کردن':'Fit'} className={input} value={item.fit??'fill'} onChange={e=>patch({fit:e.target.value as 'fill'|'contain'})}>
      <option value="fill">{fa?'کشیدن به اندازهٔ کادر':'Stretch to the box'}</option><option value="contain">{fa?'جای دادن با حفظ نسبت':'Contain (letterbox)'}</option></select></label>
-   <div className="flex gap-1">
-     <button type="button" aria-pressed={!!item.flipHorizontal} onClick={()=>patch({flipHorizontal:!item.flipHorizontal})} className={`rounded px-2 py-1 ${item.flipHorizontal?'bg-sky-700':'bg-slate-700'}`}>{fa?'آینه افقی':'Flip H'}</button>
-     <button type="button" aria-pressed={!!item.flipVertical} onClick={()=>patch({flipVertical:!item.flipVertical})} className={`rounded px-2 py-1 ${item.flipVertical?'bg-sky-700':'bg-slate-700'}`}>{fa?'آینه عمودی':'Flip V'}</button>
-     {([0,90,180,270] as const).map(deg=><button key={deg} type="button" onClick={()=>patch({rotation:deg})} className={`rounded px-2 py-1 ${item.rotation===deg?'bg-sky-700':'bg-slate-700'}`}>{deg}°</button>)}
+   <div className="flex flex-wrap gap-1">
+     <button type="button" aria-pressed={!!item.flipHorizontal} onClick={()=>patch({flipHorizontal:!item.flipHorizontal})} className={`rounded px-2 py-1 cursor-pointer ${item.flipHorizontal?'bg-sky-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{fa?'آینه افقی':'Flip H'}</button>
+     <button type="button" aria-pressed={!!item.flipVertical} onClick={()=>patch({flipVertical:!item.flipVertical})} className={`rounded px-2 py-1 cursor-pointer ${item.flipVertical?'bg-sky-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{fa?'آینه عمودی':'Flip V'}</button>
+     {([0,90,180,270] as const).map(deg=><button key={deg} type="button" onClick={()=>patch({rotation:deg})} className={`rounded px-2 py-1 cursor-pointer ${item.rotation===deg?'bg-sky-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{deg}°</button>)}
    </div>
    <label className="block">{fa?'چرخش':'Rotation'} {item.rotation}°<input aria-label={fa?'چرخش تصویر':'Image rotation'} type="range" min="0" max="360" step="0.1" value={item.rotation} onChange={e=>patch({rotation:+e.target.value})} className="w-full"/></label>
    <label className="block">{fa?'شفافیت':'Opacity'} {Math.round(item.opacity*100)}%<input aria-label={fa?'شفافیت تصویر':'Image opacity'} type="range" min="10" max="100" value={item.opacity*100} onChange={e=>patch({opacity:+e.target.value/100})} className="w-full"/></label>
-   <div className="space-y-1 border-t border-slate-700 pt-2" data-erase-panel>
+   <div className="space-y-1 border-t border-slate-200 pt-2 dark:border-slate-700" data-erase-panel>
      <div className="flex items-center justify-between"><strong>{fa?'پاک‌کن':'Eraser'}</strong>
-       <span className="text-slate-400" data-erase-count>{fa?`${eraseCount} حرکت`:`${eraseCount} stroke(s)`}</span></div>
+       <span className="text-slate-500 dark:text-slate-400" data-erase-count>{fa?`${eraseCount} حرکت`:`${eraseCount} stroke(s)`}</span></div>
      <p className="text-[10px] leading-4 text-slate-500">{fa
        ? 'روی هر جای تصویر که دکمهٔ ماوس گرفته شود قلم‌مو کار می‌کند؛ اگر رنگی انتخاب کرده باشید به‌جای سوراخ کردن، همان رنگ را می‌گذارد. دو بار کلیک روی دکمهٔ روشن، پاک‌کن را خاموش می‌کند.'
        : 'The brush works wherever the mouse button is held down on the picture; with a colour chosen it lays that colour instead of cutting a hole. Pressing the lit button again turns the eraser off.'}</p>
      <div className="flex gap-1">
-       <button type="button" data-erase-tool="brush" aria-pressed={eraseTool==='brush'} onClick={()=>setEraseTool(eraseTool==='brush'?'off':'brush')} title={fa?'با کشیدن قلم‌مو، بخشی از تصویر پاک می‌شود':'Drag a brush over the picture to erase it'} className={`flex-1 rounded px-2 py-1 ${eraseTool==='brush'?'bg-rose-700 text-white':'bg-slate-700'}`}>{fa?'قلم‌مو':'Brush'}</button>
-       <button type="button" data-erase-tool="region" aria-pressed={eraseTool==='region'} onClick={()=>setEraseTool(eraseTool==='region'?'off':'region')} title={fa?'یک کادر بکشید، بعد Delete بزنید':'Drag a rectangle, then press Delete to apply it'} className={`flex-1 rounded px-2 py-1 ${eraseTool==='region'?'bg-rose-700 text-white':'bg-slate-700'}`}>{fa?'ناحیه':'Region'}</button>
-       <button type="button" data-erase-tool="picker" aria-pressed={eraseTool==='picker'} onClick={()=>setEraseTool(eraseTool==='picker'?'off':'picker')} title={fa?'روی تصویر کلیک کنید تا رنگ آن نقطه، رنگ قلم‌مو شود':'Click on the picture to make its colour the brush colour'} className={`flex-1 rounded px-2 py-1 ${eraseTool==='picker'?'bg-amber-500 text-slate-950':'bg-slate-700'}`}>{fa?'قطره‌چکان':'Pick'}</button>
+       <button type="button" data-erase-tool="brush" aria-pressed={eraseTool==='brush'} onClick={()=>setEraseTool(eraseTool==='brush'?'off':'brush')} title={fa?'با کشیدن قلم‌مو، بخشی از تصویر پاک می‌شود':'Drag a brush over the picture to erase it'} className={`flex-1 rounded px-2 py-1 cursor-pointer ${eraseTool==='brush'?'bg-rose-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{fa?'قلم‌مو':'Brush'}</button>
+       <button type="button" data-erase-tool="region" aria-pressed={eraseTool==='region'} onClick={()=>setEraseTool(eraseTool==='region'?'off':'region')} title={fa?'یک کادر بکشید، بعد Delete بزنید':'Drag a rectangle, then press Delete to apply it'} className={`flex-1 rounded px-2 py-1 cursor-pointer ${eraseTool==='region'?'bg-rose-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{fa?'ناحیه':'Region'}</button>
+       <button type="button" data-erase-tool="picker" aria-pressed={eraseTool==='picker'} onClick={()=>setEraseTool(eraseTool==='picker'?'off':'picker')} title={fa?'روی تصویر کلیک کنید تا رنگ آن نقطه، رنگ قلم‌مو شود':'Click on the picture to make its colour the brush colour'} className={`flex-1 rounded px-2 py-1 cursor-pointer ${eraseTool==='picker'?'bg-amber-500 text-slate-950':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{fa?'قطره‌چکان':'Pick'}</button>
      </div>
      {eraseTool!=='off' && <label className="block">{fa?`قطر قلم (میلی‌متر) = ${eraseBrushMm}`:`Brush diameter (mm) = ${eraseBrushMm}`}
        <input data-erase-size aria-label={fa?'قطر پاک‌کن':'Eraser size'} type="number" min="0.2" max="500" step="0.1" className={input} value={Number(eraseBrushMm.toFixed(2))} onChange={e=>setEraseBrushMm(Number(e.target.value))}/></label>}
      {eraseTool!=='off' && <label className="flex items-center gap-1.5">
-       <span className="text-[10px] text-slate-400">{fa?'رنگ قلم':'Brush colour'}</span>
-       {/* A colour turns the brush from a hole into a patch of paint — the way an operator covers a logo with the
-           background colour without ever asking the file for a rewrite. */}
-       <input data-erase-color type="color" aria-label={fa?'رنگ قلم پاک‌کن':'Eraser brush colour'} value={eraseColor??'#ffffff'} onChange={e=>setEraseColor(e.target.value)} className="h-6 w-9 cursor-pointer rounded border border-slate-600 bg-slate-800 p-0.5"/>
-       <button type="button" data-erase-color="hole" onClick={()=>setEraseColor(null)} className={`rounded px-1.5 py-0.5 ${!eraseColor?'bg-rose-700 text-white':'bg-slate-700 hover:bg-slate-600'}`}>{fa?'سوراخ':'Hole'}</button>
+       <span className="text-[10px] text-slate-500 dark:text-slate-400">{fa?'رنگ قلم':'Brush colour'}</span>
+       <input data-erase-color type="color" aria-label={fa?'رنگ قلم پاک‌کن':'Eraser brush colour'} value={eraseColor??'#ffffff'} onChange={e=>setEraseColor(e.target.value)} className="h-6 w-9 cursor-pointer rounded border border-slate-300 bg-white p-0.5 dark:border-slate-600 dark:bg-slate-800"/>
+       <button type="button" data-erase-color="hole" onClick={()=>setEraseColor(null)} className={`rounded px-1.5 py-0.5 cursor-pointer ${!eraseColor?'bg-rose-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600'}`}>{fa?'سوراخ':'Hole'}</button>
      </label>}
-     {pendingHere && <div className="flex items-center gap-1 rounded bg-slate-800 p-1.5" data-erase-pending>
-       <span className="flex-1 text-[10px] leading-4 text-amber-300">{fa
+     {pendingHere && <div className="flex items-center gap-1 rounded border border-amber-300 bg-amber-50 p-1.5 dark:border-slate-700 dark:bg-slate-800" data-erase-pending>
+       <span className="flex-1 text-[10px] leading-4 text-amber-800 dark:text-amber-300">{fa
          ? 'کادر انتخاب شد؛ برای اعمال روی تصویر Delete را بزنید (Esc بی‌اثرش می‌کند).'
          : 'Region selected — press Delete to apply it to the picture (Esc throws it away).'}</span>
-       <button type="button" data-erase-apply onClick={commitErasePending} className="rounded bg-rose-700 px-1.5 py-0.5 text-white">{fa?'اعمال':'Apply'}</button>
-       <button type="button" data-erase-discard onClick={()=>setErasePending(null)} className="rounded bg-slate-700 px-1.5 py-0.5">{fa?'بی‌خیال':'Discard'}</button>
+       <button type="button" data-erase-apply onClick={commitErasePending} className="rounded bg-rose-600 px-1.5 py-0.5 text-white cursor-pointer">{fa?'اعمال':'Apply'}</button>
+       <button type="button" data-erase-discard onClick={()=>setErasePending(null)} className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-slate-700 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 cursor-pointer">{fa?'بی‌خیال':'Discard'}</button>
      </div>}
      <div className="flex gap-1">
-       <button type="button" data-erase-undo disabled={!eraseCount} onClick={()=>setOverlayErase(item.id,popEraseShape(item.erase))} className={`flex-1 rounded px-2 py-1 ${eraseCount?'bg-slate-700 hover:bg-slate-600 cursor-pointer':'bg-slate-800 text-slate-500'}`}>{fa?'یک حرکت برگرد':'Undo one stroke'}</button>
-       <button type="button" data-erase-restore disabled={!eraseCount} onClick={()=>setOverlayErase(item.id,[])} className={`flex-1 rounded px-2 py-1 ${eraseCount?'bg-slate-700 hover:bg-slate-600 cursor-pointer':'bg-slate-800 text-slate-500'}`}>{fa?'بازگرداندن تصویر':'Restore picture'}</button>
+       <button type="button" data-erase-undo disabled={!eraseCount} onClick={()=>setOverlayErase(item.id,popEraseShape(item.erase))} className={`flex-1 rounded px-2 py-1 ${eraseCount?'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600 cursor-pointer':'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'}`}>{fa?'یک حرکت برگرد':'Undo one stroke'}</button>
+       <button type="button" data-erase-restore disabled={!eraseCount} onClick={()=>setOverlayErase(item.id,[])} className={`flex-1 rounded px-2 py-1 ${eraseCount?'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600 cursor-pointer':'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'}`}>{fa?'بازگرداندن تصویر':'Restore picture'}</button>
      </div>
-     {eraseCount>0 && <p className="text-[10px] leading-4 text-amber-300">{fa
+     {eraseCount>0 && <p className="text-[10px] leading-4 text-amber-700 dark:text-amber-300">{fa
        ? 'فایل اصلی دست‌نخورده است: پاک‌کن فقط شکلِ پاک‌شده را کنار می‌گذارد، پس هر حرکت با Ctrl+Z هم برگشت‌پذیر است.'
        : 'The file itself is untouched — an erase is stored beside it, so every stroke is also reversible with Ctrl+Z.'}</p>}
    </div>
-   <button type="button" data-image-invert aria-pressed={!!item.invert} onClick={()=>toggleOverlayInvert([item.id])} title={fa?'بار دوم همان قبلی را برمی‌گرداند، نه یک معکوس دیگر':'Pressing it again returns the previous look, it does not invert twice'} className={`w-full rounded px-2 py-1 ${item.invert?'bg-fuchsia-700 text-white':'bg-slate-700 hover:bg-slate-600'}`}>{item.invert?(fa?'لغو معکوس رنگ تصویر':'Undo picture inversion'):(fa?'معکوس رنگ تصویر':'Invert picture colours')}</button>
+   <button type="button" data-image-invert aria-pressed={!!item.invert} onClick={()=>toggleOverlayInvert([item.id])} title={fa?'بار دوم همان قبلی را برمی‌گرداند، نه یک معکوس دیگر':'Pressing it again returns the previous look, it does not invert twice'} className={`w-full rounded px-2 py-1 cursor-pointer ${item.invert?'bg-fuchsia-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600'}`}>{item.invert?(fa?'لغو معکوس رنگ تصویر':'Undo picture inversion'):(fa?'معکوس رنگ تصویر':'Invert picture colours')}</button>
    {(() => {
-     // One line that says what the file is and what the exporter will do with it.
      const plan = planPictureEmbedding(item.src);
-     return <p className="text-slate-400" data-picture-format="">{fa ? 'فایل' : 'File'}: {describePictureFormat(item.src, { width: item.naturalWidth, height: item.naturalHeight })}
-       {plan.notes.length ? <span className="text-amber-300"> · {plan.notes.join(' · ')}</span> : null}</p>;
+     return <p className="text-slate-500 dark:text-slate-400" data-picture-format="">{fa ? 'فایل' : 'File'}: {describePictureFormat(item.src, { width: item.naturalWidth, height: item.naturalHeight })}
+       {plan.notes.length ? <span className="text-amber-600 dark:text-amber-300"> · {plan.notes.join(' · ')}</span> : null}</p>;
    })()}
    <label className="block">{fa?'مبنا':'Attach to'}<select aria-label={fa?'مبنای تصویر':'Image target'} className={input} value={item.target} onChange={e=>setScope(item.targetScope,e.target.value as OverlayTarget)}>
      <option value="page">{fa?'صفحه سند':'Document page'}</option><option value="sheet">{fa?'برگه خروجی':'Output sheet'}</option></select></label>
@@ -164,11 +161,11 @@ export function ImageControlPanel(){
    {item.targetScope==='selected' && <>
      <label className="block">{item.target==='page'?(fa?'شماره صفحات':'Chosen pages'):(fa?'شماره برگه‌ها':'Chosen sheets')}
        <input aria-label={fa?'بازه تصویر':'Image range'} dir="ltr" className={input} value={range} placeholder="1, 3-5" onChange={e=>{setRange(e.target.value);setRangeError(false);}}/></label>
-     <button type="button" onClick={applyRange} className="rounded bg-slate-700 px-2 py-1">{fa?'اعمال بازه':'Apply range'}</button>
-     {rangeError && <p role="alert" className="text-rose-300">{fa?'شماره یا بازه معتبر وارد کنید.':'Enter valid numbers or ranges.'}</p>}
+     <button type="button" onClick={applyRange} className="rounded border border-slate-300 bg-slate-100 px-2 py-1 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 cursor-pointer">{fa?'اعمال بازه':'Apply range'}</button>
+     {rangeError && <p role="alert" className="text-rose-600 dark:text-rose-300">{fa?'شماره یا بازه معتبر وارد کنید.':'Enter valid numbers or ranges.'}</p>}
    </>}
-   <p className="text-slate-400">{fa?'کشیدن روی کادر، اندازهٔ کادر را عوض می‌کند؛ برای تصویرِ بدون کشیدگی، قفل نسبت ابعاد را روشن نگه دارید.':'Dragging a handle resizes the box; keep the ratio locked to avoid stretching the picture.'}</p>
-   <button type="button" onClick={()=>removeOverlay(item.id)} className="rounded bg-rose-900 px-2 py-1">{fa?'حذف تصویر':'Delete picture'}</button>
+   <p className="text-slate-500 dark:text-slate-400">{fa?'کشیدن روی کادر، اندازهٔ کادر را عوض می‌کند؛ برای تصویرِ بدون کشیدگی، قفل نسبت ابعاد را روشن نگه دارید.':'Dragging a handle resizes the box; keep the ratio locked to avoid stretching the picture.'}</p>
+   <button type="button" onClick={()=>removeOverlay(item.id)} className="rounded border border-rose-300 bg-rose-50 px-2 py-1 text-rose-700 hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-900 dark:text-rose-100 cursor-pointer">{fa?'حذف تصویر':'Delete picture'}</button>
    <p className="text-slate-500">{fa?'حجم تصویر در فایل پروژه نگه داشته می‌شود؛ برای پروژه‌های سنگین، تصویر را کوچک کنید.':'The picture is stored inside the project file; downscale large images to keep projects small.'}</p>
  </aside>;
 }

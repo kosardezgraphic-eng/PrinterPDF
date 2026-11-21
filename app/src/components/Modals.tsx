@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   X,
   Calculator,
@@ -14,6 +14,7 @@ import {
   Info,
   Loader2,
   ArrowUp,
+  FileText,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { PrinterRetryButton, PrinterServiceStatus } from './PrinterStatus';
@@ -50,6 +51,7 @@ export const ModalsAndToasts: React.FC = () => {
     showOnboardingTour,
     pendingDuplexPrint,
     printProgress,
+    pdfPreviewModal,
     toasts,
     setModalState,
     selectPrinter,
@@ -61,6 +63,7 @@ export const ModalsAndToasts: React.FC = () => {
     dismissDuplexPrint,
     cancelActivePrintJob,
     closePrintProgress,
+    closePdfPreviewModal,
     splitEveryNPages,
     makePageArray,
     updateSettings,
@@ -70,6 +73,28 @@ export const ModalsAndToasts: React.FC = () => {
   const lang = settings.language;
   const isFa = lang === 'fa';
   const summary = computeCounterSummary(documents, pages, layout, settings);
+
+  useEffect(() => {
+    if (!pdfPreviewModal) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closePdfPreviewModal();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [pdfPreviewModal, closePdfPreviewModal]);
+
+  const fieldCls =
+    'w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white';
+  const compactFieldCls =
+    'w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white';
+  const miniFieldCls =
+    'w-full rounded-xl border border-slate-300 bg-white px-2 py-1.5 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white';
+  const subCardCls =
+    'rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950/80';
+  const closeBtnCls =
+    'rounded-lg p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer';
 
   // Print Dialog local state (G1)
   const [copies, setCopies] = useState(1);
@@ -255,11 +280,14 @@ export const ModalsAndToasts: React.FC = () => {
     <>
       {/* 1. COUNTER & COST SUMMARY MODAL (B1 - B2) */}
       {showCounterModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-3xl rounded-2xl border border-slate-700 bg-slate-900 p-6 text-slate-100 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-xs dark:bg-black/70">
+          <div
+            dir={isFa ? 'rtl' : 'ltr'}
+            className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-6 text-slate-900 shadow-2xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          >
+            <div className="mb-4 flex items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-800">
               <div className="flex items-center gap-2">
-                <Calculator className="h-5 w-5 text-amber-400" />
+                <Calculator className="h-5 w-5 text-amber-500 dark:text-amber-400" />
                 <h2 className="text-base font-extrabold">
                   {isFa
                     ? 'داشبورد جامع شمارش صفحات، مصرف کاغذ و برآورد هزینه (B1–B2)'
@@ -269,7 +297,7 @@ export const ModalsAndToasts: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setModalState('counter', false)}
-                className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white cursor-pointer"
+                className={closeBtnCls}
               >
                 <X className="h-5 w-5" />
               </button>
@@ -277,23 +305,23 @@ export const ModalsAndToasts: React.FC = () => {
 
             {/* KPI Cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-              <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
-                <div className="text-[11px] text-slate-400">
+              <div className={`${subCardCls} p-3`}>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">
                   {isFa ? 'تعداد کل فایل‌ها / صفحات' : 'Total Files / Pages'}
                 </div>
-                <div className="mt-1 text-lg font-black text-white">
+                <div className="mt-1 text-lg font-black text-slate-900 dark:text-white">
                   {formatLocalizedNumber(summary.totalFiles, lang)} /{' '}
                   {formatLocalizedNumber(summary.totalPages, lang)}
                 </div>
               </div>
 
-              <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3">
-                <div className="text-[11px] text-sky-300">
+              <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 dark:border-sky-500/30 dark:bg-sky-500/10">
+                <div className="text-[11px] text-sky-700 dark:text-sky-300">
                   {isFa
                     ? 'تعداد برگ کاغذ فیزیکی مصرفی'
                     : 'Physical Paper Sheets'}
                 </div>
-                <div className="mt-1 text-lg font-black text-sky-400">
+                <div className="mt-1 text-lg font-black text-sky-600 dark:text-sky-400">
                   {formatLocalizedNumber(summary.totalPhysicalSheets, lang)}{' '}
                   <span className="text-xs font-normal">
                     ({summary.cellsPerSheet}-Up •{' '}
@@ -309,12 +337,12 @@ export const ModalsAndToasts: React.FC = () => {
                 </div>
               </div>
 
-              <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
-                <div className="text-[11px] text-slate-400">
+              <div className={`${subCardCls} p-3`}>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">
                   {isFa ? 'رنگی / سیاه‌وسفید / خالی' : 'Color / B&W / Blank'}
                 </div>
-                <div className="mt-1 text-base font-bold text-slate-200">
-                  <span className="text-sky-400">
+                <div className="mt-1 text-base font-bold text-slate-800 dark:text-slate-200">
+                  <span className="text-sky-600 dark:text-sky-400">
                     {formatLocalizedNumber(summary.colorPages, lang)}
                   </span>{' '}
                   /{' '}
@@ -325,20 +353,20 @@ export const ModalsAndToasts: React.FC = () => {
                 </div>
               </div>
 
-              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
-                <div className="text-[11px] text-emerald-300">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                <div className="text-[11px] text-emerald-700 dark:text-emerald-300">
                   {isFa ? 'برآورد هزینه مشتری (ریال)' : 'Estimated Cost (IRR)'}
                 </div>
-                <div className="mt-1 text-lg font-black text-emerald-400">
+                <div className="mt-1 text-lg font-black text-emerald-700 dark:text-emerald-400">
                   {formatLocalizedNumber(summary.estimatedCostRials, lang)}
                 </div>
               </div>
             </div>
 
             {/* Breakdown by File Table */}
-            <div className="mb-4 max-h-52 overflow-y-auto rounded-xl border border-slate-800">
+            <div className="mb-4 max-h-52 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-800">
               <table className="w-full text-xs">
-                <thead className="bg-slate-950 text-slate-400">
+                <thead className="bg-slate-100 text-slate-600 dark:bg-slate-950 dark:text-slate-400">
                   <tr>
                     <th className="px-3 py-2 text-start">
                       {isFa ? 'نام فایل' : 'Document Name'}
@@ -357,14 +385,14 @@ export const ModalsAndToasts: React.FC = () => {
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800 bg-slate-900/50">
+                <tbody className="divide-y divide-slate-200 bg-white dark:divide-slate-800 dark:bg-slate-900/50">
                   {summary.byFile.map((f) => (
                     <tr key={f.documentId}>
                       <td className="px-3 py-2 font-semibold">{f.documentName}</td>
                       <td className="px-3 py-2 text-center">
                         {formatLocalizedNumber(f.totalPages, lang)}
                       </td>
-                      <td className="px-3 py-2 text-center text-sky-400 font-bold">
+                      <td className="px-3 py-2 text-center font-bold text-sky-600 dark:text-sky-400">
                         {formatLocalizedNumber(f.selectedPages, lang)}
                       </td>
                       <td className="px-3 py-2 text-center">
@@ -381,13 +409,13 @@ export const ModalsAndToasts: React.FC = () => {
 
             {/* Breakdown by Paper Size & Orientation */}
             <div className="mb-5 flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-slate-400">
+              <span className="text-slate-500 dark:text-slate-400">
                 {isFa ? 'تفکیک سایز و جهت:' : 'By Size & Orientation:'}
               </span>
               {summary.byPaperSize.map((b) => (
                 <span
                   key={`${b.sizeLabel}-${b.orientation}`}
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-slate-200"
+                  className="rounded-lg border border-slate-200 bg-slate-100 px-2.5 py-1 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                 >
                   {b.sizeLabel} ({b.orientation}):{' '}
                   <b>{formatLocalizedNumber(b.selectedPages, lang)}</b>
@@ -395,13 +423,13 @@ export const ModalsAndToasts: React.FC = () => {
               ))}
             </div>
 
-            <div className="flex items-center justify-between border-t border-slate-800 pt-4">
+            <div className="flex items-center justify-between border-t border-slate-200 pt-4 dark:border-slate-800">
               <button
                 type="button"
                 onClick={exportCounterCsv}
-                className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-bold text-slate-200 hover:bg-slate-700 cursor-pointer"
+                className="flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
               >
-                <Download className="h-4 w-4 text-sky-400" />
+                <Download className="h-4 w-4 text-sky-600 dark:text-sky-400" />
                 <span>
                   {isFa ? 'خروجی جدول اکسل / CSV' : 'Export CSV Report'}
                 </span>
@@ -420,11 +448,14 @@ export const ModalsAndToasts: React.FC = () => {
 
       {/* 2. FULL PRINT DIALOG MODAL (G1 - G2) */}
       {showPrintModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 text-slate-100 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-xs dark:bg-black/70">
+          <div
+            dir={isFa ? 'rtl' : 'ltr'}
+            className="w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 text-slate-900 shadow-2xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          >
+            <div className="mb-4 flex items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-800">
               <div className="flex items-center gap-2">
-                <Printer className="h-5 w-5 text-sky-400" />
+                <Printer className="h-5 w-5 text-sky-600 dark:text-sky-400" />
                 <h2 className="text-base font-extrabold">
                   {isFa
                     ? 'پنجره جامع چاپ و ارسال مستقیم به Spooler ویندوز (G1–G2)'
@@ -434,7 +465,7 @@ export const ModalsAndToasts: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setModalState('print', false)}
-                className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white cursor-pointer"
+                className={closeBtnCls}
               >
                 <X className="h-5 w-5" />
               </button>
@@ -443,7 +474,7 @@ export const ModalsAndToasts: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
               <div className="space-y-3">
                 <div>
-                  <label className="mb-1 block text-slate-400">
+                  <label className="mb-1 block text-slate-600 dark:text-slate-400">
                     {isFa ? 'انتخاب پرینتر (محلی / شبکه / مجازی):' : 'Printer:'}
                   </label>
                   <div className="flex items-center gap-2">
@@ -451,7 +482,7 @@ export const ModalsAndToasts: React.FC = () => {
                       aria-label={isFa ? 'انتخاب پرینتر' : 'Select printer'}
                       value={selectedPrinter?.name ?? ''}
                       onChange={(e) => selectPrinter(e.target.value)}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-white"
+                      className={fieldCls}
                     >
                       {printers.length === 0 && (
                         <option value="">{isFa ? '— پرینتری خوانده نشد —' : '— no printers read —'}</option>
@@ -467,7 +498,7 @@ export const ModalsAndToasts: React.FC = () => {
                       type="button"
                       disabled={!selectedPrinter}
                       onClick={() => selectedPrinter && void openPrinterPreferences(selectedPrinter.name)}
-                      className="rounded-xl border border-emerald-500/40 bg-emerald-600/15 px-2.5 py-2 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-600/25 disabled:opacity-40 whitespace-nowrap shrink-0 cursor-pointer"
+                      className="rounded-xl border border-emerald-500/40 bg-emerald-50 px-2.5 py-2 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-40 dark:bg-emerald-600/15 dark:text-emerald-300 dark:hover:bg-emerald-600/25 whitespace-nowrap shrink-0 cursor-pointer"
                     >
                       {isFa ? 'تنظیمات درایور ویندوز' : 'Driver Preferences'}
                     </button>
@@ -478,7 +509,7 @@ export const ModalsAndToasts: React.FC = () => {
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="mb-1 block text-slate-400">
+                    <label className="mb-1 block text-slate-600 dark:text-slate-400">
                       {isFa ? 'سایز کاغذ درایور:' : 'Driver Paper Size:'}
                     </label>
                     <select
@@ -498,7 +529,7 @@ export const ModalsAndToasts: React.FC = () => {
                           });
                         }
                       }}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white tabular-nums"
+                      className={`${compactFieldCls} tabular-nums`}
                     >
                       {paperOptions.map((opt) => (
                         <option key={`${opt.id}-${opt.name}`} value={opt.name}>
@@ -508,7 +539,7 @@ export const ModalsAndToasts: React.FC = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="mb-1 block text-slate-400">
+                    <label className="mb-1 block text-slate-600 dark:text-slate-400">
                       {isFa ? 'جهت صفحه:' : 'Orientation:'}
                     </label>
                     <select
@@ -521,7 +552,7 @@ export const ModalsAndToasts: React.FC = () => {
                           void updatePrinterProfile(selectedPrinter.name, { orientation: next });
                         }
                       }}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white"
+                      className={compactFieldCls}
                     >
                       <option value="portrait">{isFa ? 'عمودی (Portrait)' : 'Portrait'}</option>
                       <option value="landscape">{isFa ? 'افقی (Landscape)' : 'Landscape'}</option>
@@ -531,7 +562,7 @@ export const ModalsAndToasts: React.FC = () => {
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="mb-1 block text-slate-400">
+                    <label className="mb-1 block text-slate-600 dark:text-slate-400">
                       {isFa ? `تعداد کپی (حداکثر ${maxCopies}):` : `Copies (Max ${maxCopies}):`}
                     </label>
                     <input
@@ -542,7 +573,7 @@ export const ModalsAndToasts: React.FC = () => {
                       onChange={(e) =>
                         setCopies(Math.max(1, Math.min(maxCopies, Number(e.target.value) || 1)))
                       }
-                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-white tabular-nums"
+                      className={`${fieldCls} tabular-nums`}
                     />
                   </div>
                   <div className="flex items-end pb-2">
@@ -559,7 +590,7 @@ export const ModalsAndToasts: React.FC = () => {
                             void updatePrinterProfile(selectedPrinter.name, { collate: checked });
                           }
                         }}
-                        className="accent-sky-500"
+                        className="accent-sky-600"
                       />
                       <span>{isFa ? 'مرتب‌سازی دسته‌ها (Collate)' : 'Collate'}</span>
                     </label>
@@ -567,7 +598,7 @@ export const ModalsAndToasts: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-slate-400">
+                  <label className="mb-1 block text-slate-600 dark:text-slate-400">
                     {isFa ? 'محدوده صفحات:' : 'Page Range:'}
                   </label>
                   <select
@@ -580,7 +611,7 @@ export const ModalsAndToasts: React.FC = () => {
                           | 'custom-range'
                       )
                     }
-                    className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-white"
+                    className={fieldCls}
                   >
                     <option value="all-selected">
                       {isFa
@@ -599,7 +630,7 @@ export const ModalsAndToasts: React.FC = () => {
                       type="text"
                       value={customRangeText}
                       onChange={(e) => setCustomRangeText(e.target.value)}
-                      className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 font-mono text-white"
+                      className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-1.5 font-mono text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     />
                   )}
                 </div>
@@ -608,7 +639,7 @@ export const ModalsAndToasts: React.FC = () => {
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="mb-1 block text-slate-400">
+                    <label className="mb-1 block text-slate-600 dark:text-slate-400">
                       {isFa ? 'سینی کاغذ (Tray):' : 'Paper Tray:'}
                     </label>
                     <select
@@ -619,7 +650,7 @@ export const ModalsAndToasts: React.FC = () => {
                           void updatePrinterProfile(selectedPrinter.name, { tray: e.target.value });
                         }
                       }}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white"
+                      className={compactFieldCls}
                     >
                       {(
                         caps?.supportedTrays ?? [
@@ -633,7 +664,7 @@ export const ModalsAndToasts: React.FC = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="mb-1 block text-slate-400">
+                    <label className="mb-1 block text-slate-600 dark:text-slate-400">
                       {isFa ? 'جنس کاغذ (Media):' : 'Media Type:'}
                     </label>
                     <select
@@ -645,7 +676,7 @@ export const ModalsAndToasts: React.FC = () => {
                           void updatePrinterProfile(selectedPrinter.name, { mediaType: e.target.value });
                         }
                       }}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white"
+                      className={compactFieldCls}
                     >
                       {(caps?.supportedMediaTypes ?? ['Plain Paper']).map((m) => (
                         <option key={m} value={m}>
@@ -658,7 +689,7 @@ export const ModalsAndToasts: React.FC = () => {
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="mb-1 block text-slate-400">
+                    <label className="mb-1 block text-slate-600 dark:text-slate-400">
                       {isFa ? 'رزولوشن چاپ (DPI):' : 'Resolution (DPI):'}
                     </label>
                     <select
@@ -670,7 +701,7 @@ export const ModalsAndToasts: React.FC = () => {
                           void updatePrinterProfile(selectedPrinter.name, { dpi: val });
                         }
                       }}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white tabular-nums"
+                      className={`${compactFieldCls} tabular-nums`}
                     >
                       {(
                         caps?.supportedDpi ?? [
@@ -684,7 +715,7 @@ export const ModalsAndToasts: React.FC = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="mb-1 block text-slate-400">
+                    <label className="mb-1 block text-slate-600 dark:text-slate-400">
                       {isFa ? 'کیفیت چاپ (Quality):' : 'Print Quality:'}
                     </label>
                     <select
@@ -696,7 +727,7 @@ export const ModalsAndToasts: React.FC = () => {
                           void updatePrinterProfile(selectedPrinter.name, { quality: q });
                         }
                       }}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white"
+                      className={compactFieldCls}
                     >
                       {(caps?.supportedQualities ?? (['draft', 'normal', 'high'] as const)).map((q) => (
                         <option key={q} value={q}>
@@ -709,7 +740,7 @@ export const ModalsAndToasts: React.FC = () => {
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="mb-1 block text-slate-400">
+                    <label className="mb-1 block text-slate-600 dark:text-slate-400">
                       {isFa ? 'چاپ دورو (Duplex):' : 'Duplex:'}
                     </label>
                     <select
@@ -724,7 +755,7 @@ export const ModalsAndToasts: React.FC = () => {
                           updateLayout({ duplexMode: d });
                         }
                       }}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white"
+                      className={compactFieldCls}
                     >
                       <option value="none">{isFa ? 'تک‌رو (Simplex)' : 'Simplex'}</option>
                       <option value="long-edge">{isFa ? 'لبه بلند (Long-Edge)' : 'Long-Edge'}</option>
@@ -732,7 +763,7 @@ export const ModalsAndToasts: React.FC = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="mb-1 block text-slate-400">
+                    <label className="mb-1 block text-slate-600 dark:text-slate-400">
                       {isFa ? 'حالت رنگ سخت‌افزاری:' : 'Color Mode:'}
                     </label>
                     <select
@@ -747,7 +778,7 @@ export const ModalsAndToasts: React.FC = () => {
                           });
                         }
                       }}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white disabled:opacity-40"
+                      className={`${compactFieldCls} disabled:opacity-40`}
                     >
                       {caps?.supportsColor && (
                         <option value="color">{isFa ? 'رنگی (Color)' : 'Color'}</option>
@@ -764,7 +795,7 @@ export const ModalsAndToasts: React.FC = () => {
                   <div className="grid grid-cols-2 gap-2">
                     {caps?.supportsStaple && (
                       <div>
-                        <label className="mb-1 block text-slate-400">
+                        <label className="mb-1 block text-slate-600 dark:text-slate-400">
                           {isFa ? 'منگنه (Staple):' : 'Staple:'}
                         </label>
                         <select
@@ -777,7 +808,7 @@ export const ModalsAndToasts: React.FC = () => {
                               void updatePrinterProfile(selectedPrinter.name, { staple: next });
                             }
                           }}
-                          className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
+                          className={miniFieldCls}
                         >
                           {(caps.supportedStapleModes ?? ['None', 'TopLeft']).map((s) => (
                             <option key={s} value={s}>{s}</option>
@@ -787,7 +818,7 @@ export const ModalsAndToasts: React.FC = () => {
                     )}
                     {(caps?.supportedHolePunchModes?.length ?? 0) > 1 && (
                       <div>
-                        <label className="mb-1 block text-slate-400">
+                        <label className="mb-1 block text-slate-600 dark:text-slate-400">
                           {isFa ? 'پانچ (Hole Punch):' : 'Hole Punch:'}
                         </label>
                         <select
@@ -800,7 +831,7 @@ export const ModalsAndToasts: React.FC = () => {
                               void updatePrinterProfile(selectedPrinter.name, { holePunch: next });
                             }
                           }}
-                          className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
+                          className={miniFieldCls}
                         >
                           {caps.supportedHolePunchModes!.map((hp) => (
                             <option key={hp} value={hp}>{hp}</option>
@@ -810,7 +841,7 @@ export const ModalsAndToasts: React.FC = () => {
                     )}
                     {(caps?.supportedOutputBins?.length ?? 0) > 0 && (
                       <div>
-                        <label className="mb-1 block text-slate-400">
+                        <label className="mb-1 block text-slate-600 dark:text-slate-400">
                           {isFa ? 'سینی خروجی (Output Bin):' : 'Output Bin:'}
                         </label>
                         <select
@@ -823,7 +854,7 @@ export const ModalsAndToasts: React.FC = () => {
                               void updatePrinterProfile(selectedPrinter.name, { outputBin: next });
                             }
                           }}
-                          className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
+                          className={miniFieldCls}
                         >
                           {caps.supportedOutputBins!.map((b) => (
                             <option key={b} value={b}>{b}</option>
@@ -833,7 +864,7 @@ export const ModalsAndToasts: React.FC = () => {
                     )}
                     {(caps?.supportedFoldModes?.length ?? 0) > 1 && (
                       <div>
-                        <label className="mb-1 block text-slate-400">
+                        <label className="mb-1 block text-slate-600 dark:text-slate-400">
                           {isFa ? 'تا کردن (Fold):' : 'Fold:'}
                         </label>
                         <select
@@ -846,7 +877,7 @@ export const ModalsAndToasts: React.FC = () => {
                               void updatePrinterProfile(selectedPrinter.name, { fold: next });
                             }
                           }}
-                          className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
+                          className={miniFieldCls}
                         >
                           {caps.supportedFoldModes!.map((f) => (
                             <option key={f} value={f}>{f}</option>
@@ -859,7 +890,7 @@ export const ModalsAndToasts: React.FC = () => {
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="mb-1 block text-slate-400">
+                    <label className="mb-1 block text-slate-600 dark:text-slate-400">
                       {isFa ? 'فیلتر فرد / زوج:' : 'Odd / Even:'}
                     </label>
                     <select
@@ -869,7 +900,7 @@ export const ModalsAndToasts: React.FC = () => {
                           e.target.value as 'all' | 'odd' | 'even'
                         )
                       }
-                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-2 text-white"
+                      className={compactFieldCls}
                     >
                       <option value="all">{isFa ? 'همه شیت‌ها' : 'All Sheets'}</option>
                       <option value="odd">{isFa ? 'فقط فرد' : 'Odd Only'}</option>
@@ -882,7 +913,7 @@ export const ModalsAndToasts: React.FC = () => {
                         type="checkbox"
                         checked={reverseOrder}
                         onChange={(e) => setReverseOrder(e.target.checked)}
-                        className="accent-sky-500"
+                        className="accent-sky-600"
                       />
                       <span>{isFa ? 'چاپ از آخر به اول (Reverse)' : 'Reverse Order'}</span>
                     </label>
@@ -899,7 +930,7 @@ export const ModalsAndToasts: React.FC = () => {
                               void updatePrinterProfile(selectedPrinter.name, { borderless: checked });
                             }
                           }}
-                          className="accent-sky-500"
+                          className="accent-sky-600"
                         />
                         <span>{isFa ? 'چاپ بدون حاشیه (Borderless)' : 'Borderless'}</span>
                       </label>
@@ -908,8 +939,8 @@ export const ModalsAndToasts: React.FC = () => {
                 </div>
 
                 {/* Final Pre-Flight Summary Box */}
-                <div className="rounded-xl border border-sky-500/30 bg-sky-950/30 p-3 text-[11px] leading-relaxed text-slate-200 tabular-nums">
-                  <div className="font-bold text-sky-300">
+                <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-[11px] leading-relaxed text-slate-700 dark:border-sky-500/30 dark:bg-sky-950/30 dark:text-slate-200 tabular-nums">
+                  <div className="font-bold text-sky-700 dark:text-sky-300">
                     {isFa ? 'خلاصه نهایی پیش از ارسال به پرینتر:' : 'Pre-flight Summary:'}
                   </div>
                   <div>
@@ -922,7 +953,7 @@ export const ModalsAndToasts: React.FC = () => {
                     {isFa ? 'برگ' : 'sheets'}
                   </div>
                   {effects.invert && (
-                    <div className="text-fuchsia-300 font-bold">
+                    <div className="font-bold text-fuchsia-700 dark:text-fuchsia-300">
                       • {isFa ? 'افکت معکوس رنگ (Invert) فعال است' : 'Invert Colors Active'}
                     </div>
                   )}
@@ -930,11 +961,11 @@ export const ModalsAndToasts: React.FC = () => {
               </div>
             </div>
 
-            <div className="mt-6 flex items-center justify-end gap-2 border-t border-slate-800 pt-4">
+            <div className="mt-6 flex items-center justify-end gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
               <button
                 type="button"
                 onClick={() => setModalState('print', false)}
-                className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-xs text-slate-300 hover:bg-slate-700 cursor-pointer"
+                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer"
               >
                 {isFa ? 'انصراف' : 'Cancel'}
               </button>
@@ -991,11 +1022,14 @@ export const ModalsAndToasts: React.FC = () => {
 
       {/* 3. MANUAL DUPLEX 3D GUIDE MODAL (D5) */}
       {showManualDuplexModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-lg rounded-2xl border border-indigo-500/40 bg-slate-900 p-6 text-slate-100 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-xs dark:bg-black/70">
+          <div
+            dir={isFa ? 'rtl' : 'ltr'}
+            className="w-full max-w-lg rounded-2xl border border-indigo-200 bg-white p-6 text-slate-900 shadow-2xl dark:border-indigo-500/40 dark:bg-slate-900 dark:text-slate-100"
+          >
+            <div className="mb-4 flex items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-800">
               <div className="flex items-center gap-2">
-                <FlipHorizontal2 className="h-5 w-5 text-indigo-400" />
+                <FlipHorizontal2 className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
                 <h2 className="text-base font-extrabold">
                   {isFa
                     ? 'راهنمای ۳بعدی چاپ دوروی دستی (Manual Duplex — D5)'
@@ -1005,7 +1039,7 @@ export const ModalsAndToasts: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setModalState('manualDuplex', false)}
-                className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 cursor-pointer"
+                className={closeBtnCls}
               >
                 <X className="h-5 w-5" />
               </button>
@@ -1013,21 +1047,21 @@ export const ModalsAndToasts: React.FC = () => {
 
             <div className="space-y-4 text-xs leading-relaxed">
               {/* 3D Animated SVG Paper Flip Illustration */}
-              <div className="flex items-center justify-center rounded-2xl border border-slate-800 bg-slate-950 p-6">
+              <div className="flex items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 p-6 dark:border-slate-800 dark:bg-slate-950">
                 <div className="flex items-center gap-6">
-                  <div className="flex h-28 w-20 flex-col items-center justify-center rounded-lg border-2 border-sky-400 bg-sky-500/10 p-2 text-center">
-                    <span className="text-[10px] font-bold text-sky-300">
+                  <div className="flex h-28 w-20 flex-col items-center justify-center rounded-lg border-2 border-sky-500 bg-sky-50 p-2 text-center dark:border-sky-400 dark:bg-sky-500/10">
+                    <span className="text-[10px] font-bold text-sky-700 dark:text-sky-300">
                       Pass 1 (Front)
                     </span>
-                    <span className="mt-1 text-lg font-black text-white">
+                    <span className="mt-1 text-lg font-black text-slate-900 dark:text-white">
                       {manualDuplexInfo.pass1FrontSides.length}
                     </span>
-                    <span className="text-[9px] text-slate-400">
+                    <span className="text-[9px] text-slate-500 dark:text-slate-400">
                       {isFa ? 'شیت رو' : 'Front Sheets'}
                     </span>
                   </div>
 
-                  <div className="flex flex-col items-center text-indigo-400">
+                  <div className="flex flex-col items-center text-indigo-600 dark:text-indigo-400">
                     <FlipHorizontal2 className="h-8 w-8 animate-pulse" />
                     <span className="mt-1 text-[10px] font-bold">
                       {layout.duplexMode === 'short-edge'
@@ -1036,21 +1070,21 @@ export const ModalsAndToasts: React.FC = () => {
                     </span>
                   </div>
 
-                  <div className="flex h-28 w-20 flex-col items-center justify-center rounded-lg border-2 border-amber-400 bg-amber-500/10 p-2 text-center">
-                    <span className="text-[10px] font-bold text-amber-300">
+                  <div className="flex h-28 w-20 flex-col items-center justify-center rounded-lg border-2 border-amber-500 bg-amber-50 p-2 text-center dark:border-amber-400 dark:bg-amber-500/10">
+                    <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300">
                       Pass 2 (Back)
                     </span>
-                    <span className="mt-1 text-lg font-black text-white">
+                    <span className="mt-1 text-lg font-black text-slate-900 dark:text-white">
                       {manualDuplexInfo.pass2BackSides.length}
                     </span>
-                    <span className="text-[9px] text-slate-400">
+                    <span className="text-[9px] text-slate-500 dark:text-slate-400">
                       {isFa ? 'شیت پشت (معکوس)' : 'Back Sheets'}
                     </span>
                   </div>
                 </div>
               </div>
 
-              <p className="rounded-xl border border-indigo-500/30 bg-indigo-950/30 p-3 text-indigo-200">
+              <p className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-950/30 dark:text-indigo-200">
                 {isFa
                   ? manualDuplexInfo.flipInstructionFa
                   : manualDuplexInfo.flipInstructionEn}
@@ -1072,11 +1106,14 @@ export const ModalsAndToasts: React.FC = () => {
 
       {/* 4. SPLIT DOCUMENT / MAKE AN ARRAY MODAL (A4) */}
       {showSplitModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 text-slate-100 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-xs dark:bg-black/70">
+          <div
+            dir={isFa ? 'rtl' : 'ltr'}
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-slate-900 shadow-2xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          >
+            <div className="mb-4 flex items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-800">
               <div className="flex items-center gap-2">
-                <Scissors className="h-5 w-5 text-amber-400" />
+                <Scissors className="h-5 w-5 text-amber-500 dark:text-amber-400" />
                 <h2 className="text-base font-extrabold">
                   {isFa
                     ? 'تفکیک خودکار سند (Split) و تکرار آرایه‌ای (A4)'
@@ -1086,15 +1123,15 @@ export const ModalsAndToasts: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setModalState('split', false)}
-                className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 cursor-pointer"
+                className={closeBtnCls}
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             <div className="space-y-4 text-xs">
-              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-2">
-                <div className="font-bold text-slate-200">
+              <div className={`${subCardCls} p-3.5 space-y-2`}>
+                <div className="font-bold text-slate-800 dark:text-slate-200">
                   {isFa
                     ? '۱. تفکیک سند هر N صفحه به بخش‌های مجزا:'
                     : '1. Split every N pages into separate groups:'}
@@ -1108,7 +1145,7 @@ export const ModalsAndToasts: React.FC = () => {
                     onChange={(e) =>
                       setSplitN(Math.max(1, Number(e.target.value)))
                     }
-                    className="w-20 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-center text-white"
+                    className="w-20 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-center text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
                   <button
                     type="button"
@@ -1123,8 +1160,8 @@ export const ModalsAndToasts: React.FC = () => {
                 </div>
               </div>
 
-              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-2">
-                <div className="font-bold text-slate-200">
+              <div className={`${subCardCls} p-3.5 space-y-2`}>
+                <div className="font-bold text-slate-800 dark:text-slate-200">
                   {isFa
                     ? '۲. تکرار آرایه‌ای صفحه انتخاب‌شده (Make an Array):'
                     : '2. Repeat highlighted page (Make an Array):'}
@@ -1138,7 +1175,7 @@ export const ModalsAndToasts: React.FC = () => {
                     onChange={(e) =>
                       setArrayCount(Math.max(2, Number(e.target.value)))
                     }
-                    className="w-20 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-center text-white"
+                    className="w-20 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-center text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
                   <button
                     type="button"
@@ -1165,11 +1202,14 @@ export const ModalsAndToasts: React.FC = () => {
 
       {/* 5. SETTINGS MODAL (K1) */}
       {showSettingsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 backdrop-blur-xs">
-          <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 p-4 text-slate-100 shadow-2xl">
-            <div className="mb-3 flex shrink-0 items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-3 backdrop-blur-xs dark:bg-black/70">
+          <div
+            dir={isFa ? 'rtl' : 'ltr'}
+            className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 text-slate-900 shadow-2xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          >
+            <div className="mb-3 flex shrink-0 items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-800">
               <div className="flex items-center gap-2">
-                <Settings className="h-5 w-5 text-sky-400" />
+                <Settings className="h-5 w-5 text-sky-600 dark:text-sky-400" />
                 <h2 className="text-base font-extrabold">
                   {isFa
                     ? 'تنظیمات عمومی، واحد اندازه‌گیری، تقویم شمسی و تعرفه (K1)'
@@ -1179,7 +1219,7 @@ export const ModalsAndToasts: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setModalState('settings', false)}
-                className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 cursor-pointer"
+                className={closeBtnCls}
               >
                 <X className="h-5 w-5" />
               </button>
@@ -1188,7 +1228,7 @@ export const ModalsAndToasts: React.FC = () => {
             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pe-1">
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div>
-                <label className="mb-1 block text-slate-400">
+                <label className="mb-1 block text-slate-600 dark:text-slate-400">
                   {isFa ? 'زبان رابط کاربری:' : 'Interface Language:'}
                 </label>
                 <select
@@ -1196,7 +1236,7 @@ export const ModalsAndToasts: React.FC = () => {
                   onChange={(e) =>
                     updateSettings({ language: e.target.value as 'fa' | 'en' })
                   }
-                  className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-white"
+                  className={fieldCls}
                 >
                   <option value="fa">فارسی (راست‌به‌چپ - RTL)</option>
                   <option value="en">English (Left-to-Right - LTR)</option>
@@ -1204,7 +1244,7 @@ export const ModalsAndToasts: React.FC = () => {
               </div>
 
               <div>
-                <label className="mb-1 block text-slate-400">
+                <label className="mb-1 block text-slate-600 dark:text-slate-400">
                   {isFa ? 'واحد خط‌کش و ابعاد:' : 'Measurement Unit:'}
                 </label>
                 <select
@@ -1214,7 +1254,7 @@ export const ModalsAndToasts: React.FC = () => {
                       unit: e.target.value as 'mm' | 'cm' | 'inch',
                     })
                   }
-                  className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-white"
+                  className={fieldCls}
                 >
                   <option value="mm">میلی‌متر (mm)</option>
                   <option value="cm">سانتی‌متر (cm)</option>
@@ -1223,7 +1263,7 @@ export const ModalsAndToasts: React.FC = () => {
               </div>
 
               <div>
-                <label className="mb-1 block text-slate-400">
+                <label className="mb-1 block text-slate-600 dark:text-slate-400">
                   {isFa ? 'تقویم پیش‌فرض:' : 'Calendar System:'}
                 </label>
                 <select
@@ -1233,7 +1273,7 @@ export const ModalsAndToasts: React.FC = () => {
                       calendar: e.target.value as 'shamsi' | 'gregorian',
                     })
                   }
-                  className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-white"
+                  className={fieldCls}
                 >
                   <option value="shamsi">
                     هجری شمسی ({formatShamsiDate(new Date(), true)})
@@ -1243,19 +1283,19 @@ export const ModalsAndToasts: React.FC = () => {
               </div>
 
               <div>
-                <label className="mb-1 block text-slate-400">
+                <label className="mb-1 block text-slate-600 dark:text-slate-400">
                   {isFa ? 'نام اپراتور (ماکرو {user}):' : 'Operator Name:'}
                 </label>
                 <input
                   type="text"
                   value={settings.userName}
                   onChange={(e) => updateSettings({ userName: e.target.value })}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-white"
+                  className={fieldCls}
                 />
               </div>
 
               <div>
-                <label className="mb-1 block text-slate-400">
+                <label className="mb-1 block text-slate-600 dark:text-slate-400">
                   {isFa ? 'تعرفه صفحه سیاه‌وسفید (ریال):' : 'B&W Page Tariff (IRR):'}
                 </label>
                 <input
@@ -1266,12 +1306,12 @@ export const ModalsAndToasts: React.FC = () => {
                       bwPageTariffRials: Math.max(0, Number(e.target.value)),
                     })
                   }
-                  className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-white"
+                  className={fieldCls}
                 />
               </div>
 
               <div>
-                <label className="mb-1 block text-slate-400">
+                <label className="mb-1 block text-slate-600 dark:text-slate-400">
                   {isFa ? 'تعرفه صفحه رنگی (ریال):' : 'Color Page Tariff (IRR):'}
                 </label>
                 <input
@@ -1282,7 +1322,7 @@ export const ModalsAndToasts: React.FC = () => {
                       colorPageTariffRials: Math.max(0, Number(e.target.value)),
                     })
                   }
-                  className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-white"
+                  className={fieldCls}
                 />
               </div>
             </div>
@@ -1290,7 +1330,7 @@ export const ModalsAndToasts: React.FC = () => {
             {/* Vector pages are re-rendered at the size they are shown; a 0.2 pt line stays a line. */}
             <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
               <div>
-                <label className="mb-1 block text-slate-400">
+                <label className="mb-1 block text-slate-600 dark:text-slate-400">
                   {isFa ? 'رندر پیش‌نمایش صفحه:' : 'Page preview rendering:'}
                 </label>
                 <select
@@ -1299,7 +1339,7 @@ export const ModalsAndToasts: React.FC = () => {
                   onChange={(e) =>
                     updateSettings({ previewFidelity: e.target.value as 'fast' | 'crisp' })
                   }
-                  className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-white"
+                  className={fieldCls}
                 >
                   <option value="crisp">
                     {isFa ? 'وکتوری، هم‌اندازهٔ نمایش (کم‌مصرف با کش محدود)' : 'Vector, re-rendered at display size (bounded cache)'}
@@ -1309,7 +1349,7 @@ export const ModalsAndToasts: React.FC = () => {
                   </option>
                 </select>
               </div>
-              <p className="self-center text-[10px] leading-4 text-slate-400">
+              <p className="self-center text-[10px] leading-4 text-slate-500 dark:text-slate-400">
                 {isFa
                   ? 'در حالت وکتوری فقط صفحه‌ای که روی صفحه نمایش داده می‌شود رندر می‌شود؛ رندرهای در حال انتظار لغو می‌شوند و کش، سقفش همان «حداکثر صفحات کش» است.'
                   : 'Crisp mode renders only the page a visible cell shows, cancels what scrolls away, and keeps at most a slice of the page-cache limit in memory.'}
@@ -1320,7 +1360,7 @@ export const ModalsAndToasts: React.FC = () => {
 
             </div>
 
-            <div className="mt-3 flex shrink-0 justify-end border-t border-slate-800 pt-3">
+            <div className="mt-3 flex shrink-0 justify-end border-t border-slate-200 pt-3 dark:border-slate-800">
               <button
                 type="button"
                 onClick={() => setModalState('settings', false)}
@@ -1335,10 +1375,13 @@ export const ModalsAndToasts: React.FC = () => {
 
       {/* 6. 6-STEP INTERACTIVE ONBOARDING TOUR MODAL */}
       {showOnboardingTour && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-lg rounded-2xl border border-sky-500/40 bg-slate-900 p-6 text-slate-100 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-xs dark:bg-black/70">
+          <div
+            dir={isFa ? 'rtl' : 'ltr'}
+            className="w-full max-w-lg rounded-2xl border border-sky-200 bg-white p-6 text-slate-900 shadow-2xl dark:border-sky-500/40 dark:bg-slate-900 dark:text-slate-100"
+          >
             <div className="mb-3 flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sky-400">
+              <div className="flex items-center gap-2 text-sky-600 dark:text-sky-400">
                 <HelpCircle className="h-5 w-5" />
                 <span className="text-xs font-bold">
                   {isFa
@@ -1349,18 +1392,18 @@ export const ModalsAndToasts: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setModalState('tour', false)}
-                className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 cursor-pointer"
+                className={closeBtnCls}
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <h3 className="text-base font-extrabold text-white">
+            <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
               {isFa
                 ? tourSteps[tourStep].titleFa
                 : tourSteps[tourStep].titleEn}
             </h3>
-            <p className="mt-2 text-xs leading-relaxed text-slate-300">
+            <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
               {isFa ? tourSteps[tourStep].descFa : tourSteps[tourStep].descEn}
             </p>
 
@@ -1370,7 +1413,7 @@ export const ModalsAndToasts: React.FC = () => {
                   <span
                     key={idx}
                     className={`h-1.5 w-5 rounded-full ${
-                      idx === tourStep ? 'bg-sky-400' : 'bg-slate-700'
+                      idx === tourStep ? 'bg-sky-500 dark:bg-sky-400' : 'bg-slate-200 dark:bg-slate-700'
                     }`}
                   />
                 ))}
@@ -1380,7 +1423,7 @@ export const ModalsAndToasts: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setTourStep(tourStep - 1)}
-                    className="rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-1.5 text-xs text-slate-200 cursor-pointer"
+                    className="rounded-xl border border-slate-300 bg-white px-3.5 py-1.5 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
                   >
                     {isFa ? 'قبلی' : 'Back'}
                   </button>
@@ -1453,19 +1496,22 @@ export const ModalsAndToasts: React.FC = () => {
             role="dialog"
             aria-modal="true"
             aria-label={isFa ? 'تعیین جهت چاپ پشت و رو' : 'Duplex Print Orientation'}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs dark:bg-black/75"
           >
-            <div className="w-full max-w-2xl rounded-2xl border border-indigo-500/40 bg-slate-900 p-6 text-slate-100 shadow-2xl">
-              <div className="mb-4 flex items-center justify-between border-b border-slate-800 pb-3">
+            <div
+              dir={isFa ? 'rtl' : 'ltr'}
+              className="w-full max-w-2xl rounded-2xl border border-indigo-200 bg-white p-6 text-slate-900 shadow-2xl dark:border-indigo-500/40 dark:bg-slate-900 dark:text-slate-100"
+            >
+              <div className="mb-4 flex items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-800">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <FlipHorizontal2 className="h-5 w-5 text-indigo-400 shrink-0" />
+                  <FlipHorizontal2 className="h-5 w-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
                   <div className="min-w-0">
                     <h2 className="text-base font-extrabold truncate">
                       {isFa
                         ? 'پیش‌نمایش و تعیین جهت چاپ پشت و رو (Duplex)'
                         : 'Confirm Duplex Orientation & Front/Back Preview'}
                     </h2>
-                    <p className="text-[11px] text-slate-400 truncate">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                       {pendingDuplexPrint.printerName} • {pendingDuplexPrint.paperName || pendingDuplexPrint.paperSize}{' '}
                       ({Math.round(pendingDuplexPrint.paperWidthMm ?? sheetDims.widthMm)}×
                       {Math.round(pendingDuplexPrint.paperHeightMm ?? sheetDims.heightMm)} mm) • {pendingDuplexPrint.tray}
@@ -1476,7 +1522,7 @@ export const ModalsAndToasts: React.FC = () => {
                   type="button"
                   onClick={dismissDuplexPrint}
                   aria-label={isFa ? 'بستن' : 'Close'}
-                  className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white cursor-pointer"
+                  className={closeBtnCls}
                 >
                   <X className="h-5 w-5" />
                 </button>
@@ -1484,8 +1530,8 @@ export const ModalsAndToasts: React.FC = () => {
 
               {/* Controls: Sheet Orientation & Flip Edge */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4 text-xs">
-                <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
-                  <div className="mb-2 font-bold text-slate-300">
+                <div className={`${subCardCls} p-3`}>
+                  <div className="mb-2 font-bold text-slate-700 dark:text-slate-300">
                     {isFa ? '۱. جهت صفحه (Orientation):' : '1. Page Orientation:'}
                   </div>
                   <div className="grid grid-cols-2 gap-2">
@@ -1494,8 +1540,8 @@ export const ModalsAndToasts: React.FC = () => {
                       onClick={() => setQuickDuplexOrientation('portrait')}
                       className={`rounded-lg border px-3 py-2 font-bold transition whitespace-nowrap cursor-pointer ${
                         quickDuplexOrientation === 'portrait'
-                          ? 'border-sky-500 bg-sky-600/25 text-sky-200'
-                          : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-800'
+                          ? 'border-sky-500 bg-sky-50 text-sky-700 dark:bg-sky-600/25 dark:text-sky-200'
+                          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-800'
                       }`}
                     >
                       {isFa ? 'عمودی (Portrait)' : 'Portrait'}
@@ -1505,8 +1551,8 @@ export const ModalsAndToasts: React.FC = () => {
                       onClick={() => setQuickDuplexOrientation('landscape')}
                       className={`rounded-lg border px-3 py-2 font-bold transition whitespace-nowrap cursor-pointer ${
                         quickDuplexOrientation === 'landscape'
-                          ? 'border-sky-500 bg-sky-600/25 text-sky-200'
-                          : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-800'
+                          ? 'border-sky-500 bg-sky-50 text-sky-700 dark:bg-sky-600/25 dark:text-sky-200'
+                          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-800'
                       }`}
                     >
                       {isFa ? 'افقی (Landscape)' : 'Landscape'}
@@ -1514,8 +1560,8 @@ export const ModalsAndToasts: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
-                  <div className="mb-2 font-bold text-slate-300">
+                <div className={`${subCardCls} p-3`}>
+                  <div className="mb-2 font-bold text-slate-700 dark:text-slate-300">
                     {isFa ? '۲. لبه چرخش پشت و رو (Flip Edge):' : '2. Duplex Flip Edge:'}
                   </div>
                   <div className="grid grid-cols-3 gap-1.5">
@@ -1524,8 +1570,8 @@ export const ModalsAndToasts: React.FC = () => {
                       onClick={() => setQuickDuplexMode('long-edge')}
                       className={`rounded-lg border px-2 py-2 text-[11px] font-bold transition whitespace-nowrap cursor-pointer ${
                         quickDuplexMode === 'long-edge'
-                          ? 'border-indigo-500 bg-indigo-600/30 text-indigo-200'
-                          : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-800'
+                          ? 'border-indigo-500 bg-indigo-50 text-indigo-700 dark:bg-indigo-600/30 dark:text-indigo-200'
+                          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-800'
                       }`}
                     >
                       {isFa ? 'لبه بلند' : 'Long Edge'}
@@ -1535,8 +1581,8 @@ export const ModalsAndToasts: React.FC = () => {
                       onClick={() => setQuickDuplexMode('short-edge')}
                       className={`rounded-lg border px-2 py-2 text-[11px] font-bold transition whitespace-nowrap cursor-pointer ${
                         quickDuplexMode === 'short-edge'
-                          ? 'border-amber-500 bg-amber-600/25 text-amber-200'
-                          : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-800'
+                          ? 'border-amber-500 bg-amber-50 text-amber-800 dark:bg-amber-600/25 dark:text-amber-200'
+                          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-800'
                       }`}
                     >
                       {isFa ? 'لبه کوتاه' : 'Short Edge'}
@@ -1546,8 +1592,8 @@ export const ModalsAndToasts: React.FC = () => {
                       onClick={() => setQuickDuplexMode('none')}
                       className={`rounded-lg border px-2 py-2 text-[11px] font-bold transition whitespace-nowrap cursor-pointer ${
                         quickDuplexMode === 'none'
-                          ? 'border-emerald-500 bg-emerald-600/25 text-emerald-200'
-                          : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-800'
+                          ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-600/25 dark:text-emerald-200'
+                          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-800'
                       }`}
                     >
                       {isFa ? 'تک‌رو' : 'Simplex'}
@@ -1557,15 +1603,15 @@ export const ModalsAndToasts: React.FC = () => {
               </div>
 
               {/* Interactive Front & Back Visual Sheet Preview */}
-              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-5">
+              <div className="rounded-2xl border border-slate-200 bg-slate-100 p-5 dark:border-slate-800 dark:bg-slate-950">
                 <div className="flex flex-col sm:flex-row items-center justify-center gap-6">
                   {/* Front Side */}
                   <div className="flex flex-col items-center gap-2">
-                    <span className="text-[11px] font-bold text-sky-300">
+                    <span className="text-[11px] font-bold text-sky-700 dark:text-sky-300">
                       {isFa ? 'روی برگه (صفحه ۱)' : 'Front Side (Page 1)'}
                     </span>
                     <div
-                      className={`relative flex flex-col items-center justify-between rounded-lg border-2 border-sky-400 bg-white p-3 text-slate-800 shadow-lg transition-all ${
+                      className={`relative flex flex-col items-center justify-between rounded-lg border-2 border-sky-500 bg-white p-3 text-slate-800 shadow-lg transition-all ${
                         isLandscapeSheet ? 'h-28 w-40' : 'h-40 w-28'
                       }`}
                     >
@@ -1596,17 +1642,17 @@ export const ModalsAndToasts: React.FC = () => {
                   {/* Flip Axis Indicator */}
                   <div className="flex flex-col items-center gap-1.5 text-center">
                     {isHorizontalTopFlip ? (
-                      <FlipVertical2 className="h-8 w-8 text-amber-400 animate-pulse" />
+                      <FlipVertical2 className="h-8 w-8 text-amber-500 dark:text-amber-400 animate-pulse" />
                     ) : (
                       <FlipHorizontal2
                         className={`h-8 w-8 ${
                           quickDuplexMode === 'none'
-                            ? 'text-slate-600'
-                            : 'text-indigo-400 animate-pulse'
+                            ? 'text-slate-400 dark:text-slate-600'
+                            : 'text-indigo-500 dark:text-indigo-400 animate-pulse'
                         }`}
                       />
                     )}
-                    <span className="rounded-md border border-slate-700 bg-slate-900 px-2.5 py-1 text-[10px] font-bold text-slate-200">
+                    <span className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-[10px] font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
                       {isFa
                         ? quickDuplexMode === 'none'
                           ? 'فقط یک‌رو'
@@ -1619,7 +1665,7 @@ export const ModalsAndToasts: React.FC = () => {
 
                   {/* Back Side */}
                   <div className="flex flex-col items-center gap-2">
-                    <span className="text-[11px] font-bold text-amber-300">
+                    <span className="text-[11px] font-bold text-amber-700 dark:text-amber-300">
                       {quickDuplexMode === 'none'
                         ? isFa
                           ? 'پشت برگه (سفید)'
@@ -1635,8 +1681,8 @@ export const ModalsAndToasts: React.FC = () => {
                         isLandscapeSheet ? 'h-28 w-40' : 'h-40 w-28'
                       } ${
                         quickDuplexMode === 'none'
-                          ? 'border-dashed border-slate-600 bg-slate-800/40 text-slate-500'
-                          : 'border-amber-400 bg-white text-slate-800'
+                          ? 'border-dashed border-slate-400 bg-slate-200/70 text-slate-500 dark:border-slate-600 dark:bg-slate-800/40'
+                          : 'border-amber-500 bg-white text-slate-800'
                       } ${backRotated180 ? 'rotate-180' : ''}`}
                     >
                       {quickDuplexMode !== 'none' && (
@@ -1670,21 +1716,21 @@ export const ModalsAndToasts: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="mt-4 rounded-xl border border-indigo-500/30 bg-indigo-950/35 p-3 text-xs leading-relaxed">
-                  <div className="font-bold text-indigo-200">
+                <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-xs leading-relaxed dark:border-indigo-500/30 dark:bg-indigo-950/35">
+                  <div className="font-bold text-indigo-800 dark:text-indigo-200">
                     {isFa ? flipHeadlineFa : flipHeadlineEn}
                   </div>
-                  <div className="mt-1 text-[11px] text-slate-300">
+                  <div className="mt-1 text-[11px] text-slate-700 dark:text-slate-300">
                     {isFa ? flipDetailFa : flipDetailEn}
                   </div>
                 </div>
               </div>
 
-              <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-800 pt-4">
+              <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={dismissDuplexPrint}
-                  className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-xs text-slate-300 hover:bg-slate-700 whitespace-nowrap cursor-pointer"
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 whitespace-nowrap cursor-pointer"
                 >
                   {isFa ? 'انصراف' : 'Cancel'}
                 </button>
@@ -1745,17 +1791,20 @@ export const ModalsAndToasts: React.FC = () => {
             role="dialog"
             aria-modal="true"
             aria-label={isFa ? 'پیشرفت ارسال چاپ' : 'Print Progress'}
-            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs dark:bg-black/75"
           >
-            <div className="w-full max-w-md rounded-2xl border border-sky-500/40 bg-slate-900 p-6 text-slate-100 shadow-2xl">
+            <div
+              dir={isFa ? 'rtl' : 'ltr'}
+              className="w-full max-w-md rounded-2xl border border-sky-200 bg-white p-6 text-slate-900 shadow-2xl dark:border-sky-500/40 dark:bg-slate-900 dark:text-slate-100"
+            >
               <div className="mb-4 flex items-center gap-3">
                 <div
                   className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${
                     printProgress.stage === 'completed'
-                      ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-400'
+                      ? 'border-emerald-300 bg-emerald-50 text-emerald-600 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-400'
                       : printProgress.stage === 'error'
-                        ? 'border-rose-500/40 bg-rose-500/15 text-rose-400'
-                        : 'border-sky-500/40 bg-sky-500/15 text-sky-400'
+                        ? 'border-rose-300 bg-rose-50 text-rose-600 dark:border-rose-500/40 dark:bg-rose-500/15 dark:text-rose-400'
+                        : 'border-sky-300 bg-sky-50 text-sky-600 dark:border-sky-500/40 dark:bg-sky-500/15 dark:text-sky-400'
                   }`}
                 >
                   {printProgress.stage === 'completed' ? (
@@ -1767,28 +1816,28 @@ export const ModalsAndToasts: React.FC = () => {
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h3 className="text-sm font-extrabold text-white truncate">
+                  <h3 className="text-sm font-extrabold text-slate-900 dark:text-white truncate">
                     {isFa ? 'در حال ارسال و چاپ سند' : 'Printing Document'}
                   </h3>
-                  <p className="text-[11px] text-slate-400 truncate">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                     {printProgress.printerName} • {printProgress.jobTitle}
                   </p>
                 </div>
               </div>
 
-              <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4">
+              <div className={`${subCardCls} p-4`}>
                 <div className="mb-2 flex items-center justify-between text-xs">
-                  <span className="font-semibold text-slate-200">
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
                     {isFa
                       ? stageTextFa[printProgress.stage]
                       : stageTextEn[printProgress.stage]}
                   </span>
-                  <span className="font-mono font-bold text-sky-300 tabular-nums">
+                  <span className="font-mono font-bold text-sky-600 dark:text-sky-300 tabular-nums">
                     {Math.round(printProgress.percent)}%
                   </span>
                 </div>
 
-                <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-800">
+                <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
                   <div
                     className={`h-full rounded-full transition-all duration-300 ${
                       printProgress.stage === 'completed'
@@ -1803,14 +1852,14 @@ export const ModalsAndToasts: React.FC = () => {
                   />
                 </div>
 
-                <div className="mt-2.5 flex items-center justify-between text-[11px] text-slate-400 tabular-nums">
+                <div className="mt-2.5 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
                   <span>
                     {isFa
                       ? `شیت ${printProgress.currentSheet} از ${printProgress.totalSheets}`
                       : `Sheet ${printProgress.currentSheet} of ${printProgress.totalSheets}`}
                   </span>
                   {printProgress.spoolerJobId && (
-                    <span className="font-mono text-emerald-300">
+                    <span className="font-mono text-emerald-700 dark:text-emerald-300">
                       Spooler #{printProgress.spoolerJobId}
                     </span>
                   )}
@@ -1823,7 +1872,7 @@ export const ModalsAndToasts: React.FC = () => {
                     type="button"
                     disabled={printProgress.stage === 'canceling'}
                     onClick={() => void cancelActivePrintJob()}
-                    className="flex items-center gap-1.5 rounded-xl border border-rose-500/50 bg-rose-600/20 px-4 py-2 text-xs font-bold text-rose-200 hover:bg-rose-600/35 disabled:opacity-50 whitespace-nowrap cursor-pointer"
+                    className="flex items-center gap-1.5 rounded-xl border border-rose-300 bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50 dark:border-rose-500/50 dark:bg-rose-600/20 dark:text-rose-200 dark:hover:bg-rose-600/35 whitespace-nowrap cursor-pointer"
                   >
                     <X className="h-4 w-4 shrink-0" />
                     <span>{isFa ? 'لغو چاپ (Cancel)' : 'Cancel Print'}</span>
@@ -1832,7 +1881,7 @@ export const ModalsAndToasts: React.FC = () => {
                   <button
                     type="button"
                     onClick={closePrintProgress}
-                    className="rounded-xl bg-slate-800 px-4 py-2 text-xs font-bold text-slate-200 hover:bg-slate-700 whitespace-nowrap cursor-pointer"
+                    className="rounded-xl border border-slate-300 bg-slate-100 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 whitespace-nowrap cursor-pointer"
                   >
                     {isFa ? 'بستن' : 'Close'}
                   </button>
@@ -1846,6 +1895,67 @@ export const ModalsAndToasts: React.FC = () => {
       {/* 9. FULL PAGE SETUP MODAL (Margins, Presets, Spine, Paper Size & Sheet) */}
       <PageSetupModal />
 
+      {/* 10. IN-APP PDF PREVIEW MODAL (View PDF File) */}
+      {pdfPreviewModal && (
+        <div
+          data-pdf-preview-modal
+          role="dialog"
+          aria-modal="true"
+          aria-label={isFa ? 'پیش‌نمایش فایل PDF خروجی' : 'PDF File Preview'}
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs"
+          onClick={closePdfPreviewModal}
+        >
+          <div
+            dir={isFa ? 'rtl' : 'ltr'}
+            onClick={(e) => e.stopPropagation()}
+            className="flex h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-2xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          >
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <FileText className="h-5 w-5 shrink-0 text-red-600 dark:text-red-400" aria-hidden="true" />
+                <span className="truncate text-sm font-extrabold">{pdfPreviewModal.fileName}</span>
+                <span className="rounded-md border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 tabular-nums">
+                  {formatLocalizedNumber(pdfPreviewModal.pageCount, lang)} {isFa ? 'صفحه' : 'pages'}
+                </span>
+                <span dir="ltr" className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-mono text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300 tabular-nums">
+                  {Math.max(1, Math.round(pdfPreviewModal.byteLength / 1024))} KB
+                </span>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-2">
+                <a
+                  href={pdfPreviewModal.url}
+                  download={pdfPreviewModal.fileName}
+                  data-pdf-preview-download
+                  className="flex items-center gap-1.5 rounded-xl bg-sky-600 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-sky-500 cursor-pointer"
+                >
+                  <Download className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span>{isFa ? 'دانلود PDF' : 'Download PDF'}</span>
+                </a>
+                <button
+                  type="button"
+                  data-pdf-preview-close
+                  aria-label={isFa ? 'بستن پیش‌نمایش PDF' : 'Close PDF preview'}
+                  onClick={closePdfPreviewModal}
+                  className={closeBtnCls}
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 bg-slate-100 p-3 dark:bg-slate-950">
+              <iframe
+                data-pdf-preview-frame
+                src={pdfPreviewModal.url}
+                title={pdfPreviewModal.fileName}
+                className="h-full w-full rounded-lg border border-slate-200 bg-white dark:border-slate-700"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* NON-INTRUSIVE TOAST NOTIFICATIONS */}
       <div className="pointer-events-none fixed bottom-11 end-4 z-50 flex flex-col gap-2 max-w-sm">
         {toasts.map((toast) => (
@@ -1854,20 +1964,20 @@ export const ModalsAndToasts: React.FC = () => {
             onClick={() => dismissToast(toast.id)}
             className={`pointer-events-auto flex items-start gap-2.5 rounded-xl border p-3 text-xs shadow-2xl backdrop-blur-md transition cursor-pointer ${
               toast.type === 'error'
-                ? 'border-rose-500/50 bg-rose-950/90 text-rose-100'
+                ? 'border-rose-300 bg-rose-50/95 text-rose-900 dark:border-rose-500/50 dark:bg-rose-950/90 dark:text-rose-100'
                 : toast.type === 'warning'
-                  ? 'border-amber-500/50 bg-amber-950/90 text-amber-100'
+                  ? 'border-amber-300 bg-amber-50/95 text-amber-900 dark:border-amber-500/50 dark:bg-amber-950/90 dark:text-amber-100'
                   : toast.type === 'success'
-                    ? 'border-emerald-500/50 bg-emerald-950/90 text-emerald-100'
-                    : 'border-sky-500/50 bg-slate-900/95 text-slate-100'
+                    ? 'border-emerald-300 bg-emerald-50/95 text-emerald-900 dark:border-emerald-500/50 dark:bg-emerald-950/90 dark:text-emerald-100'
+                    : 'border-sky-300 bg-white/95 text-slate-900 dark:border-sky-500/50 dark:bg-slate-900/95 dark:text-slate-100'
             }`}
           >
             {toast.type === 'success' ? (
-              <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
             ) : toast.type === 'error' || toast.type === 'warning' ? (
-              <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0 mt-0.5" />
+              <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
             ) : (
-              <Info className="h-4 w-4 text-sky-400 shrink-0 mt-0.5" />
+              <Info className="h-4 w-4 text-sky-600 dark:text-sky-400 shrink-0 mt-0.5" />
             )}
             <div className="leading-relaxed">
               <div className="font-bold">{toast.title}</div>

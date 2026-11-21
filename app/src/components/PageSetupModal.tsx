@@ -247,7 +247,7 @@ export const PageSetupModal: React.FC = () => {
   ];
 
   const inputClass =
-    'w-full rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs text-white focus:border-sky-500 focus:outline-none tabular-nums';
+    'w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 focus:border-sky-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white tabular-nums';
 
   return (
     <div
@@ -255,23 +255,23 @@ export const PageSetupModal: React.FC = () => {
       role="dialog"
       aria-modal="true"
       aria-label={isFa ? 'تنظیمات کامل صفحه و چیدمان' : 'Page Setup'}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-xs dark:bg-black/75"
       onClick={() => setModalState('pageSetup', false)}
     >
       <div
         dir={isFa ? 'rtl' : 'ltr'}
         onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 text-slate-100 shadow-2xl"
+        className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-2xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3.5">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5 dark:border-slate-800">
           <div className="flex items-center gap-2.5">
-            <SlidersHorizontal className="h-5 w-5 text-sky-400 shrink-0" aria-hidden="true" />
+            <SlidersHorizontal className="h-5 w-5 text-sky-600 dark:text-sky-400 shrink-0" aria-hidden="true" />
             <div>
-              <h2 className="text-sm font-extrabold text-white">
+              <h2 className="text-sm font-extrabold text-slate-900 dark:text-white">
                 {isFa ? 'تنظیمات کامل صفحه (Page Setup)' : 'Page Setup'}
               </h2>
-              <p className="text-[11px] text-slate-400">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
                 {isFa
                   ? 'تنظیم حاشیه‌ها، پریست‌ها، شیرازه و عطف بوکلت، اندازه کاغذ و چیدمان شیت'
                   : 'Configure margins, presets, booklet spine & fold, paper size, orientation, and imposition'}
@@ -282,22 +282,22 @@ export const PageSetupModal: React.FC = () => {
             type="button"
             aria-label={isFa ? 'بستن تنظیمات صفحه' : 'Close Page Setup'}
             onClick={() => setModalState('pageSetup', false)}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white cursor-pointer"
+            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex items-center gap-1 border-b border-slate-800 bg-slate-950/60 px-5 pt-2 text-xs">
+        <div className="flex items-center gap-1 border-b border-slate-200 bg-slate-50 px-5 pt-2 text-xs dark:border-slate-800 dark:bg-slate-950/60">
           <button
             type="button"
             data-page-setup-tab="margins"
             onClick={() => setActiveTab('margins')}
             className={`flex items-center gap-1.5 rounded-t-lg border-b-2 px-4 py-2 font-bold transition whitespace-nowrap cursor-pointer ${
               activeTab === 'margins'
-                ? 'border-sky-400 bg-slate-900 text-sky-300'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
+                ? 'border-sky-500 bg-white text-sky-700 dark:border-sky-400 dark:bg-slate-900 dark:text-sky-300'
+                : 'border-transparent text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
             }`}
           >
             <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
@@ -309,8 +309,8 @@ export const PageSetupModal: React.FC = () => {
             onClick={() => setActiveTab('paper')}
             className={`flex items-center gap-1.5 rounded-t-lg border-b-2 px-4 py-2 font-bold transition whitespace-nowrap cursor-pointer ${
               activeTab === 'paper'
-                ? 'border-sky-400 bg-slate-900 text-sky-300'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
+                ? 'border-sky-500 bg-white text-sky-700 dark:border-sky-400 dark:bg-slate-900 dark:text-sky-300'
+                : 'border-transparent text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
             }`}
           >
             <FileText className="h-3.5 w-3.5" aria-hidden="true" />
@@ -327,7 +327,7 @@ export const PageSetupModal: React.FC = () => {
                 {/* Quick Presets Strip */}
                 <div>
                   <div className="mb-2 flex items-center justify-between">
-                    <span className="font-bold text-slate-200">
+                    <span className="font-bold text-slate-800 dark:text-slate-200">
                       {isFa ? 'پریست‌های سریع حاشیه' : 'Quick Margin Presets'}
                     </span>
                     <button
@@ -342,7 +342,7 @@ export const PageSetupModal: React.FC = () => {
                           marginsMm: { ...minMargins },
                         }));
                       }}
-                      className="flex items-center gap-1 rounded-lg border border-orange-500/40 bg-orange-500/10 px-2.5 py-1 text-[11px] font-semibold text-orange-300 hover:bg-orange-500/20 disabled:opacity-40 cursor-pointer"
+                      className="flex items-center gap-1 rounded-lg border border-orange-300 bg-orange-50 px-2.5 py-1 text-[11px] font-semibold text-orange-700 hover:bg-orange-100 disabled:opacity-40 dark:border-orange-500/40 dark:bg-orange-500/10 dark:text-orange-300 dark:hover:bg-orange-500/20 cursor-pointer"
                     >
                       <RotateCcw className="h-3 w-3" aria-hidden="true" />
                       <span>{isFa ? 'حاشیه سخت‌افزاری پرینتر' : 'Use Hardware Margins'}</span>
@@ -376,19 +376,19 @@ export const PageSetupModal: React.FC = () => {
                           }}
                           className={`rounded-xl border px-2.5 py-2 text-start transition cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed ${
                             isSelected
-                              ? 'border-sky-500 bg-sky-500/15 text-white'
-                              : 'border-slate-700/80 bg-slate-950/60 text-slate-300 hover:border-slate-600'
+                              ? 'border-sky-500 bg-sky-50 text-sky-900 dark:bg-sky-500/15 dark:text-white'
+                              : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 dark:border-slate-700/80 dark:bg-slate-950/60 dark:text-slate-300 dark:hover:border-slate-600'
                           }`}
                         >
                           <div className="truncate font-bold">
                             {isFa ? preset.titleFa : preset.titleEn}
                           </div>
                           {preset.marginsMm ? (
-                            <div dir="ltr" className="mt-0.5 text-[10px] text-slate-400 tabular-nums">
+                            <div dir="ltr" className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400 tabular-nums">
                               T:{formatMarginValue(preset.marginsMm.top, settings.unit)} · B:{formatMarginValue(preset.marginsMm.bottom, settings.unit)} · L:{formatMarginValue(preset.marginsMm.left, settings.unit)} · R:{formatMarginValue(preset.marginsMm.right, settings.unit)}
                             </div>
                           ) : (
-                            <div className="mt-0.5 text-[10px] text-amber-300/80">
+                            <div className="mt-0.5 text-[10px] text-amber-600 dark:text-amber-300/80">
                               {isFa ? 'نامشخص' : 'Unavailable'}
                             </div>
                           )}
@@ -399,9 +399,9 @@ export const PageSetupModal: React.FC = () => {
                 </div>
 
                 {/* 4-Side Margins Inputs */}
-                <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3.5">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-950/50">
                   <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
-                    <span className="font-bold text-slate-200">
+                    <span className="font-bold text-slate-800 dark:text-slate-200">
                       {isFa ? 'حاشیه‌های چهارگانه صفحه (mm)' : 'Page Margins (mm)'}
                     </span>
                     <div className="flex items-center gap-2">
@@ -420,13 +420,13 @@ export const PageSetupModal: React.FC = () => {
                             },
                           }));
                         }}
-                        className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:border-sky-500/60 hover:bg-slate-700 cursor-pointer"
+                        className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-semibold text-slate-700 hover:border-sky-500/60 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
                       >
-                        <ArrowLeftRight className="h-3 w-3 text-sky-400" aria-hidden="true" />
+                        <ArrowLeftRight className="h-3 w-3 text-sky-600 dark:text-sky-400" aria-hidden="true" />
                         <span>{isFa ? 'جابجایی چپ ↔ راست' : 'Swap Left ↔ Right'}</span>
                       </button>
                       {minMargins && (
-                        <span className="text-[10px] text-rose-300 tabular-nums">
+                        <span className="text-[10px] text-rose-600 dark:text-rose-300 tabular-nums">
                           {isFa
                             ? `حداقل پرینتر: بالا ${minMargins.top} · راست ${minMargins.right} · پایین ${minMargins.bottom} · چپ ${minMargins.left} mm`
                             : `Printer min: T ${minMargins.top} · R ${minMargins.right} · B ${minMargins.bottom} · L ${minMargins.left} mm`}
@@ -441,10 +441,10 @@ export const PageSetupModal: React.FC = () => {
                       const currentVal = Math.max(minSide, draft.marginsMm[side]);
                       return (
                         <label key={side} className="block space-y-1">
-                          <span className="flex items-center justify-between text-[11px] text-slate-400">
+                          <span className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400">
                             <span>{isFa ? fa : en}</span>
                             {settings.unit !== 'mm' && (
-                              <span dir="ltr" className="text-[10px] text-sky-300 tabular-nums">
+                              <span dir="ltr" className="text-[10px] text-sky-600 dark:text-sky-300 tabular-nums">
                                 {formatMarginValue(currentVal, settings.unit)}
                               </span>
                             )}
@@ -465,9 +465,9 @@ export const PageSetupModal: React.FC = () => {
                   </div>
 
                   {/* Binding & Duplex Mirroring Summary */}
-                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-slate-800/80 pt-3">
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-slate-200 pt-3 dark:border-slate-800/80">
                     <label className="block space-y-1">
-                      <span className="text-[11px] text-slate-400">
+                      <span className="text-[11px] text-slate-600 dark:text-slate-400">
                         {isFa ? 'چاپ پشت و رو (آینه‌ای شدن در زوج و فرد)' : 'Duplex Mode (Odd / Even Mirror)'}
                       </span>
                       <select
@@ -491,7 +491,7 @@ export const PageSetupModal: React.FC = () => {
                       </select>
                     </label>
                     <div className="space-y-1">
-                      <span className="block text-[11px] text-slate-400">
+                      <span className="block text-[11px] text-slate-600 dark:text-slate-400">
                         {isFa ? 'جهت صحافی / چیدمان زوج و فرد' : 'Binding Direction'}
                       </span>
                       <div className="grid grid-cols-2 gap-2">
@@ -509,8 +509,8 @@ export const PageSetupModal: React.FC = () => {
                             }}
                             className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition cursor-pointer ${
                               bindingDir === dirOption
-                                ? 'border-amber-400/70 bg-amber-500/15 text-amber-200'
-                                : 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                                ? 'border-amber-400 bg-amber-50 text-amber-800 dark:border-amber-400/70 dark:bg-amber-500/15 dark:text-amber-200'
+                                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
                             }`}
                           >
                             {dirOption === 'rtl'
@@ -524,13 +524,13 @@ export const PageSetupModal: React.FC = () => {
                 </div>
 
                 {/* Spine & Fold (Booklet) + Sheet Gutters */}
-                <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3.5 space-y-3">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-3 dark:border-slate-800 dark:bg-slate-950/50">
                   <div className="flex items-center justify-between">
-                    <span className="flex items-center gap-1.5 font-bold text-slate-200">
-                      <BookOpen className="h-4 w-4 text-amber-400" aria-hidden="true" />
+                    <span className="flex items-center gap-1.5 font-bold text-slate-800 dark:text-slate-200">
+                      <BookOpen className="h-4 w-4 text-amber-500 dark:text-amber-400" aria-hidden="true" />
                       <span>{isFa ? 'شیرازه، عطف و فاصله بین صفحات' : 'Spine, Fold & Gutters'}</span>
                     </span>
-                    <label className="flex items-center gap-2 cursor-pointer font-semibold text-amber-200">
+                    <label className="flex items-center gap-2 cursor-pointer font-semibold text-amber-700 dark:text-amber-200">
                       <input
                         type="checkbox"
                         data-page-setup-booklet-toggle
@@ -545,9 +545,9 @@ export const PageSetupModal: React.FC = () => {
                   {booklet.enabled ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                       <label className="block space-y-1">
-                        <span className="flex items-center justify-between text-[11px] text-slate-400">
+                        <span className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400">
                           <span>{isFa ? 'عرض فضای شیرازه و عطف (mm)' : 'Spine & fold gap (mm)'}</span>
-                          <span className="font-mono text-amber-300 tabular-nums">{booklet.spineWidthMm} mm</span>
+                          <span className="font-mono text-amber-700 dark:text-amber-300 tabular-nums">{booklet.spineWidthMm} mm</span>
                         </span>
                         <div className="flex items-center gap-2">
                           <input
@@ -571,13 +571,13 @@ export const PageSetupModal: React.FC = () => {
                                 spineWidthMm: Math.max(0, Math.min(30, Number(e.target.value) || 0)),
                               })
                             }
-                            className="w-20 rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-center text-xs text-white tabular-nums"
+                            className="w-20 rounded-lg border border-slate-300 bg-white px-2 py-1 text-center text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white tabular-nums"
                           />
                         </div>
                       </label>
 
                       <label className="block space-y-1">
-                        <span className="text-[11px] text-slate-400">
+                        <span className="text-[11px] text-slate-600 dark:text-slate-400">
                           {isFa ? 'جهت صحافی بوکلت' : 'Binding direction'}
                         </span>
                         <select
@@ -595,7 +595,7 @@ export const PageSetupModal: React.FC = () => {
                       </label>
 
                       <label className="block space-y-1">
-                        <span className="text-[11px] text-slate-400">
+                        <span className="text-[11px] text-slate-600 dark:text-slate-400">
                           {isFa ? 'جبران ضخامت کاغذ / Creep (mm)' : 'Creep compensation (mm)'}
                         </span>
                         <input
@@ -614,7 +614,7 @@ export const PageSetupModal: React.FC = () => {
                       </label>
 
                       <label className="block space-y-1">
-                        <span className="text-[11px] text-slate-400">
+                        <span className="text-[11px] text-slate-600 dark:text-slate-400">
                           {isFa ? 'تعداد صفحات در هر دسته صحافی' : 'Pages per signature'}
                         </span>
                         <select
@@ -635,7 +635,7 @@ export const PageSetupModal: React.FC = () => {
                         </select>
                       </label>
 
-                      <label className="flex items-center gap-2 sm:col-span-2 cursor-pointer text-slate-300">
+                      <label className="flex items-center gap-2 sm:col-span-2 cursor-pointer text-slate-700 dark:text-slate-300">
                         <input
                           type="checkbox"
                           checked={booklet.compensateCreep}
@@ -648,7 +648,7 @@ export const PageSetupModal: React.FC = () => {
                   ) : (
                     <div className="grid grid-cols-2 gap-3 pt-1">
                       <label className="block space-y-1">
-                        <span className="text-[11px] text-slate-400">
+                        <span className="text-[11px] text-slate-600 dark:text-slate-400">
                           {isFa ? 'فاصله افقی خانه‌ها / ستون‌ها (mm)' : 'Horizontal Gutter (mm)'}
                         </span>
                         <input
@@ -668,7 +668,7 @@ export const PageSetupModal: React.FC = () => {
                         />
                       </label>
                       <label className="block space-y-1">
-                        <span className="text-[11px] text-slate-400">
+                        <span className="text-[11px] text-slate-600 dark:text-slate-400">
                           {isFa ? 'فاصله عمودی خانه‌ها / ردیف‌ها (mm)' : 'Vertical Gutter (mm)'}
                         </span>
                         <input
@@ -696,14 +696,14 @@ export const PageSetupModal: React.FC = () => {
             {activeTab === 'paper' && (
               <>
                 {/* Paper Size & Orientation */}
-                <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3.5 space-y-3">
-                  <div className="font-bold text-slate-200">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-3 dark:border-slate-800 dark:bg-slate-950/50">
+                  <div className="font-bold text-slate-800 dark:text-slate-200">
                     {isFa ? 'اندازه کاغذ و جهت صفحه' : 'Paper Size & Orientation'}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <label className="block space-y-1">
-                      <span className="text-[11px] text-slate-400">
+                      <span className="text-[11px] text-slate-600 dark:text-slate-400">
                         {isFa ? 'اندازه کاغذ شیت' : 'Paper Size'}
                       </span>
                       <select
@@ -743,7 +743,7 @@ export const PageSetupModal: React.FC = () => {
                     </label>
 
                     <div className="space-y-1">
-                      <span className="block text-[11px] text-slate-400">
+                      <span className="block text-[11px] text-slate-600 dark:text-slate-400">
                         {isFa ? 'جهت صفحه' : 'Orientation'}
                       </span>
                       <div className="grid grid-cols-2 gap-2">
@@ -756,8 +756,8 @@ export const PageSetupModal: React.FC = () => {
                             onClick={() => setDraft((prev) => ({ ...prev, orientation: ori }))}
                             className={`rounded-lg border px-3 py-1.5 font-semibold transition cursor-pointer disabled:opacity-50 ${
                               (booklet.enabled ? 'landscape' : draft.orientation) === ori
-                                ? 'border-sky-500 bg-sky-500/20 text-sky-200'
-                                : 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                                ? 'border-sky-500 bg-sky-50 text-sky-800 dark:bg-sky-500/20 dark:text-sky-200'
+                                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
                             }`}
                           >
                             {ori === 'portrait'
@@ -772,7 +772,7 @@ export const PageSetupModal: React.FC = () => {
                   {draft.paperSize === 'Custom' && (
                     <div className="grid grid-cols-2 gap-3 pt-1">
                       <label className="block space-y-1">
-                        <span className="text-[11px] text-slate-400">{isFa ? 'عرض کاغذ (mm)' : 'Width (mm)'}</span>
+                        <span className="text-[11px] text-slate-600 dark:text-slate-400">{isFa ? 'عرض کاغذ (mm)' : 'Width (mm)'}</span>
                         <input
                           type="number"
                           min={10}
@@ -788,7 +788,7 @@ export const PageSetupModal: React.FC = () => {
                         />
                       </label>
                       <label className="block space-y-1">
-                        <span className="text-[11px] text-slate-400">{isFa ? 'ارتفاع کاغذ (mm)' : 'Height (mm)'}</span>
+                        <span className="text-[11px] text-slate-600 dark:text-slate-400">{isFa ? 'ارتفاع کاغذ (mm)' : 'Height (mm)'}</span>
                         <input
                           type="number"
                           min={10}
@@ -808,15 +808,15 @@ export const PageSetupModal: React.FC = () => {
                 </div>
 
                 {/* Grid, Scale & Duplex */}
-                <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3.5 space-y-3">
-                  <div className="flex items-center gap-1.5 font-bold text-slate-200">
-                    <Layers className="h-4 w-4 text-sky-400" aria-hidden="true" />
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-3 dark:border-slate-800 dark:bg-slate-950/50">
+                  <div className="flex items-center gap-1.5 font-bold text-slate-800 dark:text-slate-200">
+                    <Layers className="h-4 w-4 text-sky-600 dark:text-sky-400" aria-hidden="true" />
                     <span>{isFa ? 'ماتریس چیدمان، مقیاس و چاپ دورو' : 'Matrix Grid, Scaling & Duplex'}</span>
                   </div>
 
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <label className="block space-y-1">
-                      <span className="text-[11px] text-slate-400">{isFa ? 'ردیف‌ها (Rows)' : 'Rows'}</span>
+                      <span className="text-[11px] text-slate-600 dark:text-slate-400">{isFa ? 'ردیف‌ها (Rows)' : 'Rows'}</span>
                       <input
                         type="number"
                         min={1}
@@ -833,7 +833,7 @@ export const PageSetupModal: React.FC = () => {
                       />
                     </label>
                     <label className="block space-y-1">
-                      <span className="text-[11px] text-slate-400">{isFa ? 'ستون‌ها (Cols)' : 'Columns'}</span>
+                      <span className="text-[11px] text-slate-600 dark:text-slate-400">{isFa ? 'ستون‌ها (Cols)' : 'Columns'}</span>
                       <input
                         type="number"
                         min={1}
@@ -850,7 +850,7 @@ export const PageSetupModal: React.FC = () => {
                       />
                     </label>
                     <label className="block space-y-1">
-                      <span className="text-[11px] text-slate-400">{isFa ? 'حالت مقیاس (Scale)' : 'Scale Mode'}</span>
+                      <span className="text-[11px] text-slate-600 dark:text-slate-400">{isFa ? 'حالت مقیاس (Scale)' : 'Scale Mode'}</span>
                       <select
                         value={draft.scaleMode}
                         onChange={(e) =>
@@ -865,7 +865,7 @@ export const PageSetupModal: React.FC = () => {
                       </select>
                     </label>
                     <label className="block space-y-1">
-                      <span className="text-[11px] text-slate-400">{isFa ? 'ترتیب چیدمان' : 'Reading Order'}</span>
+                      <span className="text-[11px] text-slate-600 dark:text-slate-400">{isFa ? 'ترتیب چیدمان' : 'Reading Order'}</span>
                       <select
                         value={draft.sheetOrder}
                         onChange={(e) =>
@@ -886,7 +886,7 @@ export const PageSetupModal: React.FC = () => {
 
                   {draft.scaleMode === 'custom' && (
                     <label className="block max-w-[180px] space-y-1">
-                      <span className="text-[11px] text-slate-400">{isFa ? 'درصد مقیاس (%)' : 'Scale (%)'}</span>
+                      <span className="text-[11px] text-slate-600 dark:text-slate-400">{isFa ? 'درصد مقیاس (%)' : 'Scale (%)'}</span>
                       <input
                         type="number"
                         min={10}
@@ -905,7 +905,7 @@ export const PageSetupModal: React.FC = () => {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                     <label className="block space-y-1">
-                      <span className="text-[11px] text-slate-400">
+                      <span className="text-[11px] text-slate-600 dark:text-slate-400">
                         {isFa ? 'چاپ دورو (یکپارچه با پرینتر)' : 'Duplex Mode (Synced)'}
                       </span>
                       <select
@@ -929,7 +929,7 @@ export const PageSetupModal: React.FC = () => {
                       </select>
                     </label>
                     <label className="block space-y-1">
-                      <span className="text-[11px] text-slate-400">{isFa ? 'نحوه چیدمان خانه‌ها' : 'Placement Mode'}</span>
+                      <span className="text-[11px] text-slate-600 dark:text-slate-400">{isFa ? 'نحوه چیدمان خانه‌ها' : 'Placement Mode'}</span>
                       <select
                         value={draft.placementMode}
                         onChange={(e) =>
@@ -946,7 +946,7 @@ export const PageSetupModal: React.FC = () => {
                     </label>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-4 pt-1 text-slate-300">
+                  <div className="flex flex-wrap items-center gap-4 pt-1 text-slate-700 dark:text-slate-300">
                     <label className="flex items-center gap-1.5 cursor-pointer">
                       <input
                         type="checkbox"
@@ -990,8 +990,8 @@ export const PageSetupModal: React.FC = () => {
           </div>
 
           {/* Live Schematic Preview Column */}
-          <div className="flex flex-col items-center justify-between rounded-xl border border-slate-800 bg-slate-950/70 p-4">
-            <div className="w-full text-center text-[11px] font-bold text-slate-300">
+          <div className="flex flex-col items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/70">
+            <div className="w-full text-center text-[11px] font-bold text-slate-700 dark:text-slate-300">
               {duplexActive
                 ? isFa
                   ? 'پیش‌نمایش برگه‌های فرد و زوج (پشت و رو)'
@@ -1034,7 +1034,7 @@ export const PageSetupModal: React.FC = () => {
                     {duplexActive && (
                       <span
                         className={`text-[10px] font-bold ${
-                          sheetSide === 'front' ? 'text-sky-300' : 'text-amber-300'
+                          sheetSide === 'front' ? 'text-sky-600 dark:text-sky-300' : 'text-amber-600 dark:text-amber-300'
                         }`}
                       >
                         {sheetSide === 'front'
@@ -1130,7 +1130,7 @@ export const PageSetupModal: React.FC = () => {
                         )}
                       </div>
                     </div>
-                    <span dir="ltr" className="text-[9px] text-slate-400 tabular-nums">
+                    <span dir="ltr" className="text-[9px] text-slate-500 dark:text-slate-400 tabular-nums">
                       L:{formatMarginValue(sm.left, settings.unit)} · R:{formatMarginValue(sm.right, settings.unit)}
                     </span>
                   </div>
@@ -1138,11 +1138,11 @@ export const PageSetupModal: React.FC = () => {
               })}
             </div>
 
-            <div className="w-full space-y-1 border-t border-slate-800 pt-3 text-center text-[11px] text-slate-300 tabular-nums">
-              <div className="font-mono font-bold text-sky-300">
+            <div className="w-full space-y-1 border-t border-slate-200 pt-3 text-center text-[11px] text-slate-700 dark:border-slate-800 dark:text-slate-300 tabular-nums">
+              <div className="font-mono font-bold text-sky-700 dark:text-sky-300">
                 {Math.round(dims.widthMm)} × {Math.round(dims.heightMm)} mm
               </div>
-              <div className="text-[10px] text-slate-400">
+              <div className="text-[10px] text-slate-500 dark:text-slate-400">
                 {booklet.enabled
                   ? isFa
                     ? `بوکلت ${bindingDir === 'rtl' ? 'راست‌چین' : 'چپ‌چین'} · شیرازه ${booklet.spineWidthMm} mm`
@@ -1150,7 +1150,7 @@ export const PageSetupModal: React.FC = () => {
                   : `${draft.rows}×${draft.cols}-Up · ${draft.orientation}`}
               </div>
               {duplexActive && (
-                <div className="text-[10px] text-amber-300/90">
+                <div className="text-[10px] text-amber-700 dark:text-amber-300/90">
                   {flipAxis === 'horizontal'
                     ? isFa
                       ? `آینه چپ ↔ راست در برگه‌های زوج و فرد (${bindingDir === 'rtl' ? 'صحافی راست‌چین' : 'صحافی چپ‌چین'})`
@@ -1165,8 +1165,8 @@ export const PageSetupModal: React.FC = () => {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between gap-3 border-t border-slate-800 bg-slate-950/60 px-5 py-3.5 text-xs">
-          <div className="text-[11px] text-slate-400">
+        <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-5 py-3.5 text-xs dark:border-slate-800 dark:bg-slate-950/60">
+          <div className="text-[11px] text-slate-500 dark:text-slate-400">
             {activePrinter
               ? isFa
                 ? `پرینتر فعال: ${activePrinter.name}`
@@ -1179,7 +1179,7 @@ export const PageSetupModal: React.FC = () => {
             <button
               type="button"
               onClick={() => setModalState('pageSetup', false)}
-              className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 font-semibold text-slate-300 hover:bg-slate-700 whitespace-nowrap cursor-pointer"
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 whitespace-nowrap cursor-pointer"
             >
               {isFa ? 'انصراف' : 'Cancel'}
             </button>

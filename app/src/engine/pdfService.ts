@@ -28,6 +28,7 @@ import type {
   PageItem,
   PageOverlay,
   PageNumberSettings,
+  PdfExportOptions,
   SourceDocument,
   WatermarkSettings,
 } from '@shared/models';
@@ -146,6 +147,48 @@ async function surfaceToPngBytes(canvas: HTMLCanvasElement | OffscreenCanvas): P
     }
   }
   throw new Error('Canvas PNG export is unavailable');
+}
+
+async function surfaceToJpegBytes(
+  canvas: HTMLCanvasElement | OffscreenCanvas,
+  quality = 0.85
+): Promise<{ bytes: Uint8Array; format: 'jpeg' | 'png' }> {
+  const anyCanvas = canvas as unknown as {
+    convertToBlob?: (opts?: { type?: string; quality?: number }) => Promise<Blob>;
+    toBlob?: (cb: (blob: Blob | null) => void, type?: string, quality?: number) => void;
+    toDataURL?: (type?: string, quality?: number) => string;
+  };
+  try {
+    if (typeof anyCanvas.convertToBlob === 'function') {
+      const blob = await anyCanvas.convertToBlob({ type: 'image/jpeg', quality });
+      if (blob.type === 'image/jpeg' || blob.size > 0) {
+        return { bytes: new Uint8Array(await blob.arrayBuffer()), format: 'jpeg' };
+      }
+    }
+    if (typeof anyCanvas.toBlob === 'function') {
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        anyCanvas.toBlob!((b) => (b ? resolve(b) : reject(new Error('JPEG encoding failed'))), 'image/jpeg', quality);
+      });
+      if (blob.type === 'image/jpeg' || blob.size > 0) {
+        return { bytes: new Uint8Array(await blob.arrayBuffer()), format: 'jpeg' };
+      }
+    }
+    if (typeof anyCanvas.toDataURL === 'function') {
+      const dataUrl = anyCanvas.toDataURL('image/jpeg', quality);
+      if (dataUrl.startsWith('data:image/jpeg')) {
+        const commaIdx = dataUrl.indexOf(',');
+        if (commaIdx >= 0) {
+          const bin = atob(dataUrl.slice(commaIdx + 1));
+          const out = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+          return { bytes: out, format: 'jpeg' };
+        }
+      }
+    }
+  } catch {
+    // Fall back cleanly to PNG in headless/mock Canvas environments
+  }
+  return { bytes: await surfaceToPngBytes(canvas), format: 'png' };
 }
 
 async function decodeImageSource(
@@ -667,6 +710,7 @@ export async function exportImposedPdf(params: {
   /** Source order, including pages excluded from output, for stable page scopes. */
   allPages?: PageItem[];
   userName: string;
+  exportOptions?: PdfExportOptions;
   onProgress?: (percent: number) => void;
 }): Promise<Uint8Array> {
   const {
@@ -679,8 +723,34 @@ export async function exportImposedPdf(params: {
     overlays = [],
     allPages = pages,
     userName,
+    exportOptions,
     onProgress,
   } = params;
+
+  const imageHandling = exportOptions?.imageHandling ?? 'preserve';
+  const compression = exportOptions?.compression ?? 'lossless';
+  const targetRasterDpi = imageHandling === 'downsample-150' ? 150 : 300;
+  const maxRasterSidePx =
+    imageHandling === 'downsample-150'
+      ? 1500
+      : imageHandling === 'downsample-300'
+        ? 2600
+        : 3600;
+  const jpegQuality = compression === 'compact' ? 0.72 : compression === 'balanced' ? 0.88 : null;
+
+  const embedSurfaceOpaque = async (canvas: HTMLCanvasElement | OffscreenCanvas) => {
+    if (jpegQuality !== null) {
+      const encoded = await surfaceToJpegBytes(canvas, jpegQuality);
+      if (encoded.format === 'jpeg') {
+        try {
+          return await outPdf.embedJpg(encoded.bytes);
+        } catch {
+          // If headless mock returned non-JPEG bytes, fall back cleanly to PNG
+        }
+      }
+    }
+    return await outPdf.embedPng(await surfaceToPngBytes(canvas));
+  };
 
   const outPdf = await PDFDocument.create();
   outPdf.setTitle('PrintStudio Pro — Imposed Output');
@@ -700,9 +770,37 @@ export async function exportImposedPdf(params: {
       const src = await PDFDocument.load(doc.rawBytes, { ignoreEncryption: false });
       loadedSourceDocs.set(doc.id, src);
     } else if (doc.fileType === 'image' && doc.rawBytes) {
-      if (doc.mimeType === 'image/png') loadedImages.set(doc.id, await outPdf.embedPng(doc.rawBytes));
-      else if (doc.mimeType === 'image/jpeg' || doc.mimeType === 'image/jpg') loadedImages.set(doc.id, await outPdf.embedJpg(doc.rawBytes));
-      else throw new Error(`Unsupported image format: ${doc.mimeType}`);
+      let embedded: Awaited<ReturnType<typeof outPdf.embedPng>> | null = null;
+      if (imageHandling !== 'preserve' || jpegQuality !== null) {
+        try {
+          const decoded = await decodeImageSource(doc.rawBytes, doc.mimeType || 'image/png');
+          try {
+            const scale = Math.min(1, maxRasterSidePx / Math.max(1, decoded.width, decoded.height));
+            const shouldReencode = scale < 1 || jpegQuality !== null;
+            if (shouldReencode) {
+              const w = Math.max(1, Math.round(decoded.width * scale));
+              const h = Math.max(1, Math.round(decoded.height * scale));
+              const surface = createCanvas2DSurface(w, h);
+              if (surface) {
+                surface.ctx.fillStyle = '#ffffff';
+                surface.ctx.fillRect(0, 0, w, h);
+                surface.ctx.drawImage(decoded.source, 0, 0, w, h);
+                embedded = await embedSurfaceOpaque(surface.canvas);
+              }
+            }
+          } finally {
+            decoded.cleanup?.();
+          }
+        } catch {
+          // Fall back to direct embed when image decoding/Canvas is unavailable (e.g. Node unit tests)
+        }
+      }
+      if (!embedded) {
+        if (doc.mimeType === 'image/png') embedded = await outPdf.embedPng(doc.rawBytes);
+        else if (doc.mimeType === 'image/jpeg' || doc.mimeType === 'image/jpg') embedded = await outPdf.embedJpg(doc.rawBytes);
+        else throw new Error(`Unsupported image format: ${doc.mimeType}`);
+      }
+      loadedImages.set(doc.id, embedded);
     }
   }
 
@@ -840,14 +938,14 @@ export async function exportImposedPdf(params: {
             const pdfPage = await pdfJsDoc.getPage(cell.page.sourcePageNumber);
             try {
               const baseViewport = pdfPage.getViewport({ scale: 1, rotation: 0 });
-              const maxSidePx = 3200;
-              const desiredScaleW = (targetCellW * (300 / 72)) / Math.max(1, baseViewport.width * visibleFractionW);
-              const desiredScaleH = (targetCellH * (300 / 72)) / Math.max(1, baseViewport.height * visibleFractionH);
+              const maxSidePx = Math.min(3200, maxRasterSidePx);
+              const desiredScaleW = (targetCellW * (targetRasterDpi / 72)) / Math.max(1, baseViewport.width * visibleFractionW);
+              const desiredScaleH = (targetCellH * (targetRasterDpi / 72)) / Math.max(1, baseViewport.height * visibleFractionH);
               const maxScale = Math.min(
                 maxSidePx / Math.max(1, baseViewport.width),
                 maxSidePx / Math.max(1, baseViewport.height)
               );
-              const minScale = Math.min(maxScale, 2);
+              const minScale = Math.min(maxScale, imageHandling === 'downsample-150' ? 1.25 : 2);
               const renderScale = Math.max(minScale, Math.min(maxScale, Math.max(desiredScaleW, desiredScaleH)));
               const viewport = pdfPage.getViewport({ scale: renderScale, rotation: 0 });
               const fullW = Math.max(1, Math.round(viewport.width));
@@ -867,6 +965,8 @@ export async function exportImposedPdf(params: {
                 fullW,
                 fullH,
                 buildResolvedEffectsKey(resolved),
+                imageHandling,
+                compression,
               ]);
               let processedPdfImg = processedPdfPages.get(pdfEffectKey);
               if (!processedPdfImg) {
@@ -894,8 +994,7 @@ export async function exportImposedPdf(params: {
                   outSurface === fullSurface ? imgData : outSurface.ctx.createImageData(cropW, cropH);
                 targetImgData.data.set(processed);
                 outSurface.ctx.putImageData(targetImgData, 0, 0);
-                const pngBytes = await surfaceToPngBytes(outSurface.canvas);
-                processedPdfImg = await outPdf.embedPng(pngBytes);
+                processedPdfImg = await embedSurfaceOpaque(outSurface.canvas);
                 processedPdfPages.set(pdfEffectKey, processedPdfImg);
               }
               outPage.drawImage(processedPdfImg, drawPlacement);
@@ -922,17 +1021,18 @@ export async function exportImposedPdf(params: {
       } else if (srcImage && cell.page.sourcePageNumber > 0) {
         let imageToDraw = srcImage;
         if (resolved.hasPixelEffects && sourceDoc?.rawBytes) {
-          const imgEffectKey = `${cell.page.documentId}|${buildResolvedEffectsKey(resolved)}`;
+          const imgEffectKey = `${cell.page.documentId}|${buildResolvedEffectsKey(resolved)}|${imageHandling}|${compression}`;
           let processedImg = processedImages.get(imgEffectKey);
           if (!processedImg) {
             const decoded = await decodeImageSource(sourceDoc.rawBytes, sourceDoc.mimeType || 'image/png');
             try {
-              const scale = Math.min(1, 3600 / Math.max(1, decoded.width, decoded.height));
+              const scale = Math.min(1, maxRasterSidePx / Math.max(1, decoded.width, decoded.height));
               const w = Math.max(1, Math.round(decoded.width * scale));
               const h = Math.max(1, Math.round(decoded.height * scale));
               const surface = createCanvas2DSurface(w, h);
               if (!surface) throw new Error('Effects export requires a Canvas 2D renderer');
-              surface.ctx.clearRect(0, 0, w, h);
+              surface.ctx.fillStyle = '#ffffff';
+              surface.ctx.fillRect(0, 0, w, h);
               surface.ctx.drawImage(decoded.source, 0, 0, w, h);
               const imgData = surface.ctx.getImageData(0, 0, w, h);
               const processed = applyEffectsToRgbaBuffer(
@@ -943,8 +1043,7 @@ export async function exportImposedPdf(params: {
               );
               imgData.data.set(processed);
               surface.ctx.putImageData(imgData, 0, 0);
-              const pngBytes = await surfaceToPngBytes(surface.canvas);
-              processedImg = await outPdf.embedPng(pngBytes);
+              processedImg = await embedSurfaceOpaque(surface.canvas);
               processedImages.set(imgEffectKey, processedImg);
             } finally {
               decoded.cleanup?.();
@@ -1200,14 +1299,27 @@ export async function exportImposedPdf(params: {
       if(!image){
         if(needsRaster){
           if (typeof document === 'undefined') throw new Error('Exporting a flipped or unsupported picture needs a Canvas 2D renderer');
-          const scale=Math.min(300/72,4096/w,4096/h);
-          const png=await rasterizeOverlayImage(item.src,w*scale,h*scale,{fit:item.fit,naturalWidth:item.naturalWidth,naturalHeight:item.naturalHeight,
-            flipHorizontal:item.flipHorizontal,flipVertical:item.flipVertical,drawRect:{x:rect.x*scale,y:rect.y*scale,width:Math.max(1,rect.width*scale),height:Math.max(1,rect.height*scale)},
-            invert:item.invert,erase:item.erase,
+          const scale = Math.min(targetRasterDpi / 72, maxRasterSidePx / w, maxRasterSidePx / h);
+          const png = await rasterizeOverlayImage(item.src, w * scale, h * scale, {
+            fit: item.fit,
+            naturalWidth: item.naturalWidth,
+            naturalHeight: item.naturalHeight,
+            flipHorizontal: item.flipHorizontal,
+            flipVertical: item.flipVertical,
+            drawRect: {
+              x: rect.x * scale,
+              y: rect.y * scale,
+              width: Math.max(1, rect.width * scale),
+              height: Math.max(1, rect.height * scale),
+            },
+            invert: item.invert,
+            erase: item.erase,
             // `rect` is the fit rectangle in points; the eraser's percentages and its millimetre brush are
             // measured on exactly that rectangle, which is the piece of the box the picture actually paints.
-            eraseWidthMm:rect.width/MM_TO_PT,eraseHeightMm:rect.height/MM_TO_PT});
-          image=await outPdf.embedPng(png);
+            eraseWidthMm: rect.width / MM_TO_PT,
+            eraseHeightMm: rect.height / MM_TO_PT,
+          });
+          image = await outPdf.embedPng(png);
         } else {
           image=plan.route==='jpeg' ? await outPdf.embedJpg(item.src) : await outPdf.embedPng(item.src);
           // pdf-lib complements every CMYK stream it stores, which turns a plain CMYK file into a
@@ -1244,7 +1356,7 @@ export async function exportImposedPdf(params: {
     }
   }
 
-  return outPdf.save();
+  return outPdf.save({ useObjectStreams: true });
 }
 
 /**

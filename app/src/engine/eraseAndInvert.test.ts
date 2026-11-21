@@ -104,7 +104,7 @@ describe('the mask the preview cuts and the paper sees', () => {
   it('is a luminance mask with a hole per gesture, in a viewBox of the picture box', () => {
     const svg = eraseMaskSvg([{ mode: 'region', x: 10, y: 10, width: 20, height: 20 }, { mode: 'brush', radiusMm: 5, points: [{ x: 50, y: 50 }] }], box)!;
     expect(svg).toContain('viewBox="0 0 100 50"');
-    expect(svg).toContain('<rect width="100" height="50" fill="#fff"/><g fill="#000">');
+    expect(svg).toContain('<rect x="0" y="0" width="100" height="50" fill="#fff"/><g fill="#000">');
     expect(svg).toContain('<rect x="10" y="5" width="20" height="10"/>');
     expect(svg).toContain('<ellipse cx="50" cy="25"');
     expect(svg).toContain('mask="url(#e)"');

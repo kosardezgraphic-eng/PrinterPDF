@@ -51,17 +51,17 @@ export const PropertiesDock: React.FC<PropertiesDockProps> = ({
 }) => (
   <aside
     data-properties-dock
-    className="psp-properties-dock flex min-h-0 min-w-0 shrink-0 flex-col border-s border-slate-700 bg-slate-900"
+    className="psp-properties-dock flex min-h-0 min-w-0 shrink-0 flex-col border-s border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"
     aria-label={labels.title}
   >
-    <header className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-slate-700 bg-slate-950/80 px-2">
-      <strong className="min-w-0 truncate text-xs text-slate-100">{labels.title}</strong>
+    <header className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-2 dark:border-slate-700 dark:bg-slate-950/80">
+      <strong className="min-w-0 truncate text-xs text-slate-800 dark:text-slate-100">{labels.title}</strong>
       <div className="flex shrink-0 items-center gap-1">
         <ToolButton icon={<Wrench className="h-3.5 w-3.5" />} label={labels.showTools} size="sm" onClick={onShowTools} />
         <ToolButton icon={<X className="h-3.5 w-3.5" />} label={labels.close} size="sm" variant="danger" onClick={onClose} />
       </div>
     </header>
-    <nav className="grid shrink-0 grid-cols-3 gap-1 border-b border-slate-700 bg-slate-900 p-2" aria-label={labels.title}>
+    <nav className="grid shrink-0 grid-cols-3 gap-1 border-b border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-900" aria-label={labels.title}>
       {panelOrder.map(panel => (
         <ToolButton
           key={panel}

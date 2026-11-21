@@ -36,7 +36,7 @@ export const CrossMarginWidget: React.FC<MarginWidgetProps> = ({
     <label
       key={side}
       data-margin-side={side}
-      className="flex min-w-0 flex-col items-center gap-0.5 text-[9px] text-slate-400"
+      className="flex min-w-0 flex-col items-center gap-0.5 text-[9px] text-slate-600 dark:text-slate-400"
       title={`${side} margin (mm)`}
     >
       <span>{labels[side]}</span>
@@ -48,19 +48,19 @@ export const CrossMarginWidget: React.FC<MarginWidgetProps> = ({
         aria-label={fa ? `مقدار حاشیه ${labels[side]}` : `${labels[side]} margin value`}
         value={Math.max(minimums[side], margins[side])}
         onChange={event => onMarginChange(side, Number(event.target.value) || 0)}
-        className="w-full min-w-0 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-center text-[10px] font-mono text-white tabular-nums"
+        className="w-full min-w-0 rounded border border-slate-300 bg-white px-1 py-1 text-center text-[10px] font-mono text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white tabular-nums"
       />
     </label>
   );
 
   return (
-    <section data-cross-margin-widget className="flex min-w-0 flex-col gap-2 rounded-lg border border-slate-700 bg-slate-950/40 p-2">
+    <section data-cross-margin-widget className="flex min-w-0 flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50/90 p-2 dark:border-slate-700 dark:bg-slate-950/40">
       <div dir="ltr" className="mx-auto grid w-full max-w-[13rem] grid-cols-3 items-center gap-1">
         <span />
         {field('top')}
         <span />
         {field('left')}
-        <div className="flex aspect-square items-center justify-center rounded-lg border border-dashed border-slate-700 bg-slate-900/70 text-sky-400">
+        <div className="flex aspect-square items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-sky-600 dark:border-slate-700 dark:bg-slate-900/70 dark:text-sky-400">
           <Crosshair className="h-5 w-5" aria-hidden="true" />
         </div>
         {field('right')}
@@ -68,8 +68,8 @@ export const CrossMarginWidget: React.FC<MarginWidgetProps> = ({
         {field('bottom')}
         <span />
       </div>
-      <div className="grid grid-cols-2 gap-2 border-t border-slate-800 pt-2">
-        <label className="flex min-w-0 flex-col gap-0.5 text-[9px] text-slate-400">
+      <div className="grid grid-cols-2 gap-2 border-t border-slate-200 pt-2 dark:border-slate-800">
+        <label className="flex min-w-0 flex-col gap-0.5 text-[9px] text-slate-600 dark:text-slate-400">
           <span>{fa ? 'فاصله افقی / شیرازه' : 'Horizontal gutter / spine'} (mm)</span>
           <input
             type="number"
@@ -80,10 +80,10 @@ export const CrossMarginWidget: React.FC<MarginWidgetProps> = ({
             data-gutter-axis="horizontal"
             value={horizontalGutterMm}
             onChange={event => onGutterChange('horizontalGutterMm', Math.max(0, Math.min(200, Number(event.target.value) || 0)))}
-            className="w-full min-w-0 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-center text-[10px] font-mono text-white tabular-nums"
+            className="w-full min-w-0 rounded border border-slate-300 bg-white px-1 py-1 text-center text-[10px] font-mono text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white tabular-nums"
           />
         </label>
-        <label className="flex min-w-0 flex-col gap-0.5 text-[9px] text-slate-400">
+        <label className="flex min-w-0 flex-col gap-0.5 text-[9px] text-slate-600 dark:text-slate-400">
           <span>{fa ? 'فاصله عمودی' : 'Vertical gutter'} (mm)</span>
           <input
             type="number"
@@ -95,7 +95,7 @@ export const CrossMarginWidget: React.FC<MarginWidgetProps> = ({
             data-gutter-axis="vertical"
             value={verticalGutterMm}
             onChange={event => onGutterChange('verticalGutterMm', Math.max(0, Math.min(200, Number(event.target.value) || 0)))}
-            className="w-full min-w-0 rounded border border-slate-700 bg-slate-800 px-1 py-1 text-center text-[10px] font-mono text-white tabular-nums disabled:opacity-40"
+            className="w-full min-w-0 rounded border border-slate-300 bg-white px-1 py-1 text-center text-[10px] font-mono text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white tabular-nums disabled:opacity-40"
           />
         </label>
       </div>

@@ -14,23 +14,14 @@ import {
   AlertTriangle,
   WifiOff,
   FileWarning,
-  MousePointer2,
-  Crop,
-  PanelsTopLeft,
-  Ruler,
   Maximize2,
-  ZoomIn,
-  ZoomOut,
   SlidersHorizontal,
   Zap,
-  Magnet,
-  Sparkles,
 } from 'lucide-react';
-import { useAppStore, type PageEditScope } from '../store/useAppStore';
-import { PageCanvasCell, type CanvasTool } from './PageCanvasCell';
+import { useAppStore, type CanvasTool, type PageEditScope } from '../store/useAppStore';
+import { PageCanvasCell } from './PageCanvasCell';
 import { PrinterRetryButton, PrinterServiceStatus } from './PrinterStatus';
 import { LayoutGuides, MeasurementTool } from './SheetTools';
-import { MarginPresetsMenu } from './MarginPresetsMenu';
 import { RulerGuideProvider, SheetRuler, GuidePaperRef, UserGuideLines } from './RulerGuides';
 import { SmartGuideProvider } from './SmartGuidesOverlay';
 import { TextOverlayLayer } from './TextOverlayLayer';
@@ -101,10 +92,12 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     resetMarginsToPrinter,
     spoolerJobs,
     batchQueue,
+    canvasTool,
+    setCanvasTool,
+    showPreflight,
+    setShowPreflight,
+    fitPageNonce,
     setActiveSheetIndex,
-    setShowRulers,
-    setSnapEnabled,
-    setSmartGuidesEnabled,
     focusPageFromPreview,
     setZoomPercent,
     importFiles,
@@ -113,7 +106,6 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     applyAspectRatioCrop,
     resetCellGeometry,
     commitLayoutGuides,
-    updateSettings,
     selectPrinter,
     setDefaultPrinter,
     openPrinterPreferences,
@@ -124,6 +116,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     purgePrinterQueue,
     removeBatchJob,
     openPageSetup,
+    updateSettings,
   } = useAppStore();
 
   const activeWorkspaceDrawer = workspaceDrawer === 'closed'
@@ -148,7 +141,6 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const scrollSuppressionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const returnSheetIndex = useRef(0);
   const [spaceDown, setSpaceDown] = useState(false);
-  const [canvasTool, setCanvasTool] = useState<CanvasTool>('move');
   const [draftLayout, setDraftLayout] = useState<LayoutSettings | null>(null);
   const [activeBandDrag, setActiveBandDrag] = useState<
     | { sheetIndex: number; kind: 'margin'; side: 'left' | 'right' | 'top' | 'bottom' }
@@ -163,7 +155,6 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const [previewOnlyPageId, setPreviewOnlyPageId] = useState<string | null>(null);
   const [navigationTarget, setNavigationTarget] = useState<{pageId: string; sheetIndex: number; previewOnly: boolean} | null>(null);
   const [panning, setPanning] = useState(false);
-  const [showPreflight, setShowPreflight] = useState(false);
   const [sheetContextMenu, setSheetContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   // A file drag fires `dragover` on the element under the cursor every few milliseconds and a
@@ -220,14 +211,14 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   // The eraser paints on the overlay layer, and that layer only accepts the pointer in the move tool — arming
   // it from the Insert tab and then dragging over a picture would otherwise do nothing at all, silently.
   const eraseArmed = useAppStore(s => s.eraseTool !== 'off');
-  useEffect(() => { if (textEditing || eraseArmed) setCanvasTool('move'); }, [textEditing, eraseArmed]);
+  useEffect(() => { if (textEditing || eraseArmed) setCanvasTool('move'); }, [textEditing, eraseArmed, setCanvasTool]);
     // A drawn shape is edited through the same interactive layer, so it has to mount for shapes alone too.
   const hasTextOverlays = useMemo(() => overlays.some(item => item.kind === 'text' || item.kind === 'shape' || item.kind === 'image' || item.kind === 'numbering' && item.enabled), [overlays]);
   useEffect(() => {
     if (!selectedOverlayId) return;
     const dismiss = (event: PointerEvent) => {
       const target = event.target instanceof Element ? event.target : null;
-      if (!target?.closest('[data-overlay-id],[data-text-control-panel],[data-shape-control-panel]')) selectOverlay(null);
+      if (!target?.closest('[data-overlay-id],[data-text-control-panel],[data-shape-control-panel],[data-tool-panel],[data-top-tool-ribbon],[data-page-context-menu]')) selectOverlay(null);
     };
     document.addEventListener('pointerdown', dismiss, true);
     return () => document.removeEventListener('pointerdown', dismiss, true);
@@ -411,6 +402,10 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     setZoomPercent(fitPageZoom(viewport.clientWidth, viewport.clientHeight, sheet.widthMm, sheet.heightMm, showRulers));
     setPan({ x: 0, y: 0 });
   };
+  useEffect(() => {
+    if (fitPageNonce > 0) fitPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitPageNonce]);
 
   const renderSingleSheet = (sheetSide: ComputedSheetSide, idxInList: number) => {
     const widthPx = Math.round(sheetSide.widthMm * basePxPerMm);
@@ -483,7 +478,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
         className="flex shrink-0 flex-col items-center gap-2"
       >
         {/* Sheet Header Badge */}
-        <div className="flex items-center gap-2 rounded-full border border-slate-700/80 bg-slate-900/90 px-3 py-1 text-[11px] font-semibold text-slate-300 shadow">
+        <div className="flex items-center gap-2 rounded-full border border-slate-300/80 bg-white/95 px-3 py-1 text-[11px] font-semibold text-slate-700 shadow-xs dark:border-slate-700/80 dark:bg-slate-900/90 dark:text-slate-300">
           <span>
             {tr.preview.sheet}{' '}
             {formatLocalizedNumber(sheetSide.sheetNumber, lang)}
@@ -491,7 +486,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
           <span>•</span>
           <span
             className={
-              sheetSide.side === 'front' ? 'text-sky-400' : 'text-amber-400'
+              sheetSide.side === 'front' ? 'text-sky-600 dark:text-sky-400' : 'text-amber-600 dark:text-amber-400'
             }
           >
             {sheetSide.side === 'front'
@@ -499,12 +494,12 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
               : tr.preview.backSide}
           </span>
           <span>•</span>
-          <span className="text-slate-300" dir="auto">
+          <span className="text-slate-700 dark:text-slate-300" dir="auto">
             {lang === 'fa' ? 'صفحات: ' : 'Pages: '}
             {[...new Set(sheetSide.cells.map(cell => cell.page ? pageNumbers.get(cell.page.id) : undefined).filter((n): n is number => n !== undefined))].map(n => formatLocalizedNumber(n, lang)).join('، ') || '—'}
           </span>
           <span>•</span>
-          <span className="font-mono text-[10px] text-slate-400">
+          <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400 tabular-nums">
             {convertMmToUnit(sheetSide.widthMm, settings.unit)}×
             {convertMmToUnit(sheetSide.heightMm, settings.unit)} {settings.unit}
           </span>
@@ -590,7 +585,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 width: widthPx,
                 height: heightPx,
               }}
-              className="relative overflow-hidden rounded-sm bg-white shadow-[0_20px_50px_rgba(0,0,0,0.65)] ring-1 ring-slate-300 transition-all duration-150"
+              className="relative overflow-hidden rounded-sm bg-white shadow-[0_12px_36px_rgba(15,23,42,0.18)] ring-1 ring-slate-300/90 transition-all duration-150 dark:shadow-[0_20px_50px_rgba(0,0,0,0.65)] dark:ring-slate-700"
             >
               <SmartGuideProvider
                 sheet={sheetSide}
@@ -1281,7 +1276,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
         const { documents } = routeDroppedFiles(files, false);
         if (documents.length) void importFiles(documents);
       }}
-      className="relative flex flex-1 flex-col overflow-hidden bg-slate-950"
+      className="relative flex flex-1 flex-col overflow-hidden bg-[#E9EEF5] text-slate-900 dark:bg-slate-950 dark:text-slate-100"
     >
       {/* Hidden File Input for Empty State */}
       <input
@@ -1299,178 +1294,137 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
 
       {/* Drag & Drop Full-Window Overlay */}
       {isDraggingOver && (
-        <div data-file-drop-overlay className="pointer-events-none absolute inset-3 z-50 flex flex-col items-center justify-center rounded-3xl border-2 border-dashed border-sky-400 bg-sky-950/85 backdrop-blur-md">
-          <UploadCloud className="mb-3 h-16 w-16 text-sky-400 animate-bounce" />
-          <h2 className="text-2xl font-black text-white">
+        <div data-file-drop-overlay className="pointer-events-none absolute inset-3 z-50 flex flex-col items-center justify-center rounded-3xl border-2 border-dashed border-sky-500 bg-sky-50/90 backdrop-blur-md dark:border-sky-400 dark:bg-sky-950/85">
+          <UploadCloud className="mb-3 h-16 w-16 text-sky-600 dark:text-sky-400 animate-bounce" />
+          <h2 className="text-2xl font-black text-slate-900 dark:text-white">
             {tr.preview.dropOverlayTitle}
           </h2>
-          <p className="mt-1 text-sm text-sky-200">
+          <p className="mt-1 text-sm text-sky-700 dark:text-sky-200">
             {tr.preview.dropOverlaySubtitle}
           </p>
         </div>
       )}
 
-      {/* Top Floating Sheet Navigation Bar */}
+      {/* Slim Contextual Sheet Navigation & Active Crop/Geometry Strip */}
       {sheets.length > 0 && (
-        <div className="flex items-center justify-between border-b border-slate-800/80 bg-slate-900/60 px-4 py-1.5 text-xs">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/90 bg-white/80 px-3 py-1 text-xs text-slate-700 backdrop-blur-xs dark:border-slate-800/80 dark:bg-slate-900/70 dark:text-slate-200">
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               disabled={safeSheetIdx <= 0}
-              aria-label={lang === 'fa' ? 'شیت قبلی' : 'Prev Sheet'} title={lang === 'fa' ? 'شیت قبلی' : 'Prev Sheet'}
+              aria-label={lang === 'fa' ? 'شیت قبلی' : 'Prev Sheet'}
+              title={lang === 'fa' ? 'شیت قبلی' : 'Prev Sheet'}
               onClick={() => navigateSheet(safeSheetIdx - 1)}
-              className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-slate-200 hover:bg-slate-700 disabled:opacity-40 cursor-pointer"
+              className="flex h-6 w-6 items-center justify-center rounded border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
             >
               <ChevronRight className="h-3.5 w-3.5" />
-              <span className="sr-only">{lang === 'fa' ? 'شیت قبلی' : 'Prev Sheet'}</span>
             </button>
 
-            <span className="font-bold text-slate-200">
+            <span className="font-bold text-slate-800 dark:text-slate-200 tabular-nums">
               {lang === 'fa'
-                ? `نمایش شیت ${formatLocalizedNumber(safeSheetIdx + 1, lang)} از ${formatLocalizedNumber(
-                    sheets.length,
-                    lang
-                  )}`
+                ? `شیت ${formatLocalizedNumber(safeSheetIdx + 1, lang)} از ${formatLocalizedNumber(sheets.length, lang)}`
                 : `Sheet ${safeSheetIdx + 1} of ${sheets.length}`}
             </span>
 
             <button
               type="button"
               disabled={safeSheetIdx >= sheets.length - 1}
-              aria-label={lang === 'fa' ? 'شیت بعدی' : 'Next Sheet'} title={lang === 'fa' ? 'شیت بعدی' : 'Next Sheet'}
+              aria-label={lang === 'fa' ? 'شیت بعدی' : 'Next Sheet'}
+              title={lang === 'fa' ? 'شیت بعدی' : 'Next Sheet'}
               onClick={() => navigateSheet(safeSheetIdx + 1)}
-              className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-slate-200 hover:bg-slate-700 disabled:opacity-40 cursor-pointer"
+              className="flex h-6 w-6 items-center justify-center rounded border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
             >
-              <span className="sr-only">{lang === 'fa' ? 'شیت بعدی' : 'Next Sheet'}</span>
               <ChevronLeft className="h-3.5 w-3.5" />
             </button>
           </div>
 
-          <div className="flex items-center gap-2 text-[11px] text-slate-400">
-            <button type="button" aria-expanded={showPreflight} aria-label={lang === 'fa' ? 'پیش‌بررسی' : 'Preflight'} title={lang === 'fa' ? 'پیش‌بررسی' : 'Preflight'} onClick={() => setShowPreflight(!showPreflight)} className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-slate-100 hover:bg-slate-700">
-              <FileWarning className="h-4 w-4" aria-hidden="true" />{preflight.length > 0 && <span aria-hidden="true">{preflight.length}</span>}
-            </button>
-            <button type="button" aria-label={lang === 'fa' ? 'جاگیری کامل' : 'Fit page'} title={lang === 'fa' ? 'جاگیری کامل' : 'Fit page'} onClick={fitPage} className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-slate-100 hover:bg-slate-700">
-              <Maximize2 className="h-4 w-4" aria-hidden="true" />
-            </button>
-            <div data-zoom-toolbar className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-1.5 py-1">
-              <button
-                type="button"
-                aria-label={lang === 'fa' ? 'کوچک‌نمایی' : 'Zoom out'}
-                title={lang === 'fa' ? 'کوچک‌نمایی' : 'Zoom out'}
-                onClick={() => setZoomPercent(Math.max(5, zoomPercent - 15))}
-                className="rounded p-0.5 text-slate-300 hover:bg-slate-700"
+          <div className="flex flex-wrap items-center gap-2 text-[11px]">
+            {showRulers && (
+              <label className="flex items-center gap-1 text-slate-600 dark:text-slate-300">
+                <span>{lang === 'fa' ? 'واحد:' : 'Unit:'}</span>
+                <select
+                  aria-label={lang === 'fa' ? 'واحد خط‌کش' : 'Ruler unit'}
+                  value={settings.unit}
+                  onChange={(e) => updateSettings({ unit: e.target.value as 'mm' | 'cm' | 'inch' })}
+                  className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                >
+                  <option value="mm">mm</option>
+                  <option value="cm">cm</option>
+                  <option value="inch">inch</option>
+                </select>
+              </label>
+            )}
+            <label className="flex items-center gap-1 text-slate-600 dark:text-slate-300">
+              <span>{lang === 'fa' ? 'اعمال روی:' : 'Apply to:'}</span>
+              <select
+                value={editScope}
+                onChange={(e) => setEditScope(e.target.value as PageEditScope)}
+                className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
               >
-                <ZoomOut className="h-3.5 w-3.5" aria-hidden="true" />
-              </button>
-              <input
-                aria-label={lang === 'fa' ? 'درصد بزرگ‌نمایی' : 'Zoom percentage'}
-                type="range"
-                min={5}
-                max={400}
-                value={zoomPercent}
-                onChange={(e) => setZoomPercent(Number(e.target.value))}
-                className="w-16 accent-sky-500"
+                <option value="current">
+                  {canvasTool === 'crop'
+                    ? (lang === 'fa' ? 'این صفحه (همه تکرارها)' : 'This page (all repeats)')
+                    : (lang === 'fa' ? 'فقط این خانه' : 'This cell')}
+                </option>
+                <option value="selected">{lang === 'fa' ? 'صفحات انتخاب‌شده در پنل' : 'Selected thumbnails'}</option>
+                <option value="all">{lang === 'fa' ? 'همه صفحات' : 'All pages'}</option>
+              </select>
+            </label>
+
+            {canvasTool === 'crop' && (
+              <AspectCropControls
+                language={lang}
+                disabled={!!previewOnlyPage || !pages.some((page) => page.isHighlighted)}
+                onApply={(ratio) => {
+                  const page =
+                    pages.find((item) => item.id === currentEditPageId && item.isHighlighted) ??
+                    pages.find((item) => item.isHighlighted);
+                  return !!page && applyAspectRatioCrop(page.id, editScope, ratio);
+                }}
               />
-              <button
-                type="button"
-                aria-label={lang === 'fa' ? 'بزرگ‌نمایی' : 'Zoom in'}
-                title={lang === 'fa' ? 'بزرگ‌نمایی' : 'Zoom in'}
-                onClick={() => setZoomPercent(Math.min(400, zoomPercent + 15))}
-                className="rounded p-0.5 text-slate-300 hover:bg-slate-700"
-              >
-                <ZoomIn className="h-3.5 w-3.5" aria-hidden="true" />
-              </button>
-              <span className="min-w-9 text-end font-mono text-[10px] font-bold text-sky-400">
-                {zoomPercent}%
-              </span>
-            </div>
+            )}
+
+            <button
+              type="button"
+              aria-label={lang === 'fa' ? 'بازنشانی برش و اندازه' : 'Reset crop and size'}
+              title={lang === 'fa' ? 'بازنشانی برش و اندازه' : 'Reset crop and size'}
+              disabled={!!previewOnlyPage || !pages.some((page) => page.isHighlighted)}
+              onClick={() => {
+                const page =
+                  pages.find((item) => item.id === currentEditPageId && item.isHighlighted) ??
+                  pages.find((item) => item.isHighlighted);
+                if (!page) return;
+                if (editScope === 'current') {
+                  const cell =
+                    sheets[safeSheetIdx]?.cells.find((item) => item.page?.id === page.id && item.occurrenceKey === currentOccurrenceKey) ??
+                    sheets[safeSheetIdx]?.cells.find((item) => item.page?.id === page.id);
+                  if (cell?.occurrenceKey) resetCellGeometry(page.id, cell.occurrenceKey);
+                } else {
+                  applyPageGeometry(page.id, editScope, { kind: 'reset' });
+                }
+              }}
+              className="flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-0.5 text-slate-700 hover:bg-slate-100 disabled:opacity-45 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+            >
+              <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+              <span className="hidden sm:inline">{lang === 'fa' ? 'بازنشانی برش' : 'Reset'}</span>
+            </button>
           </div>
+          {canvasTool === 'move' && <span className="sr-only">{lang === 'fa' ? 'روی تصویر کلیک کنید؛ برای ترتیب لایه راست‌کلیک کنید یا انگشت را نگه دارید.' : 'Click an image to edit it. Right-click or touch and hold for layer order.'}</span>}
+          {canvasTool === 'crop' && <span className="sr-only">{lang === 'fa' ? 'برش صفحه روی همه تکرارهای آن اعمال و اندازه‌های اختصاصی آن صفحه بازنشانی می‌شود.' : 'Cropping a page affects all repeats and resets their individual sizes.'}</span>}
+          {canvasTool === 'layout' && <span className="sr-only">{lang === 'fa' ? 'سبز: حاشیه؛ بنفش: فاصلهٔ یکسان همهٔ ستون‌ها یا ردیف‌ها. با موس یا لمس بکشید.' : 'Drag green margin or purple uniform gutter handles with mouse or touch.'}</span>}
+          {canvasTool === 'measure' && <span className="sr-only">{lang === 'fa' ? 'برای اندازه‌گیری بکشید؛ Shift جهت افقی یا عمودی را قفل می‌کند.' : 'Drag to measure; hold Shift to lock horizontally or vertically.'}</span>}
         </div>
       )}
 
-      {sheets.length > 0 && <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-200">
-        {(['move', 'crop', 'layout', 'measure'] as const).map(tool => {
-          const label = lang === 'fa' ? { move:'انتخاب / جابه‌جایی / اندازه', crop:'برش', layout:'حاشیه / فاصله', measure:'خط‌کش' }[tool] : { move:'Select / move / resize', crop:'Crop', layout:'Margins / gutters', measure:'Measure' }[tool];
-          const Icon = {move:MousePointer2, crop:Crop, layout:PanelsTopLeft, measure:Ruler}[tool];
-          return <button key={tool} type="button" aria-label={label} title={label} aria-pressed={canvasTool === tool} disabled={!!previewOnlyPage}
-            onClick={() => { setDraftLayout(null); setCanvasTool(tool); }} className={`rounded-lg px-3 py-1.5 disabled:opacity-40 ${canvasTool === tool ? 'bg-sky-600 text-white' : 'bg-slate-800 hover:bg-slate-700'}`}>
-            <Icon className="h-4 w-4" aria-hidden="true" /><span className="sr-only">{label}</span>
-          </button>;
-        })}
-        <button type="button" aria-pressed={showRulers} aria-label={lang === 'fa' ? 'نمایش خط‌کش‌ها' : 'Show rulers'}
-          title={lang === 'fa' ? 'نمایش یا پنهان کردن خط‌کش‌ها' : 'Show or hide rulers'} onClick={()=>setShowRulers(!showRulers)}
-          className={`rounded border px-2 py-1 ${showRulers?'border-sky-500 text-sky-300':'border-slate-700 text-slate-300'}`}>
-          {lang === 'fa' ? 'خط‌کش' : 'Rulers'}
-        </button>
-        <button
-          type="button"
-          data-snap-toggle
-          aria-pressed={snapEnabled}
-          aria-label={lang === 'fa' ? 'چسبندگی آهن‌ربایی به راهنما و لبه‌ها' : 'Magnetic snap to guides and edges'}
-          title={lang === 'fa' ? 'فعال یا غیرفعال کردن حالت آهن‌ربایی (Snap) به خطوط راهنما و لبه‌ها' : 'Toggle magnetic snapping to guides and edges'}
-          onClick={() => setSnapEnabled(!snapEnabled)}
-          className={`flex items-center gap-1 rounded border px-2 py-1 ${snapEnabled ? 'border-purple-500 bg-purple-600/20 text-purple-200' : 'border-slate-700 text-slate-300'}`}
-        >
-          <Magnet className="h-3.5 w-3.5" aria-hidden="true" />
-          <span>{lang === 'fa' ? 'آهن‌ربا' : 'Snap'}</span>
-        </button>
-        <button
-          type="button"
-          data-smart-guides-toggle
-          aria-pressed={smartGuidesEnabled}
-          aria-label={lang === 'fa' ? 'خطوط راهنمای بنفش (وسط، یک‌سوم و تقسیم فاصله)' : 'Purple smart guides (center, thirds, equal spacing)'}
-          title={lang === 'fa' ? 'نمایش خطوط راهنمای بنفش موقت هنگام جابه‌جایی (وسط، یک‌سوم و تقسیم فاصله)' : 'Toggle temporary purple guides while dragging'}
-          onClick={() => setSmartGuidesEnabled(!smartGuidesEnabled)}
-          className={`flex items-center gap-1 rounded border px-2 py-1 ${smartGuidesEnabled ? 'border-purple-500 bg-purple-600/20 text-purple-200' : 'border-slate-700 text-slate-300'}`}
-        >
-          <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-          <span>{lang === 'fa' ? 'راهنمای بنفش' : 'Smart Guides'}</span>
-        </button>
-        <label title={lang === 'fa' ? 'واحد اندازه‌گیری کل برنامه را تغییر می‌دهد' : 'Changes the measurement unit throughout the app'} className="flex items-center gap-1">{lang === 'fa' ? 'واحد خط‌کش:' : 'Ruler unit:'}
-          <select aria-label={lang === 'fa' ? 'واحد خط‌کش' : 'Ruler unit'} value={settings.unit} onChange={e=>updateSettings({unit:e.target.value as typeof settings.unit})} className="rounded bg-slate-800 px-1 py-1 text-slate-100">
-            <option value="mm">mm</option><option value="cm">cm</option><option value="inch">inch</option>
-          </select>
-        </label>
-        <span className="text-[10px] text-slate-400">{viewMode === 'grid' ? (lang === 'fa' ? 'خط‌کش در نمای شبکه مخفی است' : 'Rulers hidden in grid view') : !showRulers ? (lang === 'fa' ? 'برای افزودن راهنما خط‌کش را روشن کنید' : 'Show rulers to add guides') : (lang === 'fa' ? 'راهنما: از خط‌کش به برگه بکشید' : 'Guides: drag from a ruler onto the sheet')}</span>
-        <label className="flex items-center gap-1">{lang === 'fa' ? 'اعمال روی:' : 'Apply to:'}
-          <select value={editScope} onChange={e => setEditScope(e.target.value as PageEditScope)} className="rounded border border-slate-700 bg-slate-800 px-2 py-1">
-            <option value="current">{canvasTool === 'crop' ? (lang === 'fa' ? 'این صفحه (همه تکرارها)' : 'This page (all repeats)') : (lang === 'fa' ? 'فقط این خانه' : 'This cell')}</option>
-            <option value="selected">{lang === 'fa' ? 'صفحات انتخاب‌شده در پنل' : 'Selected thumbnails'}</option>
-            <option value="all">{lang === 'fa' ? 'همه صفحات' : 'All pages'}</option>
-          </select>
-        </label>
-        {canvasTool === 'crop' && <AspectCropControls language={lang} disabled={!!previewOnlyPage || !pages.some(page => page.isHighlighted)} onApply={ratio => {
-          const page = pages.find(item => item.id === currentEditPageId && item.isHighlighted) ?? pages.find(item => item.isHighlighted);
-          return !!page && applyAspectRatioCrop(page.id, editScope, ratio);
-        }} />}
-        <MarginPresetsMenu compact disabled={!!previewOnlyPage} />
-        <button type="button" disabled={!!previewOnlyPage || printerMargins.status !== 'available'} onClick={resetMarginsToPrinter}
-          title={lang === 'fa' ? 'بازنشانی به حاشیه چاپگر انتخاب‌شده' : 'Reset to selected printer margins'}
-          className="rounded bg-slate-800 px-2 py-1.5 hover:bg-slate-700 disabled:opacity-50">{lang === 'fa' ? 'بازنشانی حاشیه چاپگر' : 'Reset printer margins'}</button>
-        <span role="status" className="text-xs text-slate-300">{printerMargins.status === 'loading' ? (lang === 'fa' ? 'در حال دریافت حاشیه چاپگر…' : 'Loading printer margins…') : printerMargins.status === 'unavailable' ? (lang === 'fa' ? 'حاشیه چاپگر نامشخص؛ مقدار فعلی تأیید نشده است' : 'Printer margins unavailable; current values are unverified') : savedLayout.marginMode !== 'printer' ? (lang === 'fa' ? 'حاشیه دستی؛ حاشیه چاپگر قابل دریافت است' : 'Custom margins; printer margins available') : printerMargins.source === 'hardware' ? (lang === 'fa' ? 'حاشیه از درایور چاپگر' : 'Margins from printer driver') : printerMargins.source === 'virtual' ? (lang === 'fa' ? 'چاپگر مجازی: حاشیه صفر' : 'Virtual printer: zero margins') : (lang === 'fa' ? 'چاپگر مجازی شبیه‌سازی‌شده: حاشیه صفر' : 'Simulated virtual printer: zero margins')}</span>
-        <button type="button" aria-label={lang === 'fa' ? 'بازنشانی برش و اندازه' : 'Reset crop and size'} title={lang === 'fa' ? 'بازنشانی برش و اندازه' : 'Reset crop and size'} disabled={!!previewOnlyPage || !pages.some(page => page.isHighlighted)} onClick={() => {
-          const page = pages.find(item => item.id === currentEditPageId && item.isHighlighted) ?? pages.find(item => item.isHighlighted);
-          if (!page) return;
-          if (editScope === 'current') {
-            const cell = sheets[safeSheetIdx]?.cells.find(item => item.page?.id === page.id && item.occurrenceKey === currentOccurrenceKey)
-              ?? sheets[safeSheetIdx]?.cells.find(item => item.page?.id === page.id);
-            if (cell?.occurrenceKey) resetCellGeometry(page.id, cell.occurrenceKey);
-          } else applyPageGeometry(page.id, editScope, { kind:'reset' });
-        }} className="rounded bg-slate-800 px-3 py-1.5 hover:bg-slate-700 disabled:opacity-50"><RotateCcw className="h-4 w-4" aria-hidden="true" /></button>
-        {canvasTool === 'move' && <span className="sr-only">{lang === 'fa' ? 'روی تصویر کلیک کنید؛ برای ترتیب لایه راست‌کلیک کنید یا انگشت را نگه دارید.' : 'Click an image to edit it. Right-click or touch and hold for layer order.'}</span>}
-        {canvasTool === 'crop' && <span className="sr-only">{lang === 'fa' ? 'برش صفحه روی همه تکرارهای آن اعمال و اندازه‌های اختصاصی آن صفحه بازنشانی می‌شود.' : 'Cropping a page affects all repeats and resets their individual sizes.'}</span>}
-        {canvasTool === 'layout' && <span className="sr-only">{lang === 'fa' ? 'سبز: حاشیه؛ بنفش: فاصلهٔ یکسان همهٔ ستون‌ها یا ردیف‌ها. با موس یا لمس بکشید.' : 'Drag green margin or purple uniform gutter handles with mouse or touch.'}</span>}
-        {canvasTool === 'measure' && <span className="sr-only">{lang === 'fa' ? 'برای اندازه‌گیری بکشید؛ Shift جهت افقی یا عمودی را قفل می‌کند.' : 'Drag to measure; hold Shift to lock horizontally or vertically.'}</span>}
-      </div>}
-
-      {previewOnlyPage && <div role="status" className="flex items-center gap-3 border-b border-amber-700 bg-amber-950 px-4 py-2 text-xs text-amber-100">
-        <span>{lang === 'fa' ? 'این صفحه برای چاپ انتخاب نشده است؛ نمایش موقت و فقط‌خواندنی است و خروجی چاپ را تغییر نمی‌دهد.' : 'This page is excluded from printing. This is a temporary read-only preview and does not change output.'}</span>
-        <button type="button" onClick={() => { setPreviewOnlyPageId(null); setActiveSheetIndex(returnSheetIndex.current); setNavigationTarget(null); }} className="rounded border border-amber-600 px-2 py-1">{lang === 'fa' ? 'بازگشت به پیش‌نمایش چاپ' : 'Return to print preview'}</button>
-      </div>}
+      {previewOnlyPage && (
+        <div role="status" className="flex items-center gap-3 border-b border-amber-300 bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
+          <span>{lang === 'fa' ? 'این صفحه برای چاپ انتخاب نشده است؛ نمایش موقت و فقط‌خواندنی است و خروجی چاپ را تغییر نمی‌دهد.' : 'This page is excluded from printing. This is a temporary read-only preview and does not change output.'}</span>
+          <button type="button" onClick={() => { setPreviewOnlyPageId(null); setActiveSheetIndex(returnSheetIndex.current); setNavigationTarget(null); }} className="rounded border border-amber-500 px-2 py-1 hover:bg-amber-100 dark:border-amber-600 dark:hover:bg-amber-900/50 cursor-pointer">{lang === 'fa' ? 'بازگشت به پیش‌نمایش چاپ' : 'Return to print preview'}</button>
+        </div>
+      )}
 
       {showPreflight && (
-        <div role="status" className="border-b border-slate-700 bg-slate-900 px-4 py-2 text-xs text-slate-200">
+        <div role="status" className="border-b border-slate-200 bg-white px-4 py-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
           {preflight.length === 0 ? (lang === 'fa' ? 'مشکل ظاهری در شیت‌ها یافت نشد.' : 'No sheet issues found.') : preflight.map(issue => {
             const labels = lang === 'fa' ? {
               'no-pages': 'صفحه‌ای انتخاب نشده', 'missing-source': 'فایل منبع موجود نیست', 'empty-page': 'صفحه سفید',
@@ -1479,9 +1433,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
               'no-pages': 'No pages selected', 'missing-source': 'Source file missing', 'empty-page': 'Blank page',
               'out-of-bounds': 'Cell outside the paper', 'effects-not-exported': 'Some effects are not applied to PDF export',
             };
-            return <div key={issue.code} className={issue.severity === 'error' ? 'text-rose-300' : 'text-amber-300'}>{labels[issue.code]}{issue.count > 0 ? ` (${issue.count})` : ''}</div>;
+            return <div key={issue.code} className={issue.severity === 'error' ? 'text-rose-600 dark:text-rose-300' : 'text-amber-600 dark:text-amber-300'}>{labels[issue.code]}{issue.count > 0 ? ` (${issue.count})` : ''}</div>;
           })}
-          <div className="mt-1 text-slate-400">{lang === 'fa' ? 'این بررسی اتصال یا قابلیت چاپگر را تأیید نمی‌کند.' : 'This check does not verify the printer or driver.'}</div>
+          <div className="mt-1 text-slate-500 dark:text-slate-400">{lang === 'fa' ? 'این بررسی اتصال یا قابلیت چاپگر را تأیید نمی‌کند.' : 'This check does not verify the printer or driver.'}</div>
         </div>
       )}
 
@@ -1526,12 +1480,12 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
         {sheets.length === 0 ? (
           /* Empty State */
           <div className="flex h-full flex-col items-center justify-center">
-            <div className="max-w-lg rounded-3xl border border-dashed border-slate-700 bg-slate-900/60 p-10 text-center shadow-2xl">
-              <UploadCloud className="mx-auto mb-4 h-14 w-14 text-sky-400" />
-              <h2 className="text-lg font-extrabold text-white">
+            <div className="max-w-lg rounded-3xl border border-dashed border-slate-300 bg-white/95 p-10 text-center shadow-lg dark:border-slate-700 dark:bg-slate-900/60 dark:shadow-2xl">
+              <UploadCloud className="mx-auto mb-4 h-14 w-14 text-sky-600 dark:text-sky-400" />
+              <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">
                 {tr.preview.emptyTitle}
               </h2>
-              <p className="mt-2 text-xs leading-relaxed text-slate-400">
+              <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
                 {tr.preview.emptyDesc}
               </p>
               <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
@@ -1561,17 +1515,17 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
 
       {/* Contextual Bottom Dock for Batch Queue (H1-H2) */}
       {activeWorkspaceDrawer === 'batch' && (
-        <section data-workspace-drawer="batch" className="psp-workspace-drawer absolute inset-x-0 bottom-0 z-40 max-h-[40%] overflow-y-auto border-t border-slate-700 bg-slate-900/95 p-4">
+        <section data-workspace-drawer="batch" className="psp-workspace-drawer absolute inset-x-0 bottom-0 z-40 max-h-[40%] overflow-y-auto border-t border-slate-200 bg-white/95 p-4 text-slate-900 dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Layers className="h-4 w-4 text-sky-400" />
-              <h3 className="text-sm font-bold text-white">
+              <Layers className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
                 {lang === 'fa'
                   ? 'صف چاپ دسته‌ای و اتوماسیون (Batch Print Queue — H1/H2)'
                   : 'Batch Print Queue Manager (H1/H2)'}
               </h3>
             </div>
-            <span className="text-xs text-slate-400">
+            <span className="text-xs text-slate-500 dark:text-slate-400">
               {lang === 'fa'
                 ? 'در صورت بروز خطا در یک فایل، صف به‌صورت خودکار به فایل بعدی ادامه می‌دهد'
                 : 'Fault-isolated batch execution with automatic retry'}
@@ -1581,15 +1535,15 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
               aria-label={lang === 'fa' ? 'بستن پنل صف دسته‌ای' : 'Close batch queue drawer'}
               title={lang === 'fa' ? 'بستن پنل' : 'Close panel'}
               onClick={() => setWorkspaceDrawer('closed')}
-              className="shrink-0 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700"
+              className="shrink-0 rounded-lg border border-slate-300 bg-slate-100 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer"
             >
               {lang === 'fa' ? 'بستن' : 'Close'}
             </button>
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-800">
-            <table className="w-full text-start text-xs text-slate-200">
-              <thead className="bg-slate-950/80 text-[11px] text-slate-400">
+          <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+            <table className="w-full text-start text-xs text-slate-800 dark:text-slate-200">
+              <thead className="bg-slate-100 text-[11px] text-slate-600 dark:bg-slate-950/80 dark:text-slate-400">
                 <tr>
                   <th className="px-3 py-2 text-start">
                     {lang === 'fa' ? 'نام فایل / پروژه' : 'File / Job'}
@@ -1611,26 +1565,26 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/70 bg-slate-900/60">
+              <tbody className="divide-y divide-slate-200 bg-white dark:divide-slate-800/70 dark:bg-slate-900/60">
                 {batchQueue.map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-800/40">
+                  <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                     <td className="px-3 py-2 font-semibold">{item.fileName}</td>
                     <td className="px-3 py-2">
                       {formatLocalizedNumber(item.pageCount, lang)}
                     </td>
-                    <td className="px-3 py-2 text-slate-300">
+                    <td className="px-3 py-2 text-slate-600 dark:text-slate-300">
                       {item.printerName}
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-1.5 text-[10px]">
-                        <span className="rounded bg-slate-800 px-1.5 py-0.5">
+                        <span className="rounded bg-slate-100 px-1.5 py-0.5 dark:bg-slate-800">
                           {item.nUp}-Up
                         </span>
-                        <span className="rounded bg-slate-800 px-1.5 py-0.5">
+                        <span className="rounded bg-slate-100 px-1.5 py-0.5 dark:bg-slate-800">
                           {item.copies}×
                         </span>
                         {item.invert && (
-                          <span className="rounded bg-fuchsia-500/20 px-1.5 py-0.5 text-fuchsia-300">
+                          <span className="rounded bg-fuchsia-100 px-1.5 py-0.5 text-fuchsia-700 dark:bg-fuchsia-500/20 dark:text-fuchsia-300">
                             Invert
                           </span>
                         )}
@@ -1638,7 +1592,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-2">
-                        <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-800">
+                        <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
                           <div
                             style={{ width: `${item.progressPercent}%` }}
                             className={`h-full transition-all ${
@@ -1657,7 +1611,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                       <button
                         type="button"
                         onClick={() => removeBatchJob(item.id)}
-                        className="rounded p-1 text-rose-400 hover:bg-rose-500/15 cursor-pointer"
+                        className="rounded p-1 text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/15 cursor-pointer"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -1690,9 +1644,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
         })();
 
         return (
-        <section data-workspace-drawer="printers" className="psp-workspace-drawer absolute inset-x-0 bottom-0 z-40 max-h-[40%] overflow-y-auto border-t border-slate-700 bg-slate-900/95 p-4">
+        <section data-workspace-drawer="printers" className="psp-workspace-drawer absolute inset-x-0 bottom-0 z-40 max-h-[40%] overflow-y-auto border-t border-slate-200 bg-white/95 p-4 text-slate-900 dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <h3 className="min-w-0 truncate text-sm font-bold text-white">
+            <h3 className="min-w-0 truncate text-sm font-bold text-slate-900 dark:text-white">
               {lang === 'fa' ? 'مدیریت پرینترها، سخت‌افزار و صف چاپ' : 'Printers, Hardware & Spooler Queue'}
             </h3>
             <button
@@ -1700,16 +1654,16 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
               aria-label={lang === 'fa' ? 'بستن پنل پرینترها' : 'Close printers drawer'}
               title={lang === 'fa' ? 'بستن پنل' : 'Close panel'}
               onClick={() => setWorkspaceDrawer('closed')}
-              className="shrink-0 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700"
+              className="shrink-0 rounded-lg border border-slate-300 bg-slate-100 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer"
             >
               {lang === 'fa' ? 'بستن' : 'Close'}
             </button>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
             {/* I1 & I2: Windows Printers & Live Status */}
-            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-800 dark:bg-slate-950/60">
               <div className="mb-2 flex items-center justify-between gap-3">
-                <h4 className="flex items-center gap-1.5 text-xs font-bold text-white">
+                <h4 className="flex items-center gap-1.5 text-xs font-bold text-slate-900 dark:text-white">
                   <Printer className="h-4 w-4 text-sky-400" />
                   <span>
                     {lang === 'fa'
@@ -1730,22 +1684,22 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                     onClick={() => selectPrinter(p.name)}
                     className={`flex items-center justify-between rounded-xl border p-2.5 text-xs transition cursor-pointer ${
                       selectedPrinterName === p.name
-                        ? 'border-sky-500 bg-sky-500/10'
-                        : 'border-slate-800 bg-slate-900/80 hover:border-slate-700'
+                        ? 'border-sky-500 bg-sky-50 dark:bg-sky-500/10'
+                        : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900/80 dark:hover:border-slate-700'
                     }`}
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="truncate font-bold text-slate-100">
+                        <span className="truncate font-bold text-slate-900 dark:text-slate-100">
                           {p.name}
                         </span>
                         {p.isDefault && (
-                          <span className="rounded bg-sky-500/20 px-1.5 py-0.5 text-[9px] font-bold text-sky-300">
+                          <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-700 dark:bg-sky-500/20 dark:text-sky-300">
                             Default
                           </span>
                         )}
                       </div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-slate-400">
+                      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-slate-500 dark:text-slate-400">
                         <span>{p.driverName}</span>
                         <span>•</span>
                         <span>{p.portName}</span>
@@ -1770,7 +1724,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                           e.stopPropagation();
                           void openPrinterPreferences(p.name);
                         }}
-                        className="rounded bg-slate-800 px-2 py-1 text-[10px] text-slate-300 hover:bg-slate-700 cursor-pointer"
+                        className="rounded border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer"
                       >
                         {lang === 'fa' ? 'تنظیمات درایور' : 'Preferences'}
                       </button>
@@ -1781,7 +1735,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                             e.stopPropagation();
                             void setDefaultPrinter(p.name);
                           }}
-                          className="rounded bg-slate-800 px-2 py-1 text-[10px] text-slate-300 hover:bg-slate-700 cursor-pointer"
+                          className="rounded border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer"
                         >
                           {lang === 'fa' ? 'پیش‌فرض' : 'Set Default'}
                         </button>
@@ -1795,11 +1749,11 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
             {/* Hardware & Driver Capabilities Inspector / Editor */}
             <div
               data-testid="printer-hardware-inspector"
-              className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-xs"
+              className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 text-xs dark:border-slate-800 dark:bg-slate-950/60"
             >
               <div className="mb-2 flex items-center justify-between gap-2">
-                <h4 className="flex items-center gap-1.5 text-xs font-bold text-white">
-                  <SlidersHorizontal className="h-4 w-4 text-emerald-400" />
+                <h4 className="flex items-center gap-1.5 text-xs font-bold text-slate-900 dark:text-white">
+                  <SlidersHorizontal className="h-4 w-4 text-emerald-500 dark:text-emerald-400" />
                   <span>
                     {lang === 'fa'
                       ? 'تنظیمات سخت‌افزاری و امکانات درایور'
@@ -1826,8 +1780,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 </div>
               ) : (
                 <div className="space-y-2.5">
-                  <div className="flex flex-wrap items-center justify-between gap-1 rounded-lg border border-slate-800 bg-slate-900/70 px-2.5 py-1.5 text-[10px] text-slate-300 tabular-nums">
-                    <span className="font-bold text-sky-300 truncate max-w-[180px]" title={activePrinter.name}>
+                  <div className="flex flex-wrap items-center justify-between gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] text-slate-700 dark:border-slate-800 dark:bg-slate-900/70 dark:text-slate-300 tabular-nums">
+                    <span className="font-bold text-sky-700 dark:text-sky-300 truncate max-w-[180px]" title={activePrinter.name}>
                       {activePrinter.name}
                     </span>
                     <span>
@@ -1841,8 +1795,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 text-[11px]">
-                    <label className="flex flex-col gap-0.5 text-slate-300">
-                      <span className="text-[10px] text-slate-400">
+                    <label className="flex flex-col gap-0.5 text-slate-700 dark:text-slate-300">
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400">
                         {lang === 'fa' ? 'کاغذ درایور (mm)' : 'Driver Paper Size'}
                       </span>
                       <select
@@ -1857,7 +1811,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                             paperHeightMm: Math.max(opt.widthMm, opt.heightMm),
                           });
                         }}
-                        className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-white tabular-nums"
+                        className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white tabular-nums"
                       >
                         {hwPaperOptions.map((o) => (
                           <option key={`${o.id}-${o.name}`} value={o.name}>
@@ -1867,8 +1821,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                       </select>
                     </label>
 
-                    <label className="flex flex-col gap-0.5 text-slate-300">
-                      <span className="text-[10px] text-slate-400">
+                    <label className="flex flex-col gap-0.5 text-slate-700 dark:text-slate-300">
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400">
                         {lang === 'fa' ? 'سینی کاغذ (Tray)' : 'Paper Tray'}
                       </span>
                       <select
@@ -1876,7 +1830,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                         onChange={(e) =>
                           void updatePrinterProfile(activePrinter.name, { tray: e.target.value })
                         }
-                        className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-white"
+                        className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                       >
                         {(caps.supportedTrays.length ? caps.supportedTrays : ['Auto Select']).map((trItem) => (
                           <option key={trItem} value={trItem}>
@@ -1886,8 +1840,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                       </select>
                     </label>
 
-                    <label className="flex flex-col gap-0.5 text-slate-300">
-                      <span className="text-[10px] text-slate-400">
+                    <label className="flex flex-col gap-0.5 text-slate-700 dark:text-slate-300">
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400">
                         {lang === 'fa' ? 'جنس کاغذ (Media)' : 'Media Type'}
                       </span>
                       <select
@@ -1895,7 +1849,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                         onChange={(e) =>
                           void updatePrinterProfile(activePrinter.name, { mediaType: e.target.value })
                         }
-                        className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-white"
+                        className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                       >
                         {(caps.supportedMediaTypes.length ? caps.supportedMediaTypes : ['Plain Paper']).map((m) => (
                           <option key={m} value={m}>
@@ -1905,8 +1859,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                       </select>
                     </label>
 
-                    <label className="flex flex-col gap-0.5 text-slate-300">
-                      <span className="text-[10px] text-slate-400">
+                    <label className="flex flex-col gap-0.5 text-slate-700 dark:text-slate-300">
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400">
                         {lang === 'fa' ? 'جهت و دورو' : 'Orientation & Duplex'}
                       </span>
                       <div className="flex gap-1">
@@ -1918,7 +1872,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                               orientation: e.target.value as PageOrientation,
                             })
                           }
-                          className="w-1/2 rounded-lg border border-slate-700 bg-slate-800 px-1.5 py-1 text-[11px] text-white"
+                          className="w-1/2 rounded-lg border border-slate-300 bg-white px-1.5 py-1 text-[11px] text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                         >
                           <option value="portrait">{lang === 'fa' ? 'عمودی' : 'Portrait'}</option>
                           <option value="landscape">{lang === 'fa' ? 'افقی' : 'Landscape'}</option>
@@ -1931,7 +1885,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                               duplexMode: e.target.value as DuplexMode,
                             })
                           }
-                          className="w-1/2 rounded-lg border border-slate-700 bg-slate-800 px-1.5 py-1 text-[11px] text-white"
+                          className="w-1/2 rounded-lg border border-slate-300 bg-white px-1.5 py-1 text-[11px] text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                         >
                           <option value="none">{lang === 'fa' ? 'تک‌رو (Simplex)' : 'Simplex (none)'}</option>
                           <option value="long-edge">{lang === 'fa' ? 'دورو لبه بلند (Long-Edge)' : 'Long-Edge'}</option>
@@ -1940,8 +1894,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                       </div>
                     </label>
 
-                    <label className="flex flex-col gap-0.5 text-slate-300">
-                      <span className="text-[10px] text-slate-400">
+                    <label className="flex flex-col gap-0.5 text-slate-700 dark:text-slate-300">
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400">
                         {lang === 'fa' ? 'رزولوشن (DPI) و رنگ' : 'DPI & Color Mode'}
                       </span>
                       <div className="flex gap-1">
@@ -1951,7 +1905,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                           onChange={(e) =>
                             void updatePrinterProfile(activePrinter.name, { dpi: Number(e.target.value) })
                           }
-                          className="w-1/2 rounded-lg border border-slate-700 bg-slate-800 px-1.5 py-1 text-[11px] text-white tabular-nums"
+                          className="w-1/2 rounded-lg border border-slate-300 bg-white px-1.5 py-1 text-[11px] text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white tabular-nums"
                         >
                           {(caps.supportedDpi.length ? caps.supportedDpi : [600]).map((d) => (
                             <option key={d} value={d}>
@@ -1968,7 +1922,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                               colorMode: e.target.value as 'color' | 'monochrome',
                             })
                           }
-                          className="w-1/2 rounded-lg border border-slate-700 bg-slate-800 px-1.5 py-1 text-[11px] text-white disabled:opacity-40"
+                          className="w-1/2 rounded-lg border border-slate-300 bg-white px-1.5 py-1 text-[11px] text-slate-900 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                         >
                           {caps.supportsColor && (
                             <option value="color">{lang === 'fa' ? 'رنگی' : 'Color'}</option>
@@ -1978,8 +1932,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                       </div>
                     </label>
 
-                    <label className="flex flex-col gap-0.5 text-slate-300">
-                      <span className="text-[10px] text-slate-400">
+                    <label className="flex flex-col gap-0.5 text-slate-700 dark:text-slate-300">
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400">
                         {lang === 'fa' ? 'کیفیت چاپ' : 'Print Quality'}
                       </span>
                       <select
@@ -1989,7 +1943,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                             quality: e.target.value as 'draft' | 'normal' | 'high',
                           })
                         }
-                        className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-white"
+                        className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                       >
                         {(caps.supportedQualities?.length
                           ? caps.supportedQualities
@@ -2003,8 +1957,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                     </label>
 
                     {((caps.supportedStapleModes?.length ?? 0) > 1 || caps.supportsStaple) && (
-                      <label className="flex flex-col gap-0.5 text-slate-300">
-                        <span className="text-[10px] text-slate-400">
+                      <label className="flex flex-col gap-0.5 text-slate-700 dark:text-slate-300">
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400">
                           {lang === 'fa' ? 'منگنه (Staple)' : 'Staple'}
                         </span>
                         <select
@@ -2012,7 +1966,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                           onChange={(e) =>
                             void updatePrinterProfile(activePrinter.name, { staple: e.target.value })
                           }
-                          className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-white"
+                          className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                         >
                           {(caps.supportedStapleModes ?? ['None', 'TopLeft']).map((s) => (
                             <option key={s} value={s}>{s}</option>
@@ -2022,8 +1976,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                     )}
 
                     {(caps.supportedHolePunchModes?.length ?? 0) > 1 && (
-                      <label className="flex flex-col gap-0.5 text-slate-300">
-                        <span className="text-[10px] text-slate-400">
+                      <label className="flex flex-col gap-0.5 text-slate-700 dark:text-slate-300">
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400">
                           {lang === 'fa' ? 'پانچ (Hole Punch)' : 'Hole Punch'}
                         </span>
                         <select
@@ -2031,7 +1985,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                           onChange={(e) =>
                             void updatePrinterProfile(activePrinter.name, { holePunch: e.target.value })
                           }
-                          className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-white"
+                          className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                         >
                           {caps.supportedHolePunchModes!.map((hp) => (
                             <option key={hp} value={hp}>{hp}</option>
@@ -2041,8 +1995,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                     )}
 
                     {(caps.supportedFoldModes?.length ?? 0) > 1 && (
-                      <label className="flex flex-col gap-0.5 text-slate-300">
-                        <span className="text-[10px] text-slate-400">
+                      <label className="flex flex-col gap-0.5 text-slate-700 dark:text-slate-300">
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400">
                           {lang === 'fa' ? 'تا کردن (Fold)' : 'Fold'}
                         </span>
                         <select
@@ -2050,7 +2004,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                           onChange={(e) =>
                             void updatePrinterProfile(activePrinter.name, { fold: e.target.value })
                           }
-                          className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-white"
+                          className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                         >
                           {caps.supportedFoldModes!.map((f) => (
                             <option key={f} value={f}>{f}</option>
@@ -2060,8 +2014,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                     )}
 
                     {(caps.supportedOutputBins?.length ?? 0) > 0 && (
-                      <label className="flex flex-col gap-0.5 text-slate-300">
-                        <span className="text-[10px] text-slate-400">
+                      <label className="flex flex-col gap-0.5 text-slate-700 dark:text-slate-300">
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400">
                           {lang === 'fa' ? 'سینی خروجی' : 'Output Bin'}
                         </span>
                         <select
@@ -2069,7 +2023,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                           onChange={(e) =>
                             void updatePrinterProfile(activePrinter.name, { outputBin: e.target.value })
                           }
-                          className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-white"
+                          className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                         >
                           {caps.supportedOutputBins!.map((b) => (
                             <option key={b} value={b}>{b}</option>
@@ -2079,9 +2033,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                     )}
                   </div>
 
-                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/80 text-[10px] text-slate-400 tabular-nums">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200 text-[10px] text-slate-500 dark:border-slate-800/80 dark:text-slate-400 tabular-nums">
                     <div className="flex items-center gap-3">
-                      <label className="flex items-center gap-1 cursor-pointer text-slate-200">
+                      <label className="flex items-center gap-1 cursor-pointer text-slate-700 dark:text-slate-200">
                         <input
                           type="checkbox"
                           checked={prof.collate ?? true}
@@ -2094,7 +2048,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                         <span>Collate</span>
                       </label>
                       {caps.supportsBorderless && (
-                        <label className="flex items-center gap-1 cursor-pointer text-slate-200">
+                        <label className="flex items-center gap-1 cursor-pointer text-slate-700 dark:text-slate-200">
                           <input
                             type="checkbox"
                             checked={Boolean(prof.borderless)}
@@ -2116,7 +2070,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                       <button
                         type="button"
                         onClick={() => refreshPrinterMargins()}
-                        className="rounded border border-slate-700 bg-slate-800 px-1.5 py-0.5 text-slate-200 hover:bg-slate-700 cursor-pointer"
+                        className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
                       >
                         {lang === 'fa' ? 'خواندن' : 'Sync'}
                       </button>
@@ -2127,9 +2081,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
             </div>
 
             {/* I3: Live Print Queue Manager (Spooler Jobs) */}
-            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-800 dark:bg-slate-950/60">
               <div className="mb-2 flex items-center justify-between">
-                <h4 className="text-xs font-bold text-white">
+                <h4 className="text-xs font-bold text-slate-900 dark:text-white">
                   {lang === 'fa'
                     ? `مدیریت صف چاپ ویندوز (Print Queue Manager — ${spoolerJobs.length} Job)`
                     : `Print Queue Manager (${spoolerJobs.length} Jobs)`}
@@ -2138,7 +2092,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                   <button
                     type="button"
                     onClick={() => void purgePrinterQueue(selectedPrinterName)}
-                    className="rounded-lg bg-rose-500/15 px-2.5 py-1 text-[11px] font-semibold text-rose-300 hover:bg-rose-500/25 cursor-pointer"
+                    className="rounded-lg bg-rose-100 px-2.5 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:hover:bg-rose-500/25 cursor-pointer"
                   >
                     {lang === 'fa' ? 'پاک‌سازی کل صف (Purge)' : 'Purge Queue'}
                   </button>
@@ -2156,18 +2110,18 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                   spoolerJobs.map((job) => (
                     <div
                       key={job.jobId}
-                      className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/80 p-2.5 text-xs"
+                      className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-2.5 text-xs dark:border-slate-800 dark:bg-slate-900/80"
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <span className="font-mono text-[10px] text-sky-400">
+                          <span className="font-mono text-[10px] text-sky-600 dark:text-sky-400">
                             #{job.jobId}
                           </span>
-                          <span className="truncate font-bold text-slate-200">
+                          <span className="truncate font-bold text-slate-800 dark:text-slate-200">
                             {job.documentTitle}
                           </span>
                         </div>
-                        <div className="mt-0.5 flex items-center gap-2 text-[10px] text-slate-400">
+                        <div className="mt-0.5 flex items-center gap-2 text-[10px] text-slate-500 dark:text-slate-400">
                           <span>{job.printerName}</span>
                           <span>•</span>
                           <span>
@@ -2175,7 +2129,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                             {lang === 'fa' ? 'صفحه' : 'p'}
                           </span>
                           <span>•</span>
-                          <span className="font-semibold text-amber-300">
+                          <span className="font-semibold text-amber-600 dark:text-amber-300">
                             {job.status}
                           </span>
                         </div>
@@ -2193,7 +2147,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                               )
                             }
                             title="ادامه چاپ (Resume)"
-                            className="rounded bg-emerald-500/20 p-1.5 text-emerald-300 hover:bg-emerald-500/30 cursor-pointer"
+                            className="rounded bg-emerald-100 p-1.5 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-500/20 dark:text-emerald-300 dark:hover:bg-emerald-500/30 cursor-pointer"
                           >
                             <Play className="h-3.5 w-3.5" />
                           </button>
@@ -2208,7 +2162,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                               )
                             }
                             title="توقف موقت (Pause)"
-                            className="rounded bg-amber-500/20 p-1.5 text-amber-300 hover:bg-amber-500/30 cursor-pointer"
+                            className="rounded bg-amber-100 p-1.5 text-amber-700 hover:bg-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:hover:bg-amber-500/30 cursor-pointer"
                           >
                             <Pause className="h-3.5 w-3.5" />
                           </button>
@@ -2223,7 +2177,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                             )
                           }
                           title="چاپ مجدد از ابتدا (Restart)"
-                          className="rounded bg-slate-800 p-1.5 text-slate-300 hover:bg-slate-700 cursor-pointer"
+                          className="rounded bg-slate-100 p-1.5 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer"
                         >
                           <RotateCcw className="h-3.5 w-3.5" />
                         </button>
@@ -2237,7 +2191,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                             )
                           }
                           title="لغو و حذف از صف (Cancel)"
-                          className="rounded bg-rose-500/20 p-1.5 text-rose-300 hover:bg-rose-500/30 cursor-pointer"
+                          className="rounded bg-rose-100 p-1.5 text-rose-700 hover:bg-rose-200 dark:bg-rose-500/20 dark:text-rose-300 dark:hover:bg-rose-500/30 cursor-pointer"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -2268,39 +2222,39 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
               dir={lang === 'fa' ? 'rtl' : 'ltr'}
               style={{ position: 'fixed', left: sheetContextMenu.x, top: sheetContextMenu.y }}
               onClick={(e) => e.stopPropagation()}
-              className="min-w-52 rounded-lg border border-slate-600 bg-slate-900 p-1 text-sm text-white shadow-xl"
+              className="min-w-52 rounded-lg border border-slate-200 bg-white p-1 text-sm text-slate-800 shadow-xl dark:border-slate-600 dark:bg-slate-900 dark:text-white"
             >
               <button
                 role="menuitem"
                 type="button"
                 disabled={printerMargins.status !== 'available'}
-                className="flex w-full items-center gap-2 rounded px-3 py-2 text-start hover:bg-slate-700 disabled:opacity-45 cursor-pointer"
+                className="flex w-full items-center gap-2 rounded px-3 py-2 text-start hover:bg-slate-100 disabled:opacity-45 dark:hover:bg-slate-700 cursor-pointer"
                 onClick={() => {
                   resetMarginsToPrinter();
                   setSheetContextMenu(null);
                 }}
               >
-                <RotateCcw className="h-3.5 w-3.5 text-amber-400 shrink-0" aria-hidden="true" />
+                <RotateCcw className="h-3.5 w-3.5 text-amber-500 dark:text-amber-400 shrink-0" aria-hidden="true" />
                 <span>{lang === 'fa' ? 'بازنشانی به حاشیه پرینتر' : 'Reset printer margins'}</span>
               </button>
               <button
                 role="menuitem"
                 type="button"
-                className="flex w-full items-center gap-2 rounded px-3 py-2 text-start hover:bg-slate-700 cursor-pointer"
+                className="flex w-full items-center gap-2 rounded px-3 py-2 text-start hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer"
                 onClick={() => {
                   fitPage();
                   setSheetContextMenu(null);
                 }}
               >
-                <Maximize2 className="h-3.5 w-3.5 text-slate-300 shrink-0" aria-hidden="true" />
+                <Maximize2 className="h-3.5 w-3.5 text-slate-600 dark:text-slate-300 shrink-0" aria-hidden="true" />
                 <span>{lang === 'fa' ? 'جاگیری کامل در صفحه' : 'Fit page to view'}</span>
               </button>
-              <div className="my-1 h-px bg-slate-700/80" />
+              <div className="my-1 h-px bg-slate-200 dark:bg-slate-700/80" />
               <button
                 role="menuitem"
                 type="button"
                 data-context-action="page-setup"
-                className="flex w-full items-center gap-2 rounded px-3 py-2 text-start text-sky-300 hover:bg-slate-700 cursor-pointer"
+                className="flex w-full items-center gap-2 rounded px-3 py-2 text-start text-sky-700 hover:bg-slate-100 dark:text-sky-300 dark:hover:bg-slate-700 cursor-pointer"
                 onClick={() => {
                   setSheetContextMenu(null);
                   openPageSetup('margins');

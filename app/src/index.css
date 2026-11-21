@@ -1,28 +1,49 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.theme-dark, .theme-dark *));
 
 @layer base {
-  :root {
+  :root,
+  .theme-light {
+    color-scheme: light;
+    --psp-bg-primary: #f1f5f9;
+    --psp-bg-surface: #ffffff;
+    --psp-bg-elevated: #f8fafc;
+    --psp-bg-canvas: #e9eef5;
+    --psp-bg-panel: #f8fafc;
+    --psp-bg-panel-raised: #ffffff;
+    --psp-bg-panel-chrome: #ffffff;
+    --psp-border-subtle: #e2e8f0;
+    --psp-border-strong: #cbd5e1;
+    --psp-text-primary: #0f172a;
+    --psp-text-muted: #64748b;
+    --psp-accent: #0284c7;
+    --psp-focus-ring: #0284c7;
+    --psp-radius-sm: 0.375rem;
+    --psp-radius-md: 0.5rem;
+    --psp-radius-lg: 0.75rem;
+    --psp-tool-rail-size: 3rem;
+    --psp-sidebar-size: 16.5rem;
+    --psp-tool-panel-size: clamp(17.5rem, 21vw, 20rem);
+    --psp-tooltip-delay: 320ms;
+    --psp-font-fa: "Vazirmatn", "IRANSans", "Tahoma", system-ui, -apple-system, sans-serif;
+    --psp-font-en: "Inter", system-ui, -apple-system, sans-serif;
+  }
+
+  .theme-dark {
+    color-scheme: dark;
     --psp-bg-primary: #020617;
     --psp-bg-surface: #0f172a;
     --psp-bg-elevated: #1e293b;
     --psp-bg-canvas: #0b1220;
     --psp-bg-panel: #0f172a;
     --psp-bg-panel-raised: #1e293b;
+    --psp-bg-panel-chrome: #0a1222;
     --psp-border-subtle: rgb(148 163 184 / 18%);
     --psp-border-strong: rgb(148 163 184 / 30%);
     --psp-text-primary: #f8fafc;
     --psp-text-muted: #94a3b8;
     --psp-accent: #0284c7;
     --psp-focus-ring: #38bdf8;
-    --psp-radius-sm: 0.375rem;
-    --psp-radius-md: 0.5rem;
-    --psp-radius-lg: 0.75rem;
-    --psp-tool-rail-size: 3rem;
-    --psp-sidebar-size: 15rem;
-    --psp-tool-panel-size: 19rem;
-    --psp-tooltip-delay: 400ms;
-    --psp-font-fa: "Vazirmatn", "IRANSans", "Tahoma", system-ui, -apple-system, sans-serif;
-    --psp-font-en: "Inter", system-ui, -apple-system, sans-serif;
   }
 
   html[dir="rtl"] body {
@@ -35,10 +56,10 @@
 }
 
 
-/* Application shell: fixed chrome rows and a single minmax workspace row. */
+/* Application shell: fixed chrome rows (QuickBar + TopToolRibbon), single minmax workspace row, and status bar. */
 .psp-app-shell {
   display: grid;
-  grid-template-rows: max-content minmax(0, 1fr) max-content;
+  grid-template-rows: max-content max-content minmax(0, 1fr) max-content;
   width: 100vw;
   height: 100vh;
   height: 100dvh;
@@ -57,18 +78,17 @@
   min-width: 0;
 }
 
+.psp-app-shell__navigation {
+  width: 100%;
+  overflow: visible;
+  z-index: 25;
+}
+
 .psp-app-shell__workspace {
   display: flex;
   min-height: 0;
   overflow: hidden;
-}
-
-.psp-app-shell__navigation {
-  display: flex;
-  flex: 0 0 var(--psp-tool-rail-size);
-  min-width: 0;
-  min-height: 0;
-  overflow: visible;
+  background: var(--psp-bg-canvas);
 }
 
 .psp-tool-rail {
@@ -85,15 +105,15 @@
   min-inline-size: 0;
   min-block-size: 0;
   overflow: hidden;
-  border-inline-start: 1px solid var(--psp-border-subtle);
+  border-left: 1px solid var(--psp-border-subtle);
   background: var(--psp-bg-panel);
+  color: var(--psp-text-primary);
   transition: inline-size 140ms ease, flex-basis 140ms ease;
 }
 
 .psp-tool-panel--collapsed {
-  flex-basis: 0;
-  inline-size: 0;
-  border-inline-start-width: 0;
+  flex-basis: 2.25rem;
+  inline-size: 2.25rem;
 }
 
 .psp-tool-panel-ribbon {
@@ -113,7 +133,12 @@
 .psp-properties-dock [data-text-control-panel],
 .psp-properties-dock [data-shape-control-panel],
 .psp-properties-dock [data-watermark-control-panel],
-.psp-properties-dock [data-booklet-control-panel] {
+.psp-properties-dock [data-booklet-control-panel],
+.psp-tool-panel [data-text-control-panel],
+.psp-tool-panel [data-shape-control-panel],
+.psp-tool-panel [data-watermark-control-panel],
+.psp-tool-panel [data-booklet-control-panel],
+.psp-tool-panel [data-eraser-control-panel] {
   inline-size: 100%;
   max-inline-size: 100%;
   min-inline-size: 0;
@@ -121,6 +146,9 @@
   block-size: 100%;
   flex-shrink: 1;
   border-inline-start: 0;
+  border-inline-end: 0;
+  border-left: 0;
+  border-right: 0;
 }
 
 .psp-segmented-control {
@@ -142,7 +170,7 @@
 }
 
 .psp-workspace-drawer {
-  box-shadow: 0 -0.75rem 2rem rgb(0 0 0 / 32%);
+  box-shadow: 0 -0.75rem 2rem rgb(0 0 0 / 16%);
   overscroll-behavior: contain;
 }
 
@@ -242,11 +270,6 @@
   scrollbar-width: none;
 }
 
-/* The light UI currently uses a root inversion. Counter-invert complete paper
-   surfaces (not individual images) so their content and effects stay accurate. */
-.theme-light [data-color-accurate] {
-  filter: invert(1) hue-rotate(180deg);
-}
 
 /* Keep the insertion marker outside React's rendering path during dragover. */
 [data-page-id][data-drop-position]::after {

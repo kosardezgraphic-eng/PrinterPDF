@@ -35,7 +35,7 @@ const errorHint: Record<SettingsPresetEditError, [string, string]> = {
 function ShortcutChip({ shortcut, isFa }: { shortcut: string; isFa: boolean }) {
   if (!shortcut) return <span className="text-[10px] text-slate-500">{isFa ? 'بدون کلید' : 'no key'}</span>;
   return (
-    <kbd dir="ltr" className="rounded border border-slate-600 bg-slate-800 px-1.5 py-0.5 font-mono text-[10px] text-slate-200">
+    <kbd dir="ltr" className="rounded border border-slate-300 bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-800 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200">
       {shortcut}
     </kbd>
   );
@@ -87,7 +87,9 @@ export function ShortcutRecorder({ presetId, shortcut, isFa, onNotice }: {
           ? 'برای ثبت کلید میانبر، این را بزنید و بعد ترکیب مورد نظر را فشار دهید (Esc لغو)'
           : 'Press this, then type the chord you want for this profile (Esc cancels)'}
         className={`rounded-lg border px-2 py-1 text-[10px] font-bold cursor-pointer ${
-          recording ? 'border-amber-400 bg-amber-500/20 text-amber-100' : 'border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700'
+          recording
+            ? 'border-amber-400 bg-amber-100 text-amber-900 dark:bg-amber-500/20 dark:text-amber-100'
+            : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
         }`}
       >
         {recording
@@ -103,7 +105,7 @@ export function ShortcutRecorder({ presetId, shortcut, isFa, onNotice }: {
             const result = editSettingsPreset(presetId, { shortcut: '' });
             if (!result.ok) onNotice(isFa ? errorHint[result.error][0] : errorHint[result.error][1]);
           }}
-          className="rounded-lg border border-slate-700 p-1 text-slate-400 hover:bg-slate-800 cursor-pointer"
+          className="rounded-lg border border-slate-300 p-1 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 cursor-pointer"
         >
           <X className="h-3 w-3" />
         </button>
@@ -150,19 +152,19 @@ export function SettingsPresetMenu() {
         aria-expanded={open}
         onClick={() => setOpen(value => !value)}
         title={isFa ? 'پروفایل‌های تنظیمات شیت' : 'Saved sheet profiles'}
-        className="flex flex-col items-center gap-1 rounded-xl border border-slate-700 bg-slate-800/80 px-3 py-2 text-slate-200 hover:bg-slate-700 cursor-pointer"
+        className="flex h-16 min-w-14 flex-col items-center justify-center gap-0.5 rounded-lg border border-slate-200 bg-white px-2 text-slate-700 transition hover:border-violet-400 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
       >
-        <Layers className="h-5 w-5 text-violet-400" />
+        <Layers className="h-5 w-5 text-violet-600 dark:text-violet-400" />
         <span className="sr-only">{isFa ? 'پروفایل شیت' : 'Sheet profiles'}</span>
-        <ChevronDown className="h-3 w-3 text-slate-400" />
+        <ChevronDown className="h-3 w-3 text-slate-500 dark:text-slate-400" />
       </button>
       {open && (
         <div
           data-preset-menu
           dir={isFa ? 'rtl' : 'ltr'}
-          className="absolute z-50 mt-1 w-96 rounded-xl border border-slate-600 bg-slate-900 p-2 text-xs text-slate-100 shadow-2xl"
+          className="absolute z-50 mt-1 w-96 rounded-xl border border-slate-200 bg-white p-2 text-xs text-slate-800 shadow-2xl dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
         >
-          <div className="mb-1 px-1 text-[10px] font-bold text-slate-400">
+          <div className="mb-1 px-1 text-[10px] font-bold text-slate-500 dark:text-slate-400">
             {isFa ? 'چیدمان شیت — با یک کلیک یا کلید میانبرش' : 'Sheet setup — one click, or its chord'}
           </div>
           <ul className="mb-1 max-h-64 overflow-y-auto">
@@ -173,14 +175,14 @@ export function SettingsPresetMenu() {
                   data-preset-apply={row.name}
                   data-preset-builtin={row.builtin ? 'true' : undefined}
                   onClick={() => { applySettingsPreset(row.id); setOpen(false); }}
-                  className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-start hover:bg-slate-700 cursor-pointer"
+                  className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-start hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer"
                 >
                   {row.builtin
-                    ? <RotateCcw className="h-3.5 w-3.5 shrink-0 text-rose-300" aria-hidden="true" />
-                    : <Check className="h-3.5 w-3.5 shrink-0 text-emerald-400" aria-hidden="true" />}
+                    ? <RotateCcw className="h-3.5 w-3.5 shrink-0 text-rose-500 dark:text-rose-300" aria-hidden="true" />
+                    : <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />}
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-semibold">{row.name}</span>
-                    {row.summary && <span dir="ltr" className="block truncate text-[10px] text-slate-400">{row.summary}</span>}
+                    {row.summary && <span dir="ltr" className="block truncate text-[10px] text-slate-500 dark:text-slate-400">{row.summary}</span>}
                   </span>
                   <ShortcutChip shortcut={row.shortcut} isFa={isFa} />
                 </button>
@@ -191,7 +193,7 @@ export function SettingsPresetMenu() {
                     aria-label={isFa ? `ویرایش پروفایل ${row.name}` : `Edit the ${row.name} profile`}
                     title={isFa ? 'نام، کلید میانبر، محتوا و حذف این پروفایل' : 'Rename this profile, give it a chord, re-capture it or delete it'}
                     onClick={() => { beginEditPreset(row.id); setModalState('settings', true); setOpen(false); }}
-                    className="rounded-lg border border-slate-700 p-1.5 text-slate-300 hover:bg-slate-700 cursor-pointer"
+                    className="rounded-lg border border-slate-200 p-1.5 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer"
                   >
                     <Pencil className="h-3.5 w-3.5" />
                   </button>
@@ -203,7 +205,7 @@ export function SettingsPresetMenu() {
             type="button"
             data-preset-save-current
             onClick={() => { saveSettingsPreset(isFa ? `پروفایل ${presets.length + 1}` : `Profile ${presets.length + 1}`); setOpen(false); }}
-            className="flex w-full items-center gap-2 rounded-lg border-t border-slate-800 px-2 py-1.5 text-start text-sky-300 hover:bg-slate-800 cursor-pointer"
+            className="flex w-full items-center gap-2 rounded-lg border-t border-slate-200 px-2 py-1.5 text-start text-sky-700 hover:bg-slate-100 dark:border-slate-800 dark:text-sky-300 dark:hover:bg-slate-800 cursor-pointer"
           >
             <Save className="h-3.5 w-3.5" aria-hidden="true" />
             {isFa ? 'ثبت چیدمان فعلی شیت به‌عنوان پروفایل' : 'Save the current sheet setup as a profile'}
@@ -269,10 +271,10 @@ export function SettingsPresetPanel() {
   };
 
   return (
-    <div className="mt-3 max-h-[42vh] overflow-y-auto overscroll-contain rounded-2xl border border-slate-800 bg-slate-950/40 p-3" data-preset-panel>
+    <div className="mt-3 max-h-[42vh] overflow-y-auto overscroll-contain rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/40" data-preset-panel>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="flex items-center gap-2 text-xs font-extrabold text-slate-200">
-          <Layers className="h-4 w-4 text-violet-400" />
+        <h3 className="flex items-center gap-2 text-xs font-extrabold text-slate-800 dark:text-slate-200">
+          <Layers className="h-4 w-4 text-violet-600 dark:text-violet-400" />
           {isFa ? 'پروفایل‌های تنظیمات چاپ' : 'Print setup profiles'}
         </h3>
         <span className="text-[10px] text-slate-500">
@@ -280,7 +282,7 @@ export function SettingsPresetPanel() {
         </span>
       </div>
 
-      <p className="mb-3 text-[11px] leading-5 text-slate-400">
+      <p className="mb-3 text-[11px] leading-5 text-slate-600 dark:text-slate-400">
         {isFa
           ? 'هر پروفایل فقط تنظیمات مؤثر بر خروجی چاپ را نگه می‌دارد: ابعاد و جهت کاغذ، حاشیه‌ها، چیدمان و تعداد خانه‌ها، دورو، افکت‌های رنگ و نور، واترمارک و شماره‌گذاری. زبان، تم، واحد رابط، تقویم، تعرفه و کیفیت پیش‌نمایش جزو پروفایل نیستند. سطر اول فقط بازنشانی تنظیمات پیش‌فرض برنامه است.'
           : 'A profile stores print-output settings only: paper size and orientation, margins, layout and cells, duplex, colour/brightness effects, watermark and page numbering. Language, theme, UI units, calendar, tariffs and preview quality are not part of a profile. The first row resets application defaults.'}
@@ -295,12 +297,14 @@ export function SettingsPresetPanel() {
               data-preset-row={row.id}
               data-preset-editing={editing ? 'true' : undefined}
               className={`flex flex-wrap items-center gap-2 rounded-xl border px-2.5 py-1.5 ${
-                editing ? 'border-sky-500/60 bg-slate-800' : 'border-slate-700 bg-slate-800/70'
+                editing
+                  ? 'border-sky-500/60 bg-sky-50/70 dark:bg-slate-800'
+                  : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800/70'
               }`}
             >
               <span className="min-w-0 flex-1 basis-40">
                 {row.builtin ? (
-                  <span className="block truncate text-[11px] font-bold text-rose-200">{row.name}</span>
+                  <span className="block truncate text-[11px] font-bold text-rose-700 dark:text-rose-200">{row.name}</span>
                 ) : editing ? (
                   <input
                     type="text"
@@ -314,12 +318,12 @@ export function SettingsPresetPanel() {
                       if (event.key === 'Escape') { event.preventDefault(); setDrafts(state => ({ ...state, [row.id]: row.name })); }
                     }}
                     onBlur={() => commitDraft(row)}
-                    className="w-full rounded-lg border border-slate-600 bg-slate-900 px-1.5 py-0.5 text-[11px] font-bold text-slate-100 focus:border-sky-500"
+                    className="w-full rounded-lg border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-900 focus:border-sky-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                   />
                 ) : (
-                  <span className="block truncate text-[11px] font-bold text-slate-100">{row.name}</span>
+                  <span className="block truncate text-[11px] font-bold text-slate-900 dark:text-slate-100">{row.name}</span>
                 )}
-                <span dir="ltr" className="block truncate text-[10px] text-slate-400">
+                <span dir="ltr" className="block truncate text-[10px] text-slate-500 dark:text-slate-400">
                   {row.summary || (row.builtin
                     ? (isFa ? 'بازنشانی چیدمان، افکت‌ها، واترمارک، شماره‌گذاری و تنظیمات برنامه' : 'resets layout, effects, watermark, numbering and app settings')
                     : '')}
@@ -341,7 +345,7 @@ export function SettingsPresetPanel() {
                     row.builtin
                       ? (confirmReset
                           ? 'bg-rose-600 text-white'
-                          : 'border border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20')
+                          : 'border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-500/20')
                       : 'bg-sky-600 text-white hover:bg-sky-500'
                   }`}
                 >
@@ -356,7 +360,7 @@ export function SettingsPresetPanel() {
                     type="button"
                     data-preset-edit={row.id}
                     onClick={() => { beginEditPreset(row.id); setDrafts(state => ({ ...state, [row.id]: row.name })); }}
-                    className="flex items-center gap-1 rounded-lg border border-slate-600 bg-slate-800 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-700 cursor-pointer"
+                    className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
                   >
                     <Pencil className="h-3 w-3" aria-hidden="true" />
                     {isFa ? 'ویرایش' : 'Edit'}
@@ -374,7 +378,7 @@ export function SettingsPresetPanel() {
                         const result = overwriteSettingsPreset(row.id);
                         if (!result.ok) setNotice(isFa ? errorHint[result.error][0] : errorHint[result.error][1]);
                       }}
-                      className="flex items-center gap-1 rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-200 hover:bg-emerald-500/20 cursor-pointer"
+                      className="flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/50 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/20 cursor-pointer"
                     >
                       <Save className="h-3 w-3" aria-hidden="true" />
                       {isFa ? 'ثبت محتوای فعلی' : 'Store current sheet'}
@@ -389,8 +393,8 @@ export function SettingsPresetPanel() {
                       }}
                       className={`rounded-lg border p-1 cursor-pointer ${
                         confirmDelete === row.id
-                          ? 'border-rose-400 bg-rose-600/30 text-rose-100'
-                          : 'border-slate-700 text-rose-300 hover:bg-rose-500/15'
+                          ? 'border-rose-400 bg-rose-100 text-rose-800 dark:bg-rose-600/30 dark:text-rose-100'
+                          : 'border-slate-300 text-rose-600 hover:bg-rose-50 dark:border-slate-700 dark:text-rose-300 dark:hover:bg-rose-500/15'
                       }`}
                     >
                       {confirmDelete === row.id
@@ -401,7 +405,7 @@ export function SettingsPresetPanel() {
                       type="button"
                       data-preset-edit-done={row.id}
                       onClick={() => { commitDraft(row); beginEditPreset(null); }}
-                      className="rounded-lg border border-slate-600 px-2 py-1 text-[10px] font-bold text-slate-300 hover:bg-slate-700 cursor-pointer"
+                      className="rounded-lg border border-slate-300 px-2 py-1 text-[10px] font-bold text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer"
                     >
                       {isFa ? 'پایان ویرایش' : 'Done'}
                     </button>
@@ -410,9 +414,9 @@ export function SettingsPresetPanel() {
               </span>
 
               {editing && (
-                <span className="flex w-full flex-wrap items-center justify-between gap-2 border-t border-slate-700 pt-1.5">
-                  <span className="flex items-center gap-1.5 text-[10px] text-slate-400">
-                    <KeyRound className="h-3 w-3 shrink-0 text-amber-300" aria-hidden="true" />
+                <span className="flex w-full flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-1.5 dark:border-slate-700">
+                  <span className="flex items-center gap-1.5 text-[10px] text-slate-600 dark:text-slate-400">
+                    <KeyRound className="h-3 w-3 shrink-0 text-amber-500 dark:text-amber-300" aria-hidden="true" />
                     {isFa ? 'کلید میانبر این پروفایل:' : 'Chord for this profile:'}
                     <ShortcutChip shortcut={row.shortcut} isFa={isFa} />
                   </span>
@@ -436,7 +440,7 @@ export function SettingsPresetPanel() {
             if (saveSettingsPreset(name)) setName('');
           }}
           placeholder={isFa ? 'نام پروفایل جدید، مثلاً «A4 دورو سیاه‌وسفید»' : 'New profile name, e.g. "A4 duplex B&W"'}
-          className="min-w-0 flex-1 basis-48 rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-[11px] text-white placeholder:text-slate-500"
+          className="min-w-0 flex-1 basis-48 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-[11px] text-slate-900 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500"
         />
         <button
           type="button"
@@ -449,7 +453,7 @@ export function SettingsPresetPanel() {
       </div>
 
       {notice && (
-        <p role="status" data-preset-notice className="mt-2 flex items-center gap-1.5 text-[10px] text-amber-300">
+        <p role="status" data-preset-notice className="mt-2 flex items-center gap-1.5 text-[10px] text-amber-700 dark:text-amber-300">
           <KeyRound className="h-3 w-3" aria-hidden="true" />{notice}
         </p>
       )}

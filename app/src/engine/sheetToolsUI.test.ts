@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PageItem } from '@shared/models';
 import { DEFAULT_LAYOUT, DEFAULT_SETTINGS, useAppStore } from '../store/useAppStore';
 import { PreviewWorkspace } from '../components/PreviewWorkspace';
+import { TopToolRibbon } from '../components/TopToolRibbon';
+import { ToolPanel } from '../components/ToolPanel';
 const page: PageItem = {id:'p',documentId:'d',documentName:'d',sourcePageNumber:1,widthMm:100,heightMm:200,rotation:0,
   selectedForPrint:true,isHighlighted:true,isBlankPage:false,colorProfile:'color',inkCoveragePercent:0};
 let container:HTMLDivElement, root:Root;
@@ -23,9 +25,9 @@ beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype,'setPointerCapture',{configurable:true,value:vi.fn()});
   useAppStore.setState({pages:[page],documents:[],layout:{...DEFAULT_LAYOUT,paperSize:'Custom',customWidthMm:200,customHeightMm:300,
     rows:2,cols:2,duplexMode:'none',marginsMm:{left:10,right:10,top:10,bottom:10},horizontalGutterMm:6,verticalGutterMm:6},
-    settings:{...DEFAULT_SETTINGS,language:'en',unit:'mm'},activeSheetIndex:0,viewMode:'single'});
+    settings:{...DEFAULT_SETTINGS,language:'en',unit:'mm'},activeSheetIndex:0,viewMode:'single',activeInspectorTool:'margins',inspectorCollapsed:false,canvasTool:'move'});
   container=document.createElement('div');document.body.appendChild(container);root=createRoot(container);
-  act(() => root.render(React.createElement(PreviewWorkspace,{onCursorMoveMm:()=>{}})));
+  act(() => root.render(React.createElement(React.Fragment,null,React.createElement(TopToolRibbon),React.createElement(PreviewWorkspace,{onCursorMoveMm:()=>{}}),React.createElement(ToolPanel))));
 });
 afterEach(() => {act(() => root.unmount());container.remove();vi.restoreAllMocks();});
 describe('sheet tool pointer interactions', () => {

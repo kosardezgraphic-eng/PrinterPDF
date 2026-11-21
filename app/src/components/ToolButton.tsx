@@ -16,9 +16,9 @@ export interface ToolButtonProps extends ButtonHTMLAttributes<HTMLButtonElement>
 
 const variantClasses: Record<ToolButtonVariant, string> = {
   primary: 'border border-sky-500/60 bg-sky-600 text-white hover:bg-sky-500',
-  secondary: 'border border-slate-700 bg-slate-800 text-slate-100 hover:bg-slate-700',
-  ghost: 'border border-transparent bg-transparent text-slate-300 hover:border-slate-700 hover:bg-slate-800 hover:text-white',
-  danger: 'border border-rose-500/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20',
+  secondary: 'border border-slate-300 bg-white text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700',
+  ghost: 'border border-transparent bg-transparent text-slate-600 hover:border-slate-300 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-white',
+  danger: 'border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200 dark:hover:bg-rose-500/20',
 };
 
 const sizeClasses: Record<ToolButtonSize, string> = {

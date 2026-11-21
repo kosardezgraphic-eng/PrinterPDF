@@ -46,7 +46,7 @@ export const ToolRail: React.FC<ToolRailProps> = ({ onNavigate }) => {
 
   return (
     <aside
-      className="psp-tool-rail flex h-full min-h-0 shrink-0 flex-col items-center gap-1 border-e border-slate-800 bg-slate-950/95 px-1.5 py-2"
+      className="psp-tool-rail flex h-full min-h-0 shrink-0 flex-col items-center gap-1 border-e border-slate-200 bg-slate-50 px-1.5 py-2 dark:border-slate-800 dark:bg-slate-950/95"
       aria-label={tr.shell.toolRail}
       data-tool-rail
     >
@@ -85,7 +85,7 @@ export const ToolRail: React.FC<ToolRailProps> = ({ onNavigate }) => {
             )}
             {tab.id === 'effects' && effects.invert && (
               <span
-                className="pointer-events-none absolute end-0 top-0 h-2 w-2 rounded-full bg-fuchsia-400 ring-2 ring-slate-950"
+                className="pointer-events-none absolute end-0 top-0 h-2 w-2 rounded-full bg-fuchsia-500 ring-2 ring-white dark:bg-fuchsia-400 dark:ring-slate-950"
                 aria-label={tr.statusBar.invertActive}
               />
             )}

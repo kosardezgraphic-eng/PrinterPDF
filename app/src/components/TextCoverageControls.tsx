@@ -29,22 +29,22 @@ export function TextCoverageControls({text,pages,sheetCount,fa,update}:Props) {
       setError(false);
     } catch {setError(true);}
   };
-  return <fieldset className="space-y-2 rounded border border-slate-600 p-2">
-    <legend>{fa?'گسترش دامنه متن':'Extend text coverage'}</legend>
-    <p className="text-slate-400">{fa?'علاوه بر دامنه اصلی؛ با خاموش‌کردن به دامنه اصلی برمی‌گردد.':'Adds to the base scope; turning it off restores the base scope.'}</p>
-    <button type="button" aria-pressed={isAll} onClick={()=>update({coverageMode:isAll?undefined:'all'})} className={`rounded px-2 py-1 ${isAll?'bg-sky-700':'bg-slate-700'}`}>
+  return <fieldset className="space-y-2 rounded border border-slate-200 bg-slate-50/70 p-2 text-slate-800 dark:border-slate-600 dark:bg-slate-800/30 dark:text-slate-200">
+    <legend className="px-1 font-semibold">{fa?'گسترش دامنه متن':'Extend text coverage'}</legend>
+    <p className="text-slate-500 dark:text-slate-400">{fa?'علاوه بر دامنه اصلی؛ با خاموش‌کردن به دامنه اصلی برمی‌گردد.':'Adds to the base scope; turning it off restores the base scope.'}</p>
+    <button type="button" aria-pressed={isAll} onClick={()=>update({coverageMode:isAll?undefined:'all'})} className={`rounded px-2 py-1 cursor-pointer ${isAll?'bg-sky-600 text-white':'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>
       {fa?'اعمال روی تمام صفحات':'Apply to all'}
     </button>
     <label className="block">{target==='page'?(fa?'شماره صفحات دلخواه':'Chosen page numbers'):(fa?'شماره برگه‌های خروجی دلخواه':'Chosen output sheet numbers')}
-      <input aria-label={target==='page'?(fa?'شماره صفحات دلخواه':'Chosen page numbers'):(fa?'شماره برگه‌های خروجی دلخواه':'Chosen output sheet numbers')} dir="ltr" value={selection} onChange={e=>{setSelection(e.target.value);setError(false);}} placeholder="1, 3-5" className="mt-1 w-full rounded border border-slate-600 bg-slate-800 p-1 text-xs text-white"/>
+      <input aria-label={target==='page'?(fa?'شماره صفحات دلخواه':'Chosen page numbers'):(fa?'شماره برگه‌های خروجی دلخواه':'Chosen output sheet numbers')} dir="ltr" value={selection} onChange={e=>{setSelection(e.target.value);setError(false);}} placeholder="1, 3-5" className="mt-1 w-full rounded border border-slate-300 bg-white p-1 text-xs text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white"/>
     </label>
-    <p className="text-slate-400">{target==='page'?(fa?'شماره‌ها بر اساس ترتیب تمام صفحات سندها هستند.':'Numbers use the order of all workspace pages.'):(fa?'شماره‌ها بر اساس ترتیب برگه‌های خروجی هستند.':'Numbers use output-side order.')}</p>
-    {error && <p role="alert" className="text-rose-300">{fa?`شماره یا بازه معتبر از ۱ تا ${target==='page'?pages.length:sheetCount} وارد کنید.`:`Enter valid numbers or ranges from 1 to ${target==='page'?pages.length:sheetCount}.`}</p>}
+    <p className="text-slate-500 dark:text-slate-400">{target==='page'?(fa?'شماره‌ها بر اساس ترتیب تمام صفحات سندها هستند.':'Numbers use the order of all workspace pages.'):(fa?'شماره‌ها بر اساس ترتیب برگه‌های خروجی هستند.':'Numbers use output-side order.')}</p>
+    {error && <p role="alert" className="text-rose-600 dark:text-rose-300">{fa?`شماره یا بازه معتبر از ۱ تا ${target==='page'?pages.length:sheetCount} وارد کنید.`:`Enter valid numbers or ranges from 1 to ${target==='page'?pages.length:sheetCount}.`}</p>}
     <div className="flex flex-wrap gap-1">
-      <button type="button" aria-pressed={isSelected} onClick={()=>isSelected?update({coverageMode:undefined}):applySelection()} className={`rounded px-2 py-1 ${isSelected?'bg-sky-700':'bg-slate-700'}`}>
+      <button type="button" aria-pressed={isSelected} onClick={()=>isSelected?update({coverageMode:undefined}):applySelection()} className={`rounded px-2 py-1 cursor-pointer ${isSelected?'bg-sky-600 text-white':'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>
         {fa?'اعمال روی صفحات دلخواه':'Apply to chosen'}
       </button>
-      {isSelected && <button type="button" onClick={applySelection} className="rounded bg-slate-700 px-2 py-1">{fa?'به‌روزرسانی انتخاب':'Update selection'}</button>}
+      {isSelected && <button type="button" onClick={applySelection} className="rounded border border-slate-300 bg-white px-2 py-1 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 cursor-pointer">{fa?'به‌روزرسانی انتخاب':'Update selection'}</button>}
     </div>
   </fieldset>;
 }

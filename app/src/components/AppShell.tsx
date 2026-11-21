@@ -29,23 +29,33 @@ export const AppShell: React.FC<AppShellProps> = ({
   workspace,
   statusBar,
   overlays,
-}) => (
-  <div
-    className={`psp-app-shell ${theme === 'light' ? 'theme-light invert hue-rotate-180' : ''}`}
-    data-psp-app-shell
-  >
-    <header className="psp-app-shell__topbar" aria-label={labels.topbar}>
-      {topbar}
-    </header>
-    <main className="psp-app-shell__workspace" aria-label={labels.workspace}>
+}) => {
+  const prefersDark =
+    theme === 'system' &&
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const resolvedDark = theme === 'dark' || prefersDark;
+
+  return (
+    <div
+      className={`psp-app-shell ${resolvedDark ? 'theme-dark dark' : 'theme-light'}`}
+      data-psp-app-shell
+    >
+      <header className="psp-app-shell__topbar" aria-label={labels.topbar}>
+        {topbar}
+      </header>
       <nav className="psp-app-shell__navigation" aria-label={labels.navigation}>
         {navigation}
       </nav>
-      {workspace}
-    </main>
-    <div className="psp-app-shell__status" role="region" aria-label={labels.status}>
-      {statusBar}
+      <main className="psp-app-shell__workspace" aria-label={labels.workspace}>
+        {workspace}
+      </main>
+      <div className="psp-app-shell__status" role="region" aria-label={labels.status}>
+        {statusBar}
+      </div>
+      <div className="psp-app-shell__layers">{overlays}</div>
     </div>
-    <div className="psp-app-shell__layers">{overlays}</div>
-  </div>
-);
+  );
+};
+
