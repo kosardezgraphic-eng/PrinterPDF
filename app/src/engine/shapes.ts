@@ -168,6 +168,7 @@ export function shapeCommands(shape: PageOverlayShape, width: number, height: nu
     case 'star':
       return line(polygonPoints(clampSides(shape.sides, 5), halfW, halfH, shape.innerRadiusPercent ?? 45), true);
     case 'line':
+      if (shape.lineOrientation === 'vertical') return line([[0, -halfH], [0, halfH]], false);
       return line([[-halfW, 0], [halfW, 0]], false);
     case 'arrow': {
       // The head is built in physical units, so a long thin arrow does not grow a splayed tip.
@@ -274,6 +275,9 @@ export function normalizeShapeStyle(patch: Partial<PageOverlayShape>): Partial<P
   if (out.innerRadiusPercent !== undefined) out.innerRadiusPercent = numberWithin(out.innerRadiusPercent, 10, 95, 45);
   if (out.strokeStyle !== undefined && !SHAPE_STROKE_STYLES.includes(out.strokeStyle)) out.strokeStyle = 'solid';
   if (out.lineCap !== undefined && !SHAPE_LINE_CAPS.includes(out.lineCap)) out.lineCap = 'butt';
+  if (out.lineOrientation !== undefined && out.lineOrientation !== 'horizontal' && out.lineOrientation !== 'vertical') {
+    out.lineOrientation = 'horizontal';
+  }
   return out;
 }
 

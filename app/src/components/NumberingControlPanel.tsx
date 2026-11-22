@@ -110,9 +110,10 @@ export function NumberingControlPanel(){
      onChange={e=>patch({sequenceBasis:e.target.value as NonNullable<PageOverlayNumbering['sequenceBasis']>})}>
      <option value="page">{fa?'شماره صفحهٔ سند (مستقل از چیدمان)':'Document page number (independent of the layout)'}</option>
      <option value="grid">{fa?'ترتیب خانه‌ها روی شیت (جدول / بوکلت)':'Cell order on the printed sheet (grid / booklet)'}</option>
+     <option value="cut-stack">{fa?'دسته‌بندی عمقی (برش و چیدمان پشت سر هم)':'Cut & Stack (pile serial across sheets)'}</option>
      <option value="sheet">{fa?'شمارهٔ برگهٔ خروجی':'Output sheet number'}</option>
    </select></label>
-   {(item.sequenceBasis??'page')==='grid' && <label className="block">{fa?'جهت شمارش':'Counting direction'}<select data-numbering-direction aria-label={fa?'جهت شمارش':'Numbering direction'} className={input} value={item.sequenceDirection??'ltr'}
+   {((item.sequenceBasis??'page')==='grid' || item.sequenceBasis==='cut-stack') && <label className="block">{fa?'جهت شمارش':'Counting direction'}<select data-numbering-direction aria-label={fa?'جهت شمارش':'Numbering direction'} className={input} value={item.sequenceDirection??'ltr'}
      onChange={e=>patch({sequenceDirection:e.target.value as NonNullable<PageOverlayNumbering['sequenceDirection']>})}>
      <option value="ltr">{fa?'ردیف‌ها، از چپ به راست':'Rows, left to right'}</option>
      <option value="rtl">{fa?'ردیف‌ها، از راست به چپ':'Rows, right to left'}</option>

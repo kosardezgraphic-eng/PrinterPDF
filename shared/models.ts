@@ -672,6 +672,7 @@ export interface SettingsPreset {
   effects: EffectsSettings;
   watermark: WatermarkSettings;
   pageNumbering: PageNumberSettings;
+  numberingOverlays?: PageOverlayNumbering[];
 }
 
 /** The built-in "back to the shipped defaults" entry; applying it resets every section, sheet and app. */
@@ -709,7 +710,7 @@ export type NumberingNumberFormat = 'persian' | 'english' | 'roman' | 'abjad';
  * pages 8 and 1, and both numbers may be wanted at once, which is why this lives on the numbering overlay and
  * not on the document.
  */
-export type NumberingSequenceBasis = 'page' | 'grid' | 'sheet';
+export type NumberingSequenceBasis = 'page' | 'grid' | 'sheet' | 'cut-stack';
 /**
  * The direction of the grid walk, and only the grid walk: `ltr`/`rtl` read each printed row in writing order,
  * `ttb`/`btt` read each column top-to-bottom or bottom-to-top, and `zigzag` reverses every other row so the
@@ -717,7 +718,7 @@ export type NumberingSequenceBasis = 'page' | 'grid' | 'sheet';
  * numbered grid of tickets.
  */
 export type NumberingSequenceDirection = 'ltr' | 'rtl' | 'ttb' | 'btt' | 'zigzag';
-export const NUMBERING_SEQUENCE_BASES: NumberingSequenceBasis[] = ['page', 'grid', 'sheet'];
+export const NUMBERING_SEQUENCE_BASES: NumberingSequenceBasis[] = ['page', 'grid', 'sheet', 'cut-stack'];
 export const NUMBERING_SEQUENCE_DIRECTIONS: NumberingSequenceDirection[] = ['ltr', 'rtl', 'ttb', 'btt', 'zigzag'];
 
 export interface OverlayBase {
@@ -772,6 +773,8 @@ export interface PageOverlayShape extends OverlayBase {
   /** How deep a `star`'s waist sits, as a percent of its radius (10–95). */
   innerRadiusPercent?: number;
   lineCap?: ShapeLineCap;
+  /** Direction for `line` shapes; defaults to horizontal so vertical cut/perforation guides never need 90-degree rotation. */
+  lineOrientation?: 'horizontal' | 'vertical';
 }
 export interface PageOverlayNumbering extends OverlayBase {
   kind: 'numbering'; enabled: boolean; fontSize: number; fontFamily: string; color: string;
@@ -1069,6 +1072,13 @@ export function sanitizeSettingsPresetList(raw: unknown): SettingsPreset[] {
     // The profile's own id is the one thing that must not be spoofable: the built-in defaults entry is
     // synthesised by the store and would otherwise be replaceable by a file.
     if (source.id === SHEET_DEFAULT_PRESET_ID) continue;
+    const numberingOverlays = Array.isArray(source.numberingOverlays)
+      ? source.numberingOverlays
+          .filter((item): item is PageOverlayNumbering =>
+            Boolean(item && typeof item === 'object' && (item as { kind?: unknown }).kind === 'numbering')
+          )
+          .slice(0, 24)
+      : undefined;
     out.push({
       id: source.id,
       name: sanitizeDriverText(source.name).slice(0, 120) || source.name,
@@ -1081,6 +1091,7 @@ export function sanitizeSettingsPresetList(raw: unknown): SettingsPreset[] {
       effects: section<EffectsSettings>(source.effects),
       watermark: section<WatermarkSettings>(source.watermark),
       pageNumbering: section<PageNumberSettings>(source.pageNumbering),
+      ...(numberingOverlays ? { numberingOverlays } : {}),
     });
     if (out.length >= 100) break;                     // a preset list is a menu, not a database
   }

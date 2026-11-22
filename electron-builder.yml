@@ -14,6 +14,8 @@ extraResources:
     to: printer-service
     filter:
       - "**/*"
+  - from: scripts/install-virtual-printer.ps1
+    to: scripts/install-virtual-printer.ps1
 win:
   signAndEditExecutable: false
   target:
@@ -34,10 +36,12 @@ win:
 nsis:
   oneClick: false
   perMachine: false
+  allowElevation: true
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: PrintStudio Pro
+  include: build/installer.nsh
 portable:
   artifactName: "${productName}-${version}-Portable-${arch}.exe"
 publish:

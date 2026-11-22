@@ -31,6 +31,8 @@ export const IPC_CHANNELS = {
   FILE_READ_LOCAL: 'file:read-local',
   /** Main → renderer notification for files passed on the command line by a second instance. */
   CLI_OPEN_FILES: 'cli:open-files',
+  /** Reads an image directly from the OS clipboard (native desktop paste button). */
+  CLIPBOARD_READ_IMAGE: 'clipboard:read-image',
 
   // Printer Service Sidecar (Win32 Spooler / System.Printing via Named Pipe JSON-RPC)
   PRINTER_LIST: 'printer:list',
@@ -97,12 +99,21 @@ export interface LocalFilePayload {
   bytes: Uint8Array;
 }
 
+/** An image read directly from the OS clipboard in the Electron main process. */
+export interface ClipboardImagePayload {
+  name: string;
+  mimeType: string;
+  bytes: Uint8Array;
+}
+
 export interface PrintStudioElectronAPI {
   isElectron: boolean;
   /** Reads a file the OS referred to by path (command line, "Open with…"). */
   readLocalFile(path: string): Promise<LocalFilePayload>;
   /** Subscribes to files passed to a second instance of the app; returns an unsubscribe. */
   onCliOpenFiles(callback: (paths: string[]) => void): () => void;
+  /** Reads an image from the OS clipboard, or returns `null` when empty. */
+  readClipboardImage?: () => Promise<ClipboardImagePayload | null>;
   listPrinters(): Promise<PrinterInfo[]>;
   /** `null` when the sidecar is running; otherwise the reason an operator has to fix. */
   getPrinterStatusNote(): Promise<string | null>;

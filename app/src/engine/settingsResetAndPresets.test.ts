@@ -78,6 +78,8 @@ beforeEach(() => {
     documents: [doc('mine')],
     pages: [page('mine-p1', { isHighlighted: true })],
     bookmarks: [], overlays: [], toasts: [],
+    printers: [],
+    selectedPrinterName: '',
     layout: { ...DEFAULT_LAYOUT },
     effects: { ...DEFAULT_EFFECTS },
     watermark: getDefaultWatermarkSettings(),
@@ -89,45 +91,120 @@ beforeEach(() => {
   });
 });
 
-describe('resetting every setting to its default', () => {
-  it('puts each adjustable section back and leaves the desk alone', () => {
+const makePrinter = () => ({
+  name: 'OfficeLaser',
+  driverName: 'PCL6 Driver',
+  portName: 'USB001',
+  isDefault: true,
+  isNetwork: false,
+  isVirtual: false,
+  status: 'Ready' as const,
+  jobsInQueue: 0,
+  capabilities: {
+    supportedPapers: ['A4', 'A3'] as Array<'A4' | 'A3'>,
+    supportedTrays: ['Auto'],
+    supportedMediaTypes: ['Plain'],
+    supportsDuplex: true,
+    supportsColor: true,
+    supportedDpi: [300, 600],
+    maxCopies: 99,
+  },
+  activeProfile: {
+    printerName: 'OfficeLaser',
+    paperSize: 'A3' as const,
+    tray: 'Auto',
+    mediaType: 'Plain',
+    orientation: 'landscape' as const,
+    duplexMode: 'short-edge' as const,
+    dpi: 600,
+    colorMode: 'color' as const,
+    quality: 'normal' as const,
+  },
+});
+
+describe('resetting every sheet and design setting to its default', () => {
+  it('puts each sheet, overlay, shape, effect, numbering, orientation, and printer-synced section back while preserving app settings and files', () => {
+    useAppStore.setState({
+      printers: [makePrinter()],
+      selectedPrinterName: 'OfficeLaser',
+    });
     const state = useAppStore.getState();
-    state.updateLayout({ rows: 2, cols: 2, paperSize: 'A3', duplexMode: 'short-edge' });
-    state.updateEffects({ invert: true, grayscale: true });
+    state.updateLayout({
+      rows: 2,
+      cols: 2,
+      paperSize: 'A3',
+      orientation: 'landscape',
+      duplexMode: 'short-edge',
+      marginMode: 'custom',
+      marginsMm: { top: 18, right: 16, bottom: 18, left: 16 },
+      horizontalGutterMm: 9,
+      verticalGutterMm: 7,
+      scaleMode: 'custom',
+      customScalePercent: 85,
+    });
+    state.updateEffects({ invert: true, grayscale: true, brightness: 15 });
+    state.rotatePages(['mine-p1'], 90);
     state.updateWatermark({ enabled: true, text: 'DRAFT' });
     state.updatePageNumbering({ enabled: true, position: 'bottom-right' });
-    state.updateSettings({ unit: 'inch', previewFidelity: 'fast', bwPageTariffRials: 999 });
+    state.addShapeOverlay('rectangle');
+    state.addNumberingOverlay(true);
+    state.updateSettings({ unit: 'inch', previewFidelity: 'fast', bwPageTariffRials: 999, theme: 'light' });
 
     useAppStore.getState().resetAllSettings();
     const after = useAppStore.getState();
 
-    expect(after.layout).toMatchObject({ rows: DEFAULT_LAYOUT.rows, cols: DEFAULT_LAYOUT.cols, paperSize: DEFAULT_LAYOUT.paperSize, duplexMode: DEFAULT_LAYOUT.duplexMode });
+    expect(after.layout).toMatchObject({
+      rows: DEFAULT_LAYOUT.rows,
+      cols: DEFAULT_LAYOUT.cols,
+      paperSize: DEFAULT_LAYOUT.paperSize,
+      orientation: DEFAULT_LAYOUT.orientation,
+      duplexMode: DEFAULT_LAYOUT.duplexMode,
+      marginMode: DEFAULT_LAYOUT.marginMode,
+      marginsMm: DEFAULT_LAYOUT.marginsMm,
+      horizontalGutterMm: DEFAULT_LAYOUT.horizontalGutterMm,
+      verticalGutterMm: DEFAULT_LAYOUT.verticalGutterMm,
+      scaleMode: DEFAULT_LAYOUT.scaleMode,
+      customScalePercent: DEFAULT_LAYOUT.customScalePercent,
+    });
     expect(after.effects).toEqual(DEFAULT_EFFECTS);
     expect(after.watermark).toEqual(getDefaultWatermarkSettings());
     expect(after.pageNumbering).toEqual(getDefaultPageNumberSettings());
-    expect(after.settings).toEqual({ ...DEFAULT_SETTINGS });
+    expect(after.overlays).toEqual([]);
+    expect(after.selectedOverlayId).toBeNull();
+    expect(after.pages[0].overrides).toBeUndefined();
+    expect(after.pages[0].rotation).toBe(0);
+    expect(after.printers[0].activeProfile.orientation).toBe(DEFAULT_LAYOUT.orientation);
+    expect(after.printers[0].activeProfile.duplexMode).toBe(DEFAULT_LAYOUT.duplexMode);
+    // Application environment preferences must stay untouched.
+    expect(after.settings).toMatchObject({
+      unit: 'inch',
+      previewFidelity: 'fast',
+      bwPageTariffRials: 999,
+      theme: 'light',
+    });
     // The files are what the operator is paid to handle: a settings reset must never touch them.
     expect(after.documents.map(item => item.id)).toEqual(['mine']);
     expect(after.pages.map(item => item.id)).toEqual(['mine-p1']);
   });
 
-  it('keeps the interface language, so the UI does not change under the operator', () => {
-    useAppStore.getState().updateSettings({ language: 'en', unit: 'cm' });
+  it('keeps the interface language and environment preferences untouched', () => {
+    useAppStore.getState().updateSettings({ language: 'en', unit: 'cm', bwPageTariffRials: 77777 });
 
     useAppStore.getState().resetAllSettings();
 
     expect(useAppStore.getState().settings.language).toBe('en');
-    expect(useAppStore.getState().settings.unit).toBe(DEFAULT_SETTINGS.unit);
+    expect(useAppStore.getState().settings.unit).toBe('cm');
+    expect(useAppStore.getState().settings.bwPageTariffRials).toBe(77777);
   });
 
-  it('writes the defaults through the same bridge the settings panel uses', () => {
+  it('does not overwrite saved application environment settings on sheet reset', () => {
     useAppStore.getState().updateSettings({ unit: 'cm' });
     saveSettings.mockClear();
 
     useAppStore.getState().resetAllSettings();
 
-    expect(saveSettings).toHaveBeenCalledTimes(1);
-    expect(saveSettings.mock.calls[0][0]).toMatchObject({ unit: DEFAULT_SETTINGS.unit, previewFidelity: DEFAULT_SETTINGS.previewFidelity });
+    expect(saveSettings).not.toHaveBeenCalled();
+    expect(useAppStore.getState().settings.unit).toBe('cm');
   });
 
   it('brings the layout back with undo, because the sheet sections are part of the history', () => {
@@ -249,14 +326,73 @@ describe('saved sheet profiles', () => {
     expect(useAppStore.getState().toasts.at(-1)?.type).toBe('warning');
   });
 
-  it('applies the defaults entry as the reset it is, from either door', () => {
-    useAppStore.getState().updateLayout({ rows: 4, cols: 4 });
+  it('applies the defaults entry as a sheet reset while preserving app environment preferences', () => {
+    useAppStore.getState().updateLayout({ rows: 4, cols: 4, orientation: 'landscape', duplexMode: 'short-edge' });
     useAppStore.getState().updateSettings({ unit: 'cm' });
 
     useAppStore.getState().applySettingsPreset(SHEET_DEFAULT_PRESET_ID);
 
     expect(useAppStore.getState().layout).toEqual(DEFAULT_LAYOUT);
-    expect(useAppStore.getState().settings.unit).toBe(DEFAULT_SETTINGS.unit);   // the reset resets everything
+    expect(useAppStore.getState().settings.unit).toBe('cm');
+  });
+
+  it('saves and restores effects, margins, gutters, custom layout, page & section numbering, orientation, and duplex with printer sync', () => {
+    useAppStore.setState({
+      printers: [makePrinter()],
+      selectedPrinterName: 'OfficeLaser',
+    });
+
+    const store = useAppStore.getState();
+    store.updateEffects({ invert: true, grayscale: true, contrast: 20, scope: 'all' });
+    store.updateLayout({
+      paperSize: 'A3',
+      orientation: 'landscape',
+      duplexMode: 'short-edge',
+      marginMode: 'custom',
+      marginsMm: { top: 15, right: 12, bottom: 14, left: 10 },
+      horizontalGutterMm: 8,
+      verticalGutterMm: 6,
+      rows: 2,
+      cols: 3,
+      scaleMode: 'custom',
+      customScalePercent: 92,
+    });
+    store.updatePageNumbering({ enabled: true, format: 'english', position: 'bottom-center', startNumber: 5 });
+    store.addNumberingOverlay(false);
+    const createdOverlay = useAppStore.getState().overlays.find((o) => o.kind === 'numbering');
+    expect(createdOverlay).toBeDefined();
+    store.updateOverlay(createdOverlay!.id, { sequenceBasis: 'grid' });
+
+    const presetId = useAppStore.getState().saveSettingsPreset('Full Sheet Profile') as string;
+    expect(presetId).toBeTruthy();
+
+    useAppStore.getState().resetAllSettings();
+    expect(useAppStore.getState().overlays).toEqual([]);
+    expect(useAppStore.getState().layout.orientation).toBe(DEFAULT_LAYOUT.orientation);
+    expect(useAppStore.getState().layout.duplexMode).toBe(DEFAULT_LAYOUT.duplexMode);
+
+    // Keep an existing shape overlay to verify numbering overlays restore cleanly alongside non-numbering overlays.
+    useAppStore.getState().addShapeOverlay('circle');
+    useAppStore.getState().applySettingsPreset(presetId);
+
+    const restored = useAppStore.getState();
+    expect(restored.effects).toMatchObject({ invert: true, grayscale: true, contrast: 20 });
+    expect(restored.layout.marginMode).toBe('custom');
+    expect(restored.layout.marginsMm).toEqual({ top: 15, right: 12, bottom: 14, left: 10 });
+    expect(restored.layout.horizontalGutterMm).toBe(8);
+    expect(restored.layout.verticalGutterMm).toBe(6);
+    expect(restored.layout.rows).toBe(2);
+    expect(restored.layout.cols).toBe(3);
+    expect(restored.layout.scaleMode).toBe('custom');
+    expect(restored.layout.customScalePercent).toBe(92);
+    expect(restored.layout.orientation).toBe('landscape');
+    expect(restored.layout.duplexMode).toBe('short-edge');
+    expect(restored.pageNumbering).toMatchObject({ enabled: true, format: 'english', startNumber: 5 });
+    expect(restored.overlays.some((o) => o.kind === 'numbering' && o.sequenceBasis === 'grid')).toBe(true);
+    expect(restored.overlays.some((o) => o.kind === 'shape')).toBe(true);
+    expect(restored.printers[0].activeProfile.orientation).toBe('landscape');
+    expect(restored.printers[0].activeProfile.duplexMode).toBe('short-edge');
+    expect(restored.printers[0].activeProfile.paperSize).toBe('A3');
   });
 
   it('renames a profile, and refuses a name another profile already has', () => {
@@ -388,10 +524,11 @@ describe('the preview pipeline following the settings', () => {
     expect(crispPreviewStats().cached).toBe(0);      // nothing was cached in a run without a worker
   });
 
-  it('gives the settings back to the pipeline when a reset turns crisp mode on again', () => {
+  it('leaves the operator previewFidelity preference intact across sheet resets', () => {
     useAppStore.getState().updateSettings({ previewFidelity: 'fast' });
     useAppStore.getState().resetAllSettings();
-    expect(crispPreviewStats().enabled).toBe(DEFAULT_SETTINGS.previewFidelity === 'crisp');
+    expect(crispPreviewStats().enabled).toBe(false);
+    expect(useAppStore.getState().settings.previewFidelity).toBe('fast');
   });
 });
 

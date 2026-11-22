@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PageItem, SourceDocument } from '@shared/models';
 import { TopToolRibbon } from '../components/TopToolRibbon';
+import { QuickBar } from '../components/QuickBar';
 import { ToolPanel } from '../components/ToolPanel';
 import { ModalsAndToasts } from '../components/Modals';
 import { DEFAULT_EFFECTS, DEFAULT_LAYOUT, DEFAULT_SETTINGS, useAppStore } from '../store/useAppStore';
@@ -126,6 +127,35 @@ describe('TopToolRibbon & ToolPanel routing', () => {
     expect(container.querySelector('[data-ribbon-quick="save-project"]')).not.toBeNull();
     expect(container.querySelector('[data-ribbon-quick="diagnostics"]')).not.toBeNull();
 
+    // All 11 moved utility/module buttons live in the start cluster (next to/below document controls)
+    const startCluster = container.querySelector('[data-top-tool-ribbon-start]')!;
+    const centerCluster = container.querySelector('[data-top-tool-ribbon-tools]')!;
+    for (const sel of [
+      '[data-ribbon-tool="pdf"]',
+      '[data-ribbon-tool="batch"]',
+      '[data-ribbon-tool="printers"]',
+      '[data-ribbon-tool="view"]',
+      '[data-ribbon-quick="save-project"]',
+      '[data-ribbon-quick="diagnostics"]',
+      '[data-ribbon-tool="loupe"]',
+      '[data-ribbon-tool="light-table"]',
+      '[data-ribbon-tool="preflight"]',
+      '[data-ribbon-tool="fit-page"]',
+      '[data-ribbon-tool="page-setup"]',
+    ]) {
+      expect(startCluster.querySelector(sel)).not.toBeNull();
+      expect(centerCluster.querySelector(sel)).toBeNull();
+    }
+
+    act(() => root.unmount());
+  });
+
+  it('removes the redundant Merge button from QuickBar', () => {
+    const root = createRoot(container);
+    act(() => {
+      root.render(React.createElement(QuickBar));
+    });
+    expect(container.querySelector('[data-quick-merge]')).toBeNull();
     act(() => root.unmount());
   });
 

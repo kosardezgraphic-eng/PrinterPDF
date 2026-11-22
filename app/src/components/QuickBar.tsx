@@ -19,7 +19,6 @@ import {
   Zap,
   Layers,
   X,
-  GitMerge,
   FileText,
   RectangleVertical,
   BookOpen,
@@ -46,6 +45,7 @@ export const QuickBar: React.FC = () => {
     settings,
     printers,
     selectedPrinterName,
+    quickPrintCopies,
     batchQueue,
     canUndo,
     canRedo,
@@ -60,6 +60,7 @@ export const QuickBar: React.FC = () => {
     updatePrinterProfile,
     updateLayout,
     openPrinterPreferences,
+    setQuickPrintCopies,
     silentPrintNow,
     exportMergedOrImposedPdf,
     savePspProject,
@@ -71,13 +72,19 @@ export const QuickBar: React.FC = () => {
   const pspInputRef = useRef<HTMLInputElement>(null);
   const hardwarePopoverRef = useRef<HTMLDivElement>(null);
   const [showHardwarePopover, setShowHardwarePopover] = useState(false);
+  const [copiesDraft, setCopiesDraft] = useState(() => String(quickPrintCopies ?? 1));
 
   const lang = settings.language;
   const isFa = lang === 'fa';
   const tr = t(lang);
 
   const currentPrinter = printers.find((p) => p.name === selectedPrinterName);
+  const maxCopies = currentPrinter?.capabilities.maxCopies ?? 999;
   const sheetDims = getSheetDimensionsMm(layout);
+
+  useEffect(() => {
+    setCopiesDraft(String(quickPrintCopies));
+  }, [quickPrintCopies]);
 
   useEffect(() => {
     const onOpenPsp = () => {
@@ -310,6 +317,75 @@ export const QuickBar: React.FC = () => {
           <Zap className="h-3.5 w-3.5 text-amber-500 shrink-0" aria-hidden="true" />
           <span>{isFa ? 'Quick Print' : 'Quick Print'}</span>
         </button>
+
+        {/* Quick Print Copies */}
+        <div
+          data-quick-copies-wrap
+          title={isFa ? 'تعداد کپی برای چاپ سریع (Copies)' : 'Number of copies for Quick Print'}
+          className={chipSelectWrapClass}
+        >
+          <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">
+            {isFa ? 'Copies' : 'Copies'}
+          </span>
+          <button
+            type="button"
+            data-quick-copies-dec
+            aria-label={isFa ? 'کاهش تعداد کپی' : 'Decrease copies'}
+            disabled={quickPrintCopies <= 1}
+            onClick={() => setQuickPrintCopies(quickPrintCopies - 1)}
+            className="flex h-5 w-4 items-center justify-center rounded text-slate-600 hover:bg-slate-200 disabled:opacity-35 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer disabled:cursor-not-allowed"
+          >
+            -
+          </button>
+          <input
+            type="number"
+            data-quick-copies-input
+            aria-label={isFa ? 'تعداد کپی چاپ سریع' : 'Quick Print Copies'}
+            min={1}
+            max={maxCopies}
+            value={copiesDraft}
+            onChange={(e) => {
+              const raw = e.target.value;
+              setCopiesDraft(raw);
+              const parsed = Number.parseInt(raw, 10);
+              if (Number.isFinite(parsed) && parsed >= 1) {
+                setQuickPrintCopies(parsed);
+              }
+            }}
+            onBlur={() => {
+              const parsed = Number.parseInt(copiesDraft, 10);
+              const clamped = Math.max(
+                1,
+                Math.min(maxCopies, Number.isFinite(parsed) ? parsed : 1)
+              );
+              setQuickPrintCopies(clamped);
+              setCopiesDraft(String(clamped));
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const parsed = Number.parseInt(copiesDraft, 10);
+                const clamped = Math.max(
+                  1,
+                  Math.min(maxCopies, Number.isFinite(parsed) ? parsed : 1)
+                );
+                setQuickPrintCopies(clamped);
+                setCopiesDraft(String(clamped));
+                e.currentTarget.blur();
+              }
+            }}
+            className="w-10 rounded border border-slate-200 bg-white px-1 py-0 text-center text-[11px] font-bold tabular-nums text-slate-900 focus:border-sky-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+          />
+          <button
+            type="button"
+            data-quick-copies-inc
+            aria-label={isFa ? 'افزایش تعداد کپی' : 'Increase copies'}
+            disabled={quickPrintCopies >= maxCopies}
+            onClick={() => setQuickPrintCopies(quickPrintCopies + 1)}
+            className="flex h-5 w-4 items-center justify-center rounded text-slate-600 hover:bg-slate-200 disabled:opacity-35 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer disabled:cursor-not-allowed"
+          >
+            +
+          </button>
+        </div>
 
         {/* PrintNow (Full Print Modal) */}
         <button
@@ -830,20 +906,6 @@ export const QuickBar: React.FC = () => {
           className={iconBtnClass}
         >
           <CircleDollarSign className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
-        </button>
-
-        {/* Merge trigger */}
-        <button
-          data-quick-merge
-          type="button"
-          disabled={isExportingPdf}
-          onClick={() => void exportMergedOrImposedPdf(false)}
-          title={tr.quickBar.merge}
-          aria-label={tr.quickBar.merge}
-          className="flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 text-[11px] font-medium text-slate-700 hover:border-slate-300 hover:bg-white disabled:opacity-45 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-700 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
-        >
-          <GitMerge className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400 shrink-0" aria-hidden="true" />
-          <span className="hidden xl:inline">{tr.quickBar.merge}</span>
         </button>
           </>
         )}

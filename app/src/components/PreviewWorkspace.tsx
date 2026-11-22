@@ -18,6 +18,7 @@ import {
   SlidersHorizontal,
   Zap,
   Boxes,
+  ClipboardPaste,
 } from 'lucide-react';
 import { useAppStore, type CanvasTool, type PageEditScope } from '../store/useAppStore';
 import { VirtualPrinterCard } from './VirtualPrinterCard';
@@ -103,6 +104,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     focusPageFromPreview,
     setZoomPercent,
     importFiles,
+    importFromClipboard,
     addImageOverlayFiles,
     applyPageGeometry,
     applyAspectRatioCrop,
@@ -1499,6 +1501,15 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 >
                   <UploadCloud className="h-4 w-4" />
                   <span>{tr.preview.browseFiles}</span>
+                </button>
+                <button
+                  type="button"
+                  data-empty-paste-clipboard
+                  onClick={() => void importFromClipboard({ target: 'document' })}
+                  className="flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-50 px-5 py-2.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-300 dark:hover:bg-emerald-500/25 cursor-pointer"
+                >
+                  <ClipboardPaste className="h-4 w-4" />
+                  <span>{tr.preview.pasteClipboard}</span>
                 </button>
               </div>
             </div>

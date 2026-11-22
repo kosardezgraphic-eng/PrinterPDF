@@ -33,6 +33,7 @@ import {
   SquareDashedMousePointer,
   Pipette,
   Boxes,
+  ClipboardPaste,
 } from 'lucide-react';
 import { MatrixSizeFields } from './MatrixSizeFields';
 import { AutoPackPanel } from './AutoPackPanel';
@@ -90,6 +91,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
     setActiveRibbonTab,
     setRibbonCollapsed,
     importFiles,
+    importFromClipboard,
     clearWorkspace,
     updateLayout,
     setNUpMatrix,
@@ -268,6 +270,18 @@ export const Ribbon: React.FC<RibbonProps> = ({
                   <FilePlus2 className="h-5 w-5" />
                   <span className="sr-only">
                     {lang === 'fa' ? 'افزودن فایل PDF / عکس' : 'Add PDF / Images'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  data-ribbon-action="paste-clipboard-file"
+                  onClick={() => void importFromClipboard({ target: 'document' })}
+                  title={lang === 'fa' ? 'چسباندن تصویر از کلیپ‌بورد (Ctrl+V)' : 'Paste Image from Clipboard (Ctrl+V)'}
+                  className="flex flex-col items-center gap-1 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-600/15 dark:text-emerald-300 dark:hover:bg-emerald-600/25 cursor-pointer"
+                >
+                  <ClipboardPaste className="h-5 w-5" />
+                  <span className="sr-only">
+                    {lang === 'fa' ? 'چسباندن تصویر از کلیپ‌بورد' : 'Paste Image from Clipboard'}
                   </span>
                 </button>
                 <button
@@ -822,8 +836,19 @@ export const Ribbon: React.FC<RibbonProps> = ({
                 {lang === 'fa' ? 'بوکلت' : 'Booklet'}
               </button>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button type="button" disabled={!pages.length} onClick={()=>imageInputRef.current?.click()} aria-label={lang==='fa'?'افزودن تصویر روی صفحه':'Add picture on the page'} className="rounded-lg border border-sky-500 bg-sky-600 px-3 py-2 font-semibold text-white hover:bg-sky-500 disabled:opacity-40 cursor-pointer">{lang==='fa'?'افزودن تصویر':'Add picture'}</button>
+                <button
+                  type="button"
+                  data-ribbon-action="paste-clipboard-overlay"
+                  disabled={!pages.length}
+                  onClick={() => void importFromClipboard({ target: 'overlay' })}
+                  title={lang === 'fa' ? 'درج تصویر از کلیپ‌بورد روی صفحه فعلی' : 'Paste clipboard image onto current sheet'}
+                  className="flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-50 px-3 py-2 font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-40 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-300 dark:hover:bg-emerald-500/25 cursor-pointer"
+                >
+                  <ClipboardPaste className="h-4 w-4" aria-hidden="true" />
+                  <span>{lang === 'fa' ? 'چسباندن تصویر از کلیپ‌بورد' : 'Paste picture'}</span>
+                </button>
                 <input ref={imageInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e=>{const files=e.target.files?Array.from(e.target.files):[];if(files.length)void addImageOverlayFiles(files);e.target.value='';}}/>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">{lang==='fa'?'یا فایل تصویر را مستقیم روی برگه در پیش‌نمایش رها کنید.' : 'Or drop an image file straight onto a sheet in the preview.'}</span>
               </div>

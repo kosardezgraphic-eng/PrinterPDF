@@ -32,7 +32,7 @@ export const DEFAULT_PRESET_ROW: SheetPresetRow = {
 
 /** Persian/English labels for the built-in row, which the store does not name. */
 export function defaultPresetLabel(isFa: boolean): string {
-  return isFa ? 'پیش‌فرض خود برنامه (بازنشانی همه‌چیز)' : 'Shipped defaults (reset everything)';
+  return isFa ? 'پیش‌فرض خود برنامه (بازنشانی تنظیمات صفحه)' : 'Shipped defaults (reset sheet settings)';
 }
 
 function describeDuplex(mode: string, isFa: boolean): string {
@@ -43,23 +43,32 @@ function describeDuplex(mode: string, isFa: boolean): string {
 }
 
 /**
- * What a profile actually carries, in one line. Kept to the settings an operator decides by eye — paper,
- * the n-up matrix, duplex, and whether watermark / numbering / invert are on — because "Profile 3" tells
- * you nothing at the moment you are choosing between two of them.
+ * What a profile actually carries, in one line: paper, orientation, the n-up matrix, duplex,
+ * margins/gutters, and whether watermark / page & section numbering / effects are active.
  */
 export function presetSummary(preset: SettingsPreset, isFa: boolean): string {
   const layout = preset.layout ?? ({} as SettingsPreset['layout']);
   const parts: string[] = [];
   if (layout.paperSize) parts.push(String(layout.paperSize));
+  if (layout.orientation) {
+    parts.push(
+      layout.orientation === 'landscape'
+        ? (isFa ? 'افقی' : 'landscape')
+        : (isFa ? 'عمودی' : 'portrait')
+    );
+  }
   if (layout.rows && layout.cols) parts.push(`${layout.rows}\u00d7${layout.cols}`);
   if (layout.duplexMode) parts.push(describeDuplex(String(layout.duplexMode), isFa));
+  const hasNumbering =
+    Boolean(preset.pageNumbering?.enabled) ||
+    Boolean(preset.numberingOverlays?.some((n) => n.enabled));
   const flags = [
     preset.watermark?.enabled ? (isFa ? 'واترمارک' : 'watermark') : '',
-    preset.pageNumbering?.enabled ? (isFa ? 'شماره‌گذاری' : 'numbering') : '',
+    hasNumbering ? (isFa ? 'شماره‌گذاری' : 'numbering') : '',
     preset.effects?.invert ? (isFa ? 'معکوس' : 'invert') : '',
     preset.effects?.grayscale || preset.effects?.blackAndWhite ? (isFa ? 'سیاه‌وسفید' : 'b&w') : '',
   ].filter(Boolean);
-  if (flags.length) parts.push(flags.join(isFa ? ' + ' : ' + '));
+  if (flags.length) parts.push(flags.join(' + '));
   return parts.join(' · ');
 }
 

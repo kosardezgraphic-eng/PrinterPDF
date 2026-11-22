@@ -104,6 +104,8 @@ const api: PrintStudioElectronAPI = {
 
   readLocalFile: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.FILE_READ_LOCAL, path),
 
+  readClipboardImage: () => ipcRenderer.invoke(IPC_CHANNELS.CLIPBOARD_READ_IMAGE),
+
   onCliOpenFiles: (callback: (paths: string[]) => void) => {
     const listener = (_event: unknown, paths: string[]) => callback(Array.isArray(paths) ? paths : []);
     ipcRenderer.on(IPC_CHANNELS.CLI_OPEN_FILES, listener);

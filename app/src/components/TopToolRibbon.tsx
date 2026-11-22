@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   BookOpen,
   ChevronDown,
+  ClipboardPaste,
   Columns2,
   CopyPlus,
   Crop,
@@ -70,6 +71,7 @@ export const TopToolRibbon: React.FC = () => {
     isGeneratingPdfPreview,
     resetAllSettings,
     importFiles,
+    importFromClipboard,
     addImageOverlayFiles,
     clearWorkspace,
     insertBlankPagesAfter,
@@ -225,7 +227,7 @@ export const TopToolRibbon: React.FC = () => {
   return (
     <div
       data-top-tool-ribbon
-      className="flex w-full flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-2.5 py-1.5 text-slate-900 shadow-xs dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
+      className="flex w-full flex-wrap items-center justify-between gap-1.5 border-b border-slate-200 bg-white px-2 py-1.5 text-slate-900 shadow-xs dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
     >
       {/* Hidden file inputs for Add Docs and Insert Image Overlay */}
       <input
@@ -255,8 +257,8 @@ export const TopToolRibbon: React.FC = () => {
         }}
       />
 
-      {/* CLUSTER 1 (Start): Reset, SaveSheetProfile, & Document Quick Controls */}
-      <div className="flex items-center gap-1.5 shrink-0">
+      {/* CLUSTER 1 (Start): Reset, SaveSheetProfile, Document Controls & Utility Modules */}
+      <div data-top-tool-ribbon-start className="flex items-center gap-1.5 shrink-0">
         <Tooltip
           label={isFa ? 'بازگردانی تمام تنظیمات به پیش‌فرض' : 'Reset all sheet settings to defaults'}
           shortcut="Alt+F6"
@@ -266,7 +268,7 @@ export const TopToolRibbon: React.FC = () => {
             type="button"
             data-ribbon-action="reset"
             onClick={() => resetAllSettings()}
-            className="flex h-16 min-w-14 flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 text-slate-700 hover:border-slate-300 hover:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+            className="flex h-16 min-w-[50px] flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-1.5 text-slate-700 hover:border-slate-300 hover:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
           >
             <RotateCw className="h-6 w-6 text-slate-800 dark:text-slate-100" aria-hidden="true" />
             <span className="text-[10px] font-semibold whitespace-nowrap">{labels.reset}</span>
@@ -277,7 +279,7 @@ export const TopToolRibbon: React.FC = () => {
 
         <div className="h-12 w-px bg-slate-200 dark:bg-slate-700 mx-0.5" aria-hidden="true" />
 
-        {/* Document quick controls: 2 compact rows */}
+        {/* Document quick controls + utility modules: 2 compact balanced rows */}
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-1">
             <Tooltip label={labels.add} shortcut="Ctrl+O" side="bottom">
@@ -290,6 +292,19 @@ export const TopToolRibbon: React.FC = () => {
                 className={iconTileClass(false)}
               >
                 <PlusCircle className="h-4 w-4 text-sky-600 dark:text-sky-400" aria-hidden="true" />
+              </button>
+            </Tooltip>
+
+            <Tooltip label={labels.pasteClipboard} shortcut="Ctrl+V" side="bottom">
+              <button
+                type="button"
+                data-ribbon-action="paste-clipboard"
+                aria-label={labels.pasteClipboard}
+                title={`${labels.pasteClipboard} (Ctrl+V)`}
+                onClick={() => void importFromClipboard({ target: 'document' })}
+                className={iconTileClass(false)}
+              >
+                <ClipboardPaste className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
               </button>
             </Tooltip>
 
@@ -391,6 +406,52 @@ export const TopToolRibbon: React.FC = () => {
                 </div>
               )}
             </div>
+
+            <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 mx-0.5" aria-hidden="true" />
+
+            <Tooltip label={labels.pdfTools} side="bottom">
+              <button
+                type="button"
+                data-ribbon-tool="pdf"
+                aria-label={labels.pdfTools}
+                aria-pressed={isToolActive('pdf')}
+                onClick={() => selectTool('pdf')}
+                className={iconTileClass(isToolActive('pdf'))}
+              >
+                <FileStack className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </Tooltip>
+
+            <Tooltip label={labels.batch} side="bottom">
+              <button
+                type="button"
+                data-ribbon-tool="batch"
+                aria-label={labels.batch}
+                aria-pressed={isToolActive('batch')}
+                onClick={() => selectTool('batch')}
+                className={iconTileClass(isToolActive('batch'))}
+              >
+                <Layers className="h-4 w-4" aria-hidden="true" />
+                {batchQueue.length > 0 && (
+                  <span className="pointer-events-none absolute -top-1 -end-1 min-w-4 rounded-full bg-sky-600 px-1 text-center text-[9px] font-bold leading-3.5 text-white tabular-nums">
+                    {batchQueue.length}
+                  </span>
+                )}
+              </button>
+            </Tooltip>
+
+            <Tooltip label={labels.printers} side="bottom">
+              <button
+                type="button"
+                data-ribbon-tool="printers"
+                aria-label={labels.printers}
+                aria-pressed={isToolActive('printers')}
+                onClick={() => selectTool('printers')}
+                className={iconTileClass(isToolActive('printers'))}
+              >
+                <Printer className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </Tooltip>
           </div>
 
           <div className="flex items-center gap-1">
@@ -400,7 +461,7 @@ export const TopToolRibbon: React.FC = () => {
                 data-ribbon-action="close-all"
                 aria-label={labels.closeAll}
                 title={`${labels.closeAll} (Ctrl+W)`}
-                disabled={documents.length === 0 && pages.length === 0}
+                disabled={documents.length === 0 && pages.length === 0 && overlays.length === 0}
                 onClick={() => clearWorkspace()}
                 className={`${iconTileClass(false)} disabled:opacity-45`}
               >
@@ -419,6 +480,115 @@ export const TopToolRibbon: React.FC = () => {
                 className={`${iconTileClass(false)} disabled:opacity-45`}
               >
                 <Trash2 className="h-4 w-4 text-rose-600 dark:text-rose-400" aria-hidden="true" />
+              </button>
+            </Tooltip>
+
+            <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 mx-0.5" aria-hidden="true" />
+
+            <Tooltip label={labels.view} side="bottom">
+              <button
+                type="button"
+                data-ribbon-tool="view"
+                aria-label={labels.view}
+                aria-pressed={isToolActive('view')}
+                onClick={() => selectTool('view')}
+                className={iconTileClass(isToolActive('view'))}
+              >
+                <Eye className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </Tooltip>
+
+            <Tooltip label={isFa ? 'ذخیره پروژه' : 'Save project'} shortcut="Ctrl+Shift+S" side="bottom">
+              <button
+                type="button"
+                data-ribbon-quick="save-project"
+                aria-label={isFa ? 'ذخیره پروژه (.psp)' : 'Save project (.psp)'}
+                title={isFa ? 'ذخیره پروژه (.psp) — Ctrl+Shift+S' : 'Save project (.psp) — Ctrl+Shift+S'}
+                onClick={() => savePspProject()}
+                className={iconTileClass(false)}
+              >
+                <Save className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+              </button>
+            </Tooltip>
+
+            <Tooltip label={isFa ? 'تشخیص و خطاها' : 'Diagnostics'} side="bottom">
+              <button
+                type="button"
+                data-ribbon-quick="diagnostics"
+                aria-label={isFa ? 'پنل وضعیت و خطاها' : 'Status and diagnostics'}
+                onClick={() => setActiveInspectorTool('printers')}
+                className={iconTileClass(isToolActive('printers'))}
+              >
+                <AlertTriangle className="h-4 w-4 text-amber-500 dark:text-amber-400" aria-hidden="true" />
+              </button>
+            </Tooltip>
+
+            <Tooltip label={labels.loupe} side="bottom">
+              <button
+                type="button"
+                data-ribbon-tool="loupe"
+                aria-label={labels.loupe}
+                aria-pressed={loupeEnabled}
+                onClick={() => setLoupeEnabled(!loupeEnabled)}
+                className={iconTileClass(loupeEnabled)}
+              >
+                <Search className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </Tooltip>
+
+            <Tooltip label={labels.lightTable} side="bottom">
+              <button
+                type="button"
+                data-ribbon-tool="light-table"
+                aria-label={labels.lightTable}
+                aria-pressed={transparentMode}
+                onClick={() => setTransparentMode(!transparentMode)}
+                className={iconTileClass(transparentMode)}
+              >
+                <SunDim className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </Tooltip>
+
+            <Tooltip label={labels.preflight} side="bottom">
+              <button
+                type="button"
+                data-ribbon-tool="preflight"
+                aria-label={labels.preflight}
+                aria-pressed={showPreflight}
+                onClick={() => setShowPreflight(!showPreflight)}
+                className={iconTileClass(showPreflight)}
+              >
+                <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+                {preflightIssues.length > 0 && (
+                  <span className="pointer-events-none absolute -top-1 -end-1 min-w-4 rounded-full bg-amber-500 px-1 text-center text-[9px] font-bold leading-3.5 text-white tabular-nums">
+                    {preflightIssues.length}
+                  </span>
+                )}
+              </button>
+            </Tooltip>
+
+            <Tooltip label={labels.fitPage} shortcut="Ctrl+0" side="bottom">
+              <button
+                type="button"
+                data-ribbon-tool="fit-page"
+                aria-label={labels.fitPage}
+                title={`${labels.fitPage} (Ctrl+0)`}
+                onClick={() => triggerFitPage()}
+                className={iconTileClass(false)}
+              >
+                <Maximize2 className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </Tooltip>
+
+            <Tooltip label={isFa ? 'تنظیمات کامل صفحه...' : 'Page Setup...'} side="bottom">
+              <button
+                type="button"
+                data-ribbon-tool="page-setup"
+                aria-label={isFa ? 'تنظیمات کامل صفحه' : 'Page Setup'}
+                onClick={() => openPageSetup('margins')}
+                className={iconTileClass(false)}
+              >
+                <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
               </button>
             </Tooltip>
           </div>
@@ -688,7 +858,7 @@ export const TopToolRibbon: React.FC = () => {
             data-ribbon-tool="page-number"
             aria-pressed={isToolActive('numbering')}
             onClick={handleNumberingClick}
-            className={`flex h-[68px] min-w-14 flex-col items-center justify-center gap-1 rounded-md border px-2 text-[10px] font-medium transition-colors cursor-pointer shrink-0 ${
+            className={`flex h-[68px] min-w-[52px] flex-col items-center justify-center gap-1 rounded-md border px-1.5 text-[10px] font-medium transition-colors cursor-pointer shrink-0 ${
               isToolActive('numbering')
                 ? 'border-sky-500 bg-sky-50 text-sky-700 dark:border-sky-400 dark:bg-sky-500/20 dark:text-sky-200'
                 : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
@@ -712,7 +882,7 @@ export const TopToolRibbon: React.FC = () => {
                 document.querySelector<HTMLInputElement>('[data-auto-pack-width]')?.focus();
               });
             }}
-            className={`flex h-[68px] min-w-16 flex-col items-center justify-center gap-1 rounded-md border px-2 text-[10px] font-medium transition-colors cursor-pointer shrink-0 ${
+            className={`flex h-[68px] min-w-[56px] flex-col items-center justify-center gap-1 rounded-md border px-1.5 text-[10px] font-medium transition-colors cursor-pointer shrink-0 ${
               isToolActive('layout')
                 ? 'border-sky-500 bg-sky-50 text-sky-700 dark:border-sky-400 dark:bg-sky-500/20 dark:text-sky-200'
                 : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
@@ -722,175 +892,10 @@ export const TopToolRibbon: React.FC = () => {
             <span className="leading-tight text-center">{isFa ? 'چیدمان ابعاد' : 'Auto-Pack'}</span>
           </button>
         </Tooltip>
-
-        <div className="h-12 w-px bg-slate-200 dark:bg-slate-700" aria-hidden="true" />
-
-        {/* Omitted Program Modules: PDF Tools, Batch, Printers, View, File, Loupe, Light Table, Preflight, Fit Page, Page Setup */}
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-1">
-            <Tooltip label={labels.pdfTools} side="bottom">
-              <button
-                type="button"
-                data-ribbon-tool="pdf"
-                aria-label={labels.pdfTools}
-                aria-pressed={isToolActive('pdf')}
-                onClick={() => selectTool('pdf')}
-                className={iconTileClass(isToolActive('pdf'))}
-              >
-                <FileStack className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </Tooltip>
-
-            <Tooltip label={labels.batch} side="bottom">
-              <button
-                type="button"
-                data-ribbon-tool="batch"
-                aria-label={labels.batch}
-                aria-pressed={isToolActive('batch')}
-                onClick={() => selectTool('batch')}
-                className={iconTileClass(isToolActive('batch'))}
-              >
-                <Layers className="h-4 w-4" aria-hidden="true" />
-                {batchQueue.length > 0 && (
-                  <span className="pointer-events-none absolute -top-1 -end-1 min-w-4 rounded-full bg-sky-600 px-1 text-center text-[9px] font-bold leading-3.5 text-white tabular-nums">
-                    {batchQueue.length}
-                  </span>
-                )}
-              </button>
-            </Tooltip>
-
-            <Tooltip label={labels.printers} side="bottom">
-              <button
-                type="button"
-                data-ribbon-tool="printers"
-                aria-label={labels.printers}
-                aria-pressed={isToolActive('printers')}
-                onClick={() => selectTool('printers')}
-                className={iconTileClass(isToolActive('printers'))}
-              >
-                <Printer className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </Tooltip>
-
-            <Tooltip label={labels.view} side="bottom">
-              <button
-                type="button"
-                data-ribbon-tool="view"
-                aria-label={labels.view}
-                aria-pressed={isToolActive('view')}
-                onClick={() => selectTool('view')}
-                className={iconTileClass(isToolActive('view'))}
-              >
-                <Eye className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </Tooltip>
-
-            {/* There is deliberately no "File" tile here. It opened the same document buttons that sit in the row
-                above (add, close all, save) instead of any tool of its own, so it read as a second File menu and did
-                nothing the operator could not already reach — it was removed rather than given a new meaning.
-                The two tiles below are quick actions it used to crowd out: saving the project and the runtime
-                diagnostics panel. */}
-            <Tooltip label={isFa ? 'ذخیره پروژه' : 'Save project'} shortcut="Ctrl+Shift+S" side="bottom">
-              <button
-                type="button"
-                data-ribbon-quick="save-project"
-                aria-label={isFa ? 'ذخیره پروژه (.psp)' : 'Save project (.psp)'}
-                title={isFa ? 'ذخیره پروژه (.psp) — Ctrl+Shift+S' : 'Save project (.psp) — Ctrl+Shift+S'}
-                onClick={() => savePspProject()}
-                className={iconTileClass(false)}
-              >
-                <Save className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
-              </button>
-            </Tooltip>
-
-            <Tooltip label={isFa ? 'تشخیص و خطاها' : 'Diagnostics'} side="bottom">
-              <button
-                type="button"
-                data-ribbon-quick="diagnostics"
-                aria-label={isFa ? 'پنل وضعیت و خطاها' : 'Status and diagnostics'}
-                onClick={() => setActiveInspectorTool('printers')}
-                className={iconTileClass(isToolActive('printers'))}
-              >
-                <AlertTriangle className="h-4 w-4 text-amber-500 dark:text-amber-400" aria-hidden="true" />
-              </button>
-            </Tooltip>
-          </div>
-
-          <div className="flex items-center gap-1">
-            <Tooltip label={labels.loupe} side="bottom">
-              <button
-                type="button"
-                data-ribbon-tool="loupe"
-                aria-label={labels.loupe}
-                aria-pressed={loupeEnabled}
-                onClick={() => setLoupeEnabled(!loupeEnabled)}
-                className={iconTileClass(loupeEnabled)}
-              >
-                <Search className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </Tooltip>
-
-            <Tooltip label={labels.lightTable} side="bottom">
-              <button
-                type="button"
-                data-ribbon-tool="light-table"
-                aria-label={labels.lightTable}
-                aria-pressed={transparentMode}
-                onClick={() => setTransparentMode(!transparentMode)}
-                className={iconTileClass(transparentMode)}
-              >
-                <SunDim className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </Tooltip>
-
-            <Tooltip label={labels.preflight} side="bottom">
-              <button
-                type="button"
-                data-ribbon-tool="preflight"
-                aria-label={labels.preflight}
-                aria-pressed={showPreflight}
-                onClick={() => setShowPreflight(!showPreflight)}
-                className={iconTileClass(showPreflight)}
-              >
-                <AlertTriangle className="h-4 w-4" aria-hidden="true" />
-                {preflightIssues.length > 0 && (
-                  <span className="pointer-events-none absolute -top-1 -end-1 min-w-4 rounded-full bg-amber-500 px-1 text-center text-[9px] font-bold leading-3.5 text-white tabular-nums">
-                    {preflightIssues.length}
-                  </span>
-                )}
-              </button>
-            </Tooltip>
-
-            <Tooltip label={labels.fitPage} shortcut="Ctrl+0" side="bottom">
-              <button
-                type="button"
-                data-ribbon-tool="fit-page"
-                aria-label={labels.fitPage}
-                title={`${labels.fitPage} (Ctrl+0)`}
-                onClick={() => triggerFitPage()}
-                className={iconTileClass(false)}
-              >
-                <Maximize2 className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </Tooltip>
-
-            <Tooltip label={isFa ? 'تنظیمات کامل صفحه...' : 'Page Setup...'} side="bottom">
-              <button
-                type="button"
-                data-ribbon-tool="page-setup"
-                aria-label={isFa ? 'تنظیمات کامل صفحه' : 'Page Setup'}
-                onClick={() => openPageSetup('margins')}
-                className={iconTileClass(false)}
-              >
-                <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </Tooltip>
-          </div>
-        </div>
       </div>
 
       {/* CLUSTER 3 (End): Save As PDF File, View PDF File, Image Quality & Compression */}
-      <div className="flex items-center gap-1.5 border-s border-slate-200 ps-2 dark:border-slate-700 shrink-0">
+      <div className="flex items-center gap-1.5 border-s border-slate-200 ps-1.5 dark:border-slate-700 shrink-0">
         <Tooltip label={labels.saveAsPdf} shortcut="Ctrl+S" side="bottom">
           <button
             type="button"
@@ -898,7 +903,7 @@ export const TopToolRibbon: React.FC = () => {
             title={`${labels.saveAsPdf} (Ctrl+S)`}
             disabled={isExportingPdf}
             onClick={() => void exportMergedOrImposedPdf(false)}
-            className="flex h-[68px] w-16 flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-1.5 text-slate-700 hover:border-slate-300 hover:bg-white disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+            className="flex h-[68px] w-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-1 text-slate-700 hover:border-slate-300 hover:bg-white disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
           >
             <FileDown className="h-6 w-6 text-rose-600 dark:text-rose-400" aria-hidden="true" />
             <span className="text-[10px] font-semibold leading-tight text-center">{labels.saveAsPdf}</span>
@@ -911,7 +916,7 @@ export const TopToolRibbon: React.FC = () => {
             data-ribbon-action="view-pdf"
             disabled={isGeneratingPdfPreview}
             onClick={() => void openPdfPreviewModal()}
-            className="flex h-[68px] w-16 flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-1.5 text-slate-700 hover:border-slate-300 hover:bg-white disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+            className="flex h-[68px] w-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-1 text-slate-700 hover:border-slate-300 hover:bg-white disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
           >
             <FileSearch className="h-6 w-6 text-red-600 dark:text-red-400" aria-hidden="true" />
             <span className="text-[10px] font-semibold leading-tight text-center">{labels.viewPdf}</span>
@@ -926,7 +931,7 @@ export const TopToolRibbon: React.FC = () => {
             onChange={(e) =>
               setPdfExportOptions({ imageHandling: e.target.value as PdfImageHandling })
             }
-            className="h-7 w-40 rounded-md border border-slate-300 bg-white px-2 text-[11px] font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            className="h-7 w-36 rounded-md border border-slate-300 bg-white px-1.5 text-[11px] font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
           >
             <option value="preserve">{labels.imagePreserve}</option>
             <option value="downsample-300">{labels.imageDownsample300}</option>
@@ -940,7 +945,7 @@ export const TopToolRibbon: React.FC = () => {
             onChange={(e) =>
               setPdfExportOptions({ compression: e.target.value as PdfCompressionMode })
             }
-            className="h-7 w-40 rounded-md border border-slate-300 bg-white px-2 text-[11px] font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            className="h-7 w-36 rounded-md border border-slate-300 bg-white px-1.5 text-[11px] font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
           >
             <option value="lossless">{labels.compLossless}</option>
             <option value="balanced">{labels.compBalanced}</option>

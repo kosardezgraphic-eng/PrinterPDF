@@ -12,6 +12,7 @@ import { StatusBar } from './components/StatusBar';
 import { ModalsAndToasts } from './components/Modals';
 import { BatchPrintWorkspace } from './components/BatchPrintWorkspace';
 import { routeDroppedFiles } from './engine/imageImport';
+import { extractFilesFromClipboardData } from './engine/clipboardImport';
 import { buildSheetPresetRows, findPresetIdByShortcut } from './engine/sheetPresets';
 import { formatShortcut } from '@shared/models';
 import { listenForNativeOpenFiles } from './engine/nativeFiles';
@@ -170,6 +171,29 @@ export const App: React.FC = () => {
         return;
       }
 
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        !e.altKey &&
+        !e.shiftKey &&
+        (e.key.toLowerCase() === 'w' || e.code === 'KeyW')
+      ) {
+        const current = useAppStore.getState();
+        if (!current.shortcutRecordingFor) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (current.textEdit) {
+            current.finishTextEdit();
+          }
+          if (
+            current.appMode === 'studio' &&
+            (current.documents.length > 0 || current.pages.length > 0 || current.overlays.length > 0)
+          ) {
+            current.clearWorkspace();
+          }
+          return;
+        }
+      }
+
       const target = e.target as HTMLElement | null;
       if (
         target &&
@@ -239,13 +263,6 @@ export const App: React.FC = () => {
         if (lowerKey === 'o' && !e.shiftKey) {
           e.preventDefault();
           window.dispatchEvent(new CustomEvent('printstudio:add-files'));
-          return;
-        }
-        if (lowerKey === 'w' && !e.shiftKey) {
-          e.preventDefault();
-          if (state.documents.length > 0 || state.pages.length > 0) {
-            state.clearWorkspace();
-          }
           return;
         }
         if (lowerKey === 'd') {
@@ -344,16 +361,28 @@ export const App: React.FC = () => {
     };
 
     const onPaste = (e: ClipboardEvent) => {
-      const files = e.clipboardData?.files
-        ? Array.from(e.clipboardData.files)
-        : [];
-      if (files.length > 0) {
-        e.preventDefault();
-        if (useAppStore.getState().appMode === 'batch') {
-          void useAppStore.getState().addBatchFiles(files);
-        } else {
-          void importFiles(files);
-        }
+      const extracted = extractFilesFromClipboardData(e.clipboardData);
+      if (extracted.length === 0) return;
+
+      const target = e.target as HTMLElement | null;
+      const isTextControl =
+        !!target &&
+        ((target.tagName === 'INPUT' &&
+          !['button', 'checkbox', 'radio', 'file', 'submit', 'reset'].includes(
+            (target as HTMLInputElement).type?.toLowerCase() || ''
+          )) ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable);
+      const hasPlainText = Boolean(e.clipboardData?.getData('text/plain'));
+      if (isTextControl && hasPlainText) {
+        return;
+      }
+
+      e.preventDefault();
+      if (useAppStore.getState().appMode === 'batch') {
+        void useAppStore.getState().addBatchFiles(extracted);
+      } else {
+        void importFiles(extracted);
       }
     };
 

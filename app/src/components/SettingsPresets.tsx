@@ -284,8 +284,8 @@ export function SettingsPresetPanel() {
 
       <p className="mb-3 text-[11px] leading-5 text-slate-600 dark:text-slate-400">
         {isFa
-          ? 'هر پروفایل فقط تنظیمات مؤثر بر خروجی چاپ را نگه می‌دارد: ابعاد و جهت کاغذ، حاشیه‌ها، چیدمان و تعداد خانه‌ها، دورو، افکت‌های رنگ و نور، واترمارک و شماره‌گذاری. زبان، تم، واحد رابط، تقویم، تعرفه و کیفیت پیش‌نمایش جزو پروفایل نیستند. سطر اول فقط بازنشانی تنظیمات پیش‌فرض برنامه است.'
-          : 'A profile stores print-output settings only: paper size and orientation, margins, layout and cells, duplex, colour/brightness effects, watermark and page numbering. Language, theme, UI units, calendar, tariffs and preview quality are not part of a profile. The first row resets application defaults.'}
+          ? 'هر پروفایل تنظیمات اعمال‌شده روی شیت را نگه می‌دارد: افکت‌ها، اندازه مارجین، اندازه میانه‌ها، چیدمان سفارشی، شماره صفحه و شماره بخش‌ها، جهت صفحه، پشت و رو بودن و واترمارک. تنظیمات محیطی نرم‌افزار (زبان، تم، واحد، تقویم، تعرفه و پیش‌نمایش) جزو پروفایل و بازنشانی نیستند.'
+          : 'A profile stores sheet setup: effects, margins, gutters, custom layout, page & section numbering, page orientation, duplex mode, and watermark. Application environment preferences (language, theme, UI units, calendar, tariffs and preview) are untouched.'}
       </p>
 
       <ul className="mb-3 grid gap-1.5">
@@ -325,7 +325,7 @@ export function SettingsPresetPanel() {
                 )}
                 <span dir="ltr" className="block truncate text-[10px] text-slate-500 dark:text-slate-400">
                   {row.summary || (row.builtin
-                    ? (isFa ? 'بازنشانی چیدمان، افکت‌ها، واترمارک، شماره‌گذاری و تنظیمات برنامه' : 'resets layout, effects, watermark, numbering and app settings')
+                    ? (isFa ? 'بازنشانی افکت‌ها، مارجین، میانه، چیدمان، شماره‌ها، جهت، دورو و اشکال (بدون تغییر تنظیمات محیطی)' : 'resets effects, margins, gutters, layout, numbering, orientation, duplex & shapes (keeps app preferences)')
                     : '')}
                   {row.changedAt && !row.builtin ? ` · ${formatStamp(row.changedAt, isFa)}` : ''}
                 </span>

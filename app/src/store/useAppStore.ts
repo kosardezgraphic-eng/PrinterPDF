@@ -57,6 +57,7 @@ import {
   getDefaultPageNumberSettings,
   getDefaultWatermarkSettings,
 } from '../engine/watermarkEngine';
+import { readImagesFromSystemClipboard } from '../engine/clipboardImport';
 import { PDFDocument } from 'pdf-lib';
 import {
   buildCrispPageSvgDataUrl,
@@ -95,6 +96,15 @@ import { ipcBridge, selectOptimalPrinter } from '../engine/ipcBridge';
 import { adjustScriptRanges, setScriptRange } from '../engine/textFormatting';
 import { buildBatchExecutionPlan, nUpToRowsCols } from '../engine/batchService';
 import { computeAutoPackPlan, type AutoPackPlan } from '../engine/autoPack';
+import {
+  buildTicketStudioLayout,
+  buildTicketStudioOverlays,
+  createBlankTicketSource,
+  createDefaultTicketConfig,
+  generateTicketPages,
+  getTicketGridMetrics,
+  type TicketConfig,
+} from '../engine/ticketNumbering';
 
 export interface AutoPackRequest {
   pageId?: string;
@@ -109,7 +119,7 @@ export interface AutoPackRequest {
   onlySelectedPage: boolean;
 }
 
-export type AppMode = 'studio' | 'batch';
+export type AppMode = 'studio' | 'batch' | 'ticket';
 
 export type RibbonTabId =
   | 'file'
@@ -193,6 +203,69 @@ function syncPrintersDuplex(printers: PrinterInfo[], duplexMode: DuplexMode): Pr
   return changed ? next : printers;
 }
 
+function syncPrintersWithLayout(
+  printers: PrinterInfo[],
+  selectedPrinterName: string,
+  nextLayout: LayoutSettings
+): PrinterInfo[] {
+  const duplexSynced = syncPrintersDuplex(printers, nextLayout.duplexMode);
+  if (!selectedPrinterName) return duplexSynced;
+  let changed = false;
+  const stdDims = nextLayout.paperSize !== 'Custom' ? STANDARD_PAPER_SIZES[nextLayout.paperSize] : null;
+  const next = duplexSynced.map((p) => {
+    if (p.name !== selectedPrinterName) return p;
+    const matchedPaperOpt =
+      p.capabilities.paperOptions?.find(
+        (o) =>
+          (p.activeProfile.paperName &&
+            nextLayout.paperSize === p.activeProfile.paperSize &&
+            o.name.toLowerCase() === p.activeProfile.paperName.toLowerCase()) ||
+          o.id === nextLayout.paperSize
+      ) ?? null;
+    const widthMm =
+      nextLayout.paperSize === 'Custom'
+        ? nextLayout.customWidthMm
+        : matchedPaperOpt
+          ? Math.min(matchedPaperOpt.widthMm, matchedPaperOpt.heightMm)
+          : stdDims?.widthMm ?? nextLayout.customWidthMm;
+    const heightMm =
+      nextLayout.paperSize === 'Custom'
+        ? nextLayout.customHeightMm
+        : matchedPaperOpt
+          ? Math.max(matchedPaperOpt.widthMm, matchedPaperOpt.heightMm)
+          : stdDims?.heightMm ?? nextLayout.customHeightMm;
+    const paperName =
+      nextLayout.paperSize === 'Custom'
+        ? 'Custom'
+        : matchedPaperOpt?.name ?? nextLayout.paperSize;
+    const ap = p.activeProfile;
+    if (
+      ap.paperSize === nextLayout.paperSize &&
+      ap.paperName === paperName &&
+      ap.orientation === nextLayout.orientation &&
+      ap.duplexMode === nextLayout.duplexMode &&
+      ap.paperWidthMm === widthMm &&
+      ap.paperHeightMm === heightMm
+    ) {
+      return p;
+    }
+    changed = true;
+    return {
+      ...p,
+      activeProfile: {
+        ...ap,
+        paperSize: nextLayout.paperSize,
+        paperName,
+        paperWidthMm: widthMm,
+        paperHeightMm: heightMm,
+        orientation: nextLayout.orientation,
+        duplexMode: nextLayout.duplexMode,
+      },
+    };
+  });
+  return changed ? next : duplexSynced;
+}
+
 function syncDuplexOnLayoutAndPrinters(
   layout: LayoutSettings,
   printers: PrinterInfo[],
@@ -247,6 +320,14 @@ export const DEFAULT_LAYOUT: LayoutSettings = {
   showCropMarks: false,
   booklet: { enabled: false, direction: 'rtl', signatureSize: 0, spineWidthMm: 4, creepMm: 0.2, duplexMode: 'short-edge', outerMarginMm: 10, compensateCreep: true },
 };
+
+function cloneDefaultLayout(): LayoutSettings {
+  return {
+    ...DEFAULT_LAYOUT,
+    marginsMm: { ...DEFAULT_LAYOUT.marginsMm },
+    ...(DEFAULT_LAYOUT.booklet ? { booklet: { ...DEFAULT_LAYOUT.booklet } } : {}),
+  };
+}
 
 export const DEFAULT_EFFECTS: EffectsSettings = {
   enabled: true,
@@ -403,11 +484,15 @@ interface AppState {
   printerServiceNote: string | null;
   isRefreshingPrinters: boolean;
 
-  // Batch Queue & Standalone Environment
+  // Batch Queue, Ticket Numbering & Standalone Environments
   appMode: AppMode;
   batchQueue: BatchJobItem[];
   batchSelectedJobId: string | null;
   isBatchRunning: boolean;
+  ticketConfig: TicketConfig;
+  ticketSourceDocument: SourceDocument | null;
+  ticketSourcePages: PageItem[];
+  ticketSelectedSourcePageId: string | null;
 
   // Windows Virtual Printer
   virtualPrinterStatus: VirtualPrinterStatus | null;
@@ -452,6 +537,7 @@ interface AppState {
   showOnboardingTour: boolean;
   showShortcutsModal: boolean;
   lastCustomMarginsMm: MarginsMm | null;
+  quickPrintCopies: number;
   pendingDuplexPrint: PrintJobRequest | null;
   printProgress: PrintProgressState | null;
 
@@ -468,6 +554,7 @@ interface AppState {
   initializeWorkspace: () => Promise<void>;
   loadSampleWorkspace: () => Promise<void>;
   importFiles: (files: File[]) => Promise<void>;
+  importFromClipboard: (options?: { target?: 'document' | 'overlay' }) => Promise<number>;
   clearWorkspace: () => void;
 
   // Undo / Redo
@@ -598,6 +685,7 @@ interface AppState {
   setDefaultPrinter: (printerName: string) => Promise<void>;
   openPrinterPreferences: (printerName: string) => Promise<void>;
   submitPrintJob: (request: PrintJobRequest) => Promise<void>;
+  setQuickPrintCopies: (copies: number) => void;
   silentPrintNow: () => Promise<void>;
   confirmDuplexPrint: (override?: Partial<PrintJobRequest>) => Promise<void>;
   dismissDuplexPrint: () => void;
@@ -627,6 +715,15 @@ interface AppState {
   pauseBatchQueue: () => void;
   removeBatchJob: (id: string) => void;
   retryFailedBatchJobs: () => void;
+
+  // Standalone Ticket / Receipt Numbering & Sheet Division
+  updateTicketConfig: (patch: Partial<TicketConfig> | ((prev: TicketConfig) => TicketConfig)) => void;
+  resetTicketConfig: () => void;
+  setTicketSelectedSourcePageId: (pageId: string | null) => void;
+  importTicketSourceFiles: (files: File[]) => Promise<void>;
+  useStudioActivePageAsTicketSource: () => boolean;
+  clearTicketSource: () => void;
+  generateTicketSheetsToStudio: () => number;
 
   // Windows Virtual Printer
   refreshVirtualPrinterStatus: () => Promise<void>;
@@ -761,13 +858,21 @@ export const useAppStore = create<AppState>((set, get) => {
    * settings stay out, so switching a profile on a loaded job cannot change how the application itself
    * behaves — a profile is a press setup, not a preferences dump.
    */
-  const capturePresetSections = (): Pick<SettingsPreset, 'layout' | 'effects' | 'watermark' | 'pageNumbering'> => {
+  const capturePresetSections = (): Pick<
+    SettingsPreset,
+    'layout' | 'effects' | 'watermark' | 'pageNumbering' | 'numberingOverlays'
+  > => {
     const state = get();
+    const clonedLayout = structuredClone(state.layout);
+    delete clonedLayout.cellOverrides;
     return {
-      layout: { ...state.layout },
-      effects: { ...state.effects },
-      watermark: { ...state.watermark },
-      pageNumbering: { ...state.pageNumbering },
+      layout: clonedLayout,
+      effects: structuredClone(state.effects),
+      watermark: structuredClone(state.watermark),
+      pageNumbering: structuredClone(state.pageNumbering),
+      numberingOverlays: structuredClone(
+        state.overlays.filter((item): item is PageOverlayNumbering => item.kind === 'numbering')
+      ),
     };
   };
   const newPresetId = () => `preset-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -872,6 +977,10 @@ export const useAppStore = create<AppState>((set, get) => {
     batchQueue: INITIAL_BATCH_QUEUE,
     batchSelectedJobId: null,
     isBatchRunning: false,
+    ticketConfig: createDefaultTicketConfig(),
+    ticketSourceDocument: null,
+    ticketSourcePages: [],
+    ticketSelectedSourcePageId: null,
 
     virtualPrinterStatus: null,
     virtualPrinterBusy: false,
@@ -913,6 +1022,7 @@ export const useAppStore = create<AppState>((set, get) => {
     showOnboardingTour: false,
     showShortcutsModal: false,
     lastCustomMarginsMm: null,
+    quickPrintCopies: 1,
     pendingDuplexPrint: null,
     printProgress: null,
 
@@ -1028,6 +1138,55 @@ export const useAppStore = create<AppState>((set, get) => {
           message: isFa ? err.solutionFa : err.solutionEn,
         });
       }
+    },
+
+    importFromClipboard: async (options) => {
+      const isFa = get().settings.language === 'fa';
+      const res = await readImagesFromSystemClipboard();
+      if (res.status === 'permission-denied') {
+        get().addToast({
+          type: 'warning',
+          title: isFa ? 'دسترسی به کلیپ‌بورد مجاز نیست' : 'Clipboard access blocked',
+          message: isFa
+            ? 'می‌توانید تصویر را مستقیم با کلید ترکیبی Ctrl+V بچسبانید یا مجوز کلیپ‌بورد مرورگر را بدهید.'
+            : 'Press Ctrl+V directly inside the app window, or grant browser clipboard permission.',
+        });
+        return 0;
+      }
+      if (res.status === 'unsupported') {
+        get().addToast({
+          type: 'info',
+          title: isFa ? 'چسباندن با Ctrl+V' : 'Paste with Ctrl+V',
+          message: isFa
+            ? 'مرورگر خواندن مستقیم کلیپ‌بورد با دکمه را پشتیبانی نمی‌کند؛ با Ctrl+V تصویر را بچسبانید.'
+            : 'Direct button read is unavailable here; press Ctrl+V to paste an image from clipboard.',
+        });
+        return 0;
+      }
+      if (res.status === 'empty' || res.files.length === 0) {
+        get().addToast({
+          type: 'info',
+          title: isFa ? 'تصویری در کلیپ‌بورد نیست' : 'No image found in clipboard',
+          message: isFa
+            ? 'ابتدا یک اسکرین‌شات یا تصویر را کپی کنید، سپس دوباره امتحان کنید.'
+            : 'Copy an image or screenshot first, then paste again.',
+        });
+        return 0;
+      }
+      const state = get();
+      if (state.appMode === 'batch') {
+        await state.addBatchFiles(res.files);
+        return res.files.length;
+      }
+      if (state.appMode === 'ticket') {
+        await state.importTicketSourceFiles(res.files);
+        return res.files.length;
+      }
+      if (options?.target === 'overlay' && state.pages.length > 0) {
+        return await state.addImageOverlayFiles(res.files);
+      }
+      await state.importFiles(res.files);
+      return res.files.length;
     },
 
     clearWorkspace: () => {
@@ -2560,8 +2719,8 @@ export const useAppStore = create<AppState>((set, get) => {
           ? (lang === 'fa' ? `پریست «${trimmed}» به‌روزرسانی شد` : `Updated the "${trimmed}" profile`)
           : (lang === 'fa' ? `پریست «${trimmed}» ذخیره شد` : `Saved the "${trimmed}" profile`),
         message: lang === 'fa'
-          ? 'چیدمان، افکت‌ها، واترمارک و شماره‌گذاری صفحه در همین پروفایل نگه داشته شدند؛ تنظیمات خود برنامه دست‌نخورده است.'
-          : 'Layout, effects, watermark and page numbering are stored in this profile; the application settings are not part of it.',
+          ? 'افکت‌ها، حاشیه و میانه‌ها، چیدمان، جهت و دورو، واترمارک و شماره‌گذاری صفحه/بخش در همین پروفایل ذخیره شدند.'
+          : 'Effects, margins, gutters, custom layout, orientation, duplex, watermark and numbering are stored in this profile.',
       });
       return duplicate?.id ?? next[next.length - 1].id;
     },
@@ -2623,13 +2782,48 @@ export const useAppStore = create<AppState>((set, get) => {
       // Every section is merged over its own default, so a profile saved before the app grew a new
       // option leaves that option at the default instead of at `undefined`.
       set((state) => {
-        const nextLayout = { ...DEFAULT_LAYOUT, ...preset.layout };
+        const defaultLayout = cloneDefaultLayout();
+        const presetLayout = preset.layout ? structuredClone(preset.layout) : ({} as Partial<LayoutSettings>);
+        const nextLayout: LayoutSettings = {
+          ...defaultLayout,
+          ...presetLayout,
+          marginsMm: { ...defaultLayout.marginsMm, ...(presetLayout.marginsMm ?? {}) },
+          booklet: defaultLayout.booklet
+            ? { ...defaultLayout.booklet, ...(presetLayout.booklet ?? {}) }
+            : presetLayout.booklet,
+        };
+        const nextEffects: EffectsSettings = {
+          ...DEFAULT_EFFECTS,
+          ...(preset.effects ? structuredClone(preset.effects) : {}),
+        };
+        if (nextEffects.scope === 'selected') {
+          const validIds = new Set(state.pages.map((p) => p.id));
+          const matchingSaved = (nextEffects.targetPageIds ?? []).filter((id) => validIds.has(id));
+          nextEffects.targetPageIds =
+            matchingSaved.length > 0
+              ? matchingSaved
+              : state.pages.filter((p) => p.isHighlighted).map((p) => p.id);
+        } else {
+          nextEffects.targetPageIds = undefined;
+        }
+        const nextOverlays = Array.isArray(preset.numberingOverlays)
+          ? [
+              ...state.overlays.filter((item) => item.kind !== 'numbering'),
+              ...structuredClone(preset.numberingOverlays),
+            ]
+          : state.overlays;
+        const nextSelectedOverlayId = nextOverlays.some((o) => o.id === state.selectedOverlayId)
+          ? state.selectedOverlayId
+          : null;
         return {
           layout: nextLayout,
-          printers: syncPrintersDuplex(state.printers, nextLayout.duplexMode),
-          effects: { ...DEFAULT_EFFECTS, ...preset.effects },
-          watermark: { ...getDefaultWatermarkSettings(), ...preset.watermark },
-          pageNumbering: { ...getDefaultPageNumberSettings(), ...preset.pageNumbering },
+          printers: syncPrintersWithLayout(state.printers, state.selectedPrinterName, nextLayout),
+          effects: nextEffects,
+          watermark: { ...getDefaultWatermarkSettings(), ...(preset.watermark ? structuredClone(preset.watermark) : {}) },
+          pageNumbering: { ...getDefaultPageNumberSettings(), ...(preset.pageNumbering ? structuredClone(preset.pageNumbering) : {}) },
+          overlays: nextOverlays,
+          selectedOverlayId: nextSelectedOverlayId,
+          activeSheetIndex: 0,
         };
       });
       pushUndo('اعمال پروفایل شیت', 'Apply sheet profile', before, captureSnapshot(get()));
@@ -2637,8 +2831,8 @@ export const useAppStore = create<AppState>((set, get) => {
         type: 'info',
         title: lang === 'fa' ? `پروفایل «${preset.name}» اعمال شد` : `Applied the "${preset.name}" profile`,
         message: lang === 'fa'
-          ? 'تنظیمات خود برنامه (زبان، واحد، تعرفه و پیش‌نمایش) تغییری نکردند؛ برگشت با Ctrl+Z ممکن است.'
-          : 'The application settings (language, unit, tariffs, preview) were not touched; Ctrl+Z brings the previous sheet setup back.',
+          ? 'تنظیمات محیطی برنامه تغییری نکردند؛ برگشت با Ctrl+Z ممکن است.'
+          : 'Application environment preferences were not touched; Ctrl+Z brings the previous sheet setup back.',
       });
     },
 
@@ -2656,23 +2850,37 @@ export const useAppStore = create<AppState>((set, get) => {
     resetAllSettings: () => {
       const before = captureSnapshot(get());
       const lang = get().settings.language;
-      set((state) => ({
-        layout: { ...DEFAULT_LAYOUT },
-        printers: syncPrintersDuplex(state.printers, DEFAULT_LAYOUT.duplexMode),
-        effects: { ...DEFAULT_EFFECTS },
-        watermark: getDefaultWatermarkSettings(),
-        pageNumbering: getDefaultPageNumberSettings(),
-        settings: { ...DEFAULT_SETTINGS, language: lang },
-      }));
-      pushUndo('بازگردانی تمام تنظیمات به پیش‌فرض', 'Reset all settings to defaults', before, captureSnapshot(get()));
-      void ipcBridge.saveSettings(get().settings);
+      set((state) => {
+        const nextLayout = cloneDefaultLayout();
+        return {
+          layout: nextLayout,
+          printers: syncPrintersWithLayout(state.printers, state.selectedPrinterName, nextLayout),
+          effects: { ...DEFAULT_EFFECTS },
+          watermark: getDefaultWatermarkSettings(),
+          pageNumbering: getDefaultPageNumberSettings(),
+          overlays: [],
+          selectedOverlayId: null,
+          textEdit: null,
+          eraseTool: 'off',
+          erasePending: null,
+          canvasTool: 'move',
+          activeSheetIndex: 0,
+          previewPageRequest: null,
+          pages: state.pages.map((p) => ({
+            ...p,
+            ...(p.overrides?.manualRotation ? { rotation: 0 } : {}),
+            overrides: undefined,
+          })),
+        };
+      });
+      pushUndo('بازگردانی تنظیمات صفحه و طراحی به پیش‌فرض', 'Reset sheet and design settings to defaults', before, captureSnapshot(get()));
       syncCrispPreview();
       get().addToast({
         type: 'success',
-        title: lang === 'fa' ? 'همهٔ تنظیمات به حالت پیش‌فرض برگشت' : 'All settings are back to their defaults',
+        title: lang === 'fa' ? 'تنظیمات صفحه، افکت‌ها و چیدمان به پیش‌فرض برگشت' : 'Sheet, effect & layout settings reset to defaults',
         message: lang === 'fa'
-          ? 'چیدمان، افکت‌ها، واترمارک، شماره‌گذاری و تنظیمات عمومی بازنشانی شد؛ فایل‌های روی میز کار دست‌نخورده‌اند.'
-          : 'Layout, effects, watermark, page numbering and general settings were reset; the files on the desk are untouched.',
+          ? 'افکت‌ها، مارجین، میانه‌ها، چیدمان، شماره صفحه/بخش، جهت، دورو و اشکال بازنشانی شدند؛ تنظیمات محیطی برنامه و فایل‌ها دست‌نخورده ماندند.'
+          : 'Effects, margins, gutters, layout, numbering, orientation, duplex & shapes were reset; app environment preferences and files are untouched.',
       });
     },
 
@@ -3443,6 +3651,17 @@ export const useAppStore = create<AppState>((set, get) => {
       }
     },
 
+    setQuickPrintCopies: (copies) => {
+      const state = get();
+      const targetPrinter =
+        state.printers.find((p) => p.name === state.selectedPrinterName) ??
+        state.printers.find((p) => p.isDefault) ??
+        state.printers[0];
+      const maxCopies = targetPrinter?.capabilities.maxCopies ?? 999;
+      const numeric = Number.isFinite(copies) ? Math.round(copies) : 1;
+      set({ quickPrintCopies: Math.max(1, Math.min(maxCopies, numeric)) });
+    },
+
     silentPrintNow: async () => {
       const state = get();
       const targetPrinter =
@@ -3454,11 +3673,16 @@ export const useAppStore = create<AppState>((set, get) => {
       const effectiveDuplex = state.layout.booklet?.enabled
         ? state.layout.booklet.duplexMode
         : (profile?.duplexMode ?? state.layout.duplexMode);
+      const maxCopies = targetPrinter?.capabilities.maxCopies ?? 999;
+      const copies = Math.max(
+        1,
+        Math.min(maxCopies, Math.round(state.quickPrintCopies) || 1)
+      );
 
       const request: PrintJobRequest = {
         printerName,
         jobTitle: state.documents[0]?.name ?? 'PrintStudio Direct Job',
-        copies: 1,
+        copies,
         collate: profile?.collate ?? true,
         pageRangeMode: 'all-selected',
         customRangeText: '',
@@ -3597,6 +3821,179 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     setAppMode: (mode) => set({ appMode: mode }),
+
+    updateTicketConfig: (patch) =>
+      set((state) => ({
+        ticketConfig:
+          typeof patch === 'function'
+            ? patch(state.ticketConfig)
+            : { ...state.ticketConfig, ...patch },
+      })),
+
+    resetTicketConfig: () =>
+      set({
+        ticketConfig: createDefaultTicketConfig(),
+      }),
+
+    setTicketSelectedSourcePageId: (pageId) =>
+      set({ ticketSelectedSourcePageId: pageId }),
+
+    importTicketSourceFiles: async (files) => {
+      if (!files.length) return;
+      const result = await importFilesBatch([files[0]]);
+      const isFa = get().settings.language === 'fa';
+      if (result.documents.length > 0 && result.pages.length > 0) {
+        const doc = result.documents[0];
+        const docPages = result.pages
+          .filter((p) => p.documentId === doc.id)
+          .map((p, idx) => ({ ...p, selectedForPrint: true, isHighlighted: idx === 0 }));
+        set({
+          ticketSourceDocument: doc,
+          ticketSourcePages: docPages,
+          ticketSelectedSourcePageId: docPages[0]?.id ?? null,
+        });
+        get().addToast({
+          type: 'success',
+          title: isFa
+            ? `فرم «${doc.name}» (${docPages.length} صفحه) بارگذاری شد`
+            : `Loaded form "${doc.name}" (${docPages.length} page${docPages.length > 1 ? 's' : ''})`,
+        });
+      }
+      for (const err of result.errors) {
+        get().addToast({
+          type: 'error',
+          title: isFa ? err.reasonFa : err.reasonEn,
+          message: isFa ? err.solutionFa : err.solutionEn,
+        });
+      }
+    },
+
+    useStudioActivePageAsTicketSource: () => {
+      const state = get();
+      const isFa = state.settings.language === 'fa';
+      const activePage =
+        state.pages.find((p) => p.id === state.activePageId) ??
+        state.pages.find((p) => p.isHighlighted) ??
+        state.pages[0];
+      if (!activePage) {
+        state.addToast({
+          type: 'warning',
+          title: isFa ? 'صفحه‌ای در استودیو انتخاب نشده است' : 'No page available in Studio',
+        });
+        return false;
+      }
+      const sourceDoc = state.documents.find((d) => d.id === activePage.documentId) ?? null;
+      const docPages = sourceDoc
+        ? state.pages.filter((p) => p.documentId === sourceDoc.id)
+        : [activePage];
+      const uniquePages = docPages.filter(
+        (page, index, arr) =>
+          arr.findIndex((p) => p.sourcePageNumber === page.sourcePageNumber && p.id === page.id) === index
+      );
+      const docForTicket: SourceDocument = sourceDoc ?? {
+        id: activePage.documentId,
+        name: activePage.documentName,
+        filePath: activePage.documentName,
+        fileSize: 0,
+        fileType: 'pdf',
+        mimeType: 'application/pdf',
+        pageCount: 1,
+        createdAt: new Date().toISOString(),
+      };
+      set({
+        ticketSourceDocument: docForTicket,
+        ticketSourcePages: uniquePages.length > 0 ? uniquePages : [activePage],
+        ticketSelectedSourcePageId: activePage.id,
+      });
+      state.addToast({
+        type: 'success',
+        title: isFa
+          ? `فرم فعلی استودیو (${activePage.documentName}) برای شماره‌گذاری انتخاب شد`
+          : `Using Studio page (${activePage.documentName}) as ticket form`,
+      });
+      return true;
+    },
+
+    clearTicketSource: () =>
+      set({
+        ticketSourceDocument: null,
+        ticketSourcePages: [],
+        ticketSelectedSourcePageId: null,
+      }),
+
+    generateTicketSheetsToStudio: () => {
+      if (get().textEdit) get().finishTextEdit();
+      const state = get();
+      const isFa = state.settings.language === 'fa';
+      const config = state.ticketConfig;
+      const metrics = getTicketGridMetrics(config);
+      const before = captureSnapshot(state);
+
+      let sourceDoc = state.ticketSourceDocument;
+      let sourcePage =
+        state.ticketSourcePages.find((p) => p.id === state.ticketSelectedSourcePageId) ??
+        state.ticketSourcePages[0];
+
+      if (!sourceDoc || !sourcePage) {
+        const blank = createBlankTicketSource(metrics.cellWidthMm, metrics.cellHeightMm, isFa);
+        sourceDoc = blank.document;
+        sourcePage = blank.page;
+      }
+
+      const generatedPages = generateTicketPages(sourcePage, metrics.totalTickets);
+      const nextLayout = buildTicketStudioLayout(state.layout, config);
+      const nextOverlays = buildTicketStudioOverlays(config, nextLayout, generatedPages);
+      const firstNumbering = nextOverlays.find((o) => o.kind === 'numbering');
+      const nextBookmark: BookmarkItem = {
+        id: `bm-ticket-${Date.now()}`,
+        title: sourceDoc.name,
+        documentId: sourceDoc.id,
+        targetPageId: generatedPages[0].id,
+        pageIndex: 0,
+        level: 0,
+      };
+
+      clearCrispPreviewCache();
+      set({
+        documents: [sourceDoc],
+        pages: generatedPages,
+        bookmarks: [nextBookmark],
+        layout: nextLayout,
+        pageNumbering: { ...state.pageNumbering, enabled: false },
+        printers: syncPrintersWithLayout(state.printers, state.selectedPrinterName, nextLayout),
+        overlays: nextOverlays,
+        selectedOverlayId: firstNumbering?.id ?? nextOverlays[0]?.id ?? null,
+        activePageId: generatedPages[0]?.id ?? null,
+        activeSheetIndex: 0,
+        previewPageRequest: generatedPages[0] ? { pageId: generatedPages[0].id } : null,
+        textEdit: null,
+        eraseTool: 'off',
+        erasePending: null,
+        appMode: 'studio',
+        activeRibbonTab: 'insert',
+        activeInspectorTool: firstNumbering ? 'numbering' : 'layout',
+        inspectorCollapsed: false,
+      });
+
+      pushUndo(
+        `تولید خودکار ${metrics.effectiveSheetCount} شیت قبض (${metrics.totalTickets} قبض)`,
+        `Generate ${metrics.effectiveSheetCount} Ticket Sheets (${metrics.totalTickets} tickets)`,
+        before,
+        captureSnapshot(get())
+      );
+
+      get().addToast({
+        type: 'success',
+        title: isFa
+          ? `${metrics.effectiveSheetCount} شیت (${metrics.totalTickets} قبض) ساخته شد و در استودیو باز شد`
+          : `Generated ${metrics.effectiveSheetCount} sheets (${metrics.totalTickets} tickets) in Studio`,
+        message: isFa
+          ? 'تمامی شماره‌ها و خطوط برش و پرفراژ در استودیو قابل ویرایش و چاپ هستند.'
+          : 'All numbering boxes and cut/perforation guides are editable in Studio.',
+      });
+
+      return generatedPages.length;
+    },
 
     selectBatchJob: (id) => set({ batchSelectedJobId: id }),
 

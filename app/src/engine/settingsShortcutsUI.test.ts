@@ -34,12 +34,14 @@ beforeEach(()=>{
 });
 afterEach(()=>{act(()=>root.unmount());host.remove();vi.restoreAllMocks();});
 
-describe('Alt+F6 resets every setting',()=>{
-  it('puts each section back without touching the desk',()=>{
+describe('Alt+F6 resets sheet and design settings while preserving app preferences',()=>{
+  it('puts each sheet section and overlay back without touching app preferences or desk files',()=>{
     const state=useAppStore.getState();
-    state.updateLayout({rows:3,cols:2,paperSize:'A3'});
+    state.updateLayout({rows:3,cols:2,paperSize:'A3',orientation:'landscape',duplexMode:'short-edge'});
     state.updateEffects({invert:true});
     state.updateWatermark({enabled:true,text:'PROOF'});
+    state.addShapeOverlay('rectangle');
+    state.addNumberingOverlay(true);
     state.updateSettings({unit:'inch',previewFidelity:'fast'});
     useAppStore.setState({documents:[{id:'d',name:'job.pdf',filePath:'job.pdf',fileSize:1,fileType:'pdf',mimeType:'application/pdf',pageCount:1,createdAt:''}],pages:[{id:'p1',documentId:'d',documentName:'job.pdf',sourcePageNumber:1,widthMm:210,heightMm:297,rotation:0,selectedForPrint:true,isHighlighted:true,isBlankPage:false,colorProfile:'color',inkCoveragePercent:1}]});
 
@@ -50,33 +52,37 @@ describe('Alt+F6 resets every setting',()=>{
     expect(after.effects).toEqual(DEFAULT_EFFECTS);
     expect(after.watermark).toEqual(getDefaultWatermarkSettings());
     expect(after.pageNumbering).toEqual(getDefaultPageNumberSettings());
-    expect(after.settings).toEqual({...DEFAULT_SETTINGS,language:'en'});       // the language is kept
+    expect(after.overlays).toEqual([]);
+    expect(after.settings).toEqual({...DEFAULT_SETTINGS,language:'en',unit:'inch',previewFidelity:'fast'});
     expect(after.pages.map(page=>page.id)).toEqual(['p1']);                    // the job stays loaded
   });
 
   it('works while the caret is inside a field, because F6 is not typing',()=>{
     const input=document.createElement('input');
     host.appendChild(input);
+    useAppStore.getState().updateLayout({cols:4});
     useAppStore.getState().updateSettings({unit:'cm'});
 
     act(()=>{input.dispatchEvent(new KeyboardEvent('keydown',{key:'F6',altKey:true,bubbles:true,cancelable:true}));});
 
-    expect(useAppStore.getState().settings.unit).toBe(DEFAULT_SETTINGS.unit);
+    expect(useAppStore.getState().layout.cols).toBe(DEFAULT_LAYOUT.cols);
+    expect(useAppStore.getState().settings.unit).toBe('cm');
     input.remove();
   });
 
   it('leaves the chords alone when Alt is not part of them',()=>{
-    useAppStore.getState().updateSettings({unit:'cm'});
+    useAppStore.getState().updateLayout({cols:4});
     act(()=>{window.dispatchEvent(new KeyboardEvent('keydown',{key:'F6',bubbles:true,cancelable:true}));});
-    expect(useAppStore.getState().settings.unit).toBe('cm');
+    expect(useAppStore.getState().layout.cols).toBe(4);
   });
 });
 
 describe('the defaults entry in the settings modal',()=>{
   it('asks for a second click before it resets, then resets',async()=>{
-    await act(async()=>{useAppStore.setState({showSettingsModal:true});});   // flush the modal into the tree
+    await act(async()=>{useAppStore.setState({showSettingsModal:true,documents:[{id:'d',name:'job.pdf',filePath:'job.pdf',fileSize:1,fileType:'pdf',mimeType:'application/pdf',pageCount:1,createdAt:''}],pages:[{id:'p1',documentId:'d',documentName:'job.pdf',sourcePageNumber:1,widthMm:210,heightMm:297,rotation:0,selectedForPrint:true,isHighlighted:true,isBlankPage:false,colorProfile:'color',inkCoveragePercent:1}]});});   // flush the modal into the tree
     useAppStore.getState().updateSettings({unit:'cm'});
     useAppStore.getState().updateLayout({cols:4});
+    useAppStore.getState().addShapeOverlay('circle');
 
     const reset=document.querySelector<HTMLButtonElement>('button[data-reset-settings]');
     expect(reset, 'the profile list has to carry the reset as its first row').toBeTruthy();
@@ -86,11 +92,13 @@ describe('the defaults entry in the settings modal',()=>{
     act(()=>{reset!.click();});
     expect(useAppStore.getState().settings.unit).toBe('cm');       // nothing lost on the first press
     expect(useAppStore.getState().layout).toMatchObject({cols:4});
+    expect(useAppStore.getState().overlays).toHaveLength(1);
     expect(document.querySelector<HTMLButtonElement>('button[data-reset-settings]')!.textContent).toMatch(/Press again to reset/);
 
     act(()=>{document.querySelector<HTMLButtonElement>('button[data-reset-settings]')!.click();});
-    expect(useAppStore.getState().settings.unit).toBe(DEFAULT_SETTINGS.unit);
+    expect(useAppStore.getState().settings.unit).toBe('cm');
     expect(useAppStore.getState().layout).toEqual(DEFAULT_LAYOUT);
+    expect(useAppStore.getState().overlays).toEqual([]);
   });
 
   it('edits a profile behind an explicit button, and only there',async()=>{

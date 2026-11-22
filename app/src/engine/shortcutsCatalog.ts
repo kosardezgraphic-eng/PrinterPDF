@@ -21,6 +21,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     titleEn: 'Files & Export',
     items: [
       { id: 'add-file', keys: 'Ctrl+O', labelFa: 'افزودن فایل (PDF / تصویر)', labelEn: 'Add PDF or image files' },
+      { id: 'paste-clipboard', keys: 'Ctrl+V', labelFa: 'چسباندن تصویر از کلیپ‌بورد', labelEn: 'Paste image from clipboard' },
       { id: 'close-all', keys: 'Ctrl+W', labelFa: 'بستن همه (پاک‌سازی میز کار)', labelEn: 'Close all files' },
       { id: 'save-pdf', keys: 'Ctrl+S', labelFa: 'ذخیره خروجی PDF', labelEn: 'Save As PDF file' },
       { id: 'save-project', keys: 'Ctrl+Shift+S', labelFa: 'ذخیره پروژه (.psp)', labelEn: 'Save project (.psp)' },

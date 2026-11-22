@@ -52,6 +52,7 @@ export const ModalsAndToasts: React.FC = () => {
     showSplitModal,
     showOnboardingTour,
     showShortcutsModal,
+    quickPrintCopies,
     pendingDuplexPrint,
     printProgress,
     pdfPreviewModal,
@@ -161,6 +162,7 @@ export const ModalsAndToasts: React.FC = () => {
 
   React.useEffect(() => {
     if (!showPrintModal) return;
+    setCopies(quickPrintCopies);
     if (!selectedPrinter) {
       setDuplexMode(layout.duplexMode);
       setOrientation(layout.orientation);
@@ -1535,6 +1537,11 @@ export const ModalsAndToasts: React.FC = () => {
                       {pendingDuplexPrint.printerName} • {pendingDuplexPrint.paperName || pendingDuplexPrint.paperSize}{' '}
                       ({Math.round(pendingDuplexPrint.paperWidthMm ?? sheetDims.widthMm)}×
                       {Math.round(pendingDuplexPrint.paperHeightMm ?? sheetDims.heightMm)} mm) • {pendingDuplexPrint.tray}
+                      {pendingDuplexPrint.copies > 1
+                        ? isFa
+                          ? ` • ${pendingDuplexPrint.copies} کپی`
+                          : ` • ${pendingDuplexPrint.copies} copies`
+                        : ''}
                     </p>
                   </div>
                 </div>

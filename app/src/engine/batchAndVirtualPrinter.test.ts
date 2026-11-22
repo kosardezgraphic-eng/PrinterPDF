@@ -335,6 +335,8 @@ describe('Standalone Batch Print Workspace & Windows Virtual Printer', () => {
     );
     expect(installPs).toContain('Add-PrinterPort');
     expect(installPs).toContain('Add-Printer');
+    expect(installPs).toContain('Set-Printer');
+    expect(installPs).toContain('Test-IsMatchingVirtualPrinter');
     expect(installPs).toContain(VIRTUAL_PRINTER_DEFAULT_NAME);
 
     const applyPs = buildApplyVirtualPrinterConfigScript(VIRTUAL_PRINTER_DEFAULT_NAME, cfg);
@@ -350,6 +352,8 @@ describe('Standalone Batch Print Workspace & Windows Virtual Printer', () => {
       'C:\\Spool\\incoming-job.pdf'
     );
     expect(uninstallPs).toContain('Remove-Printer');
+    expect(uninstallPs).toContain('Remove-PrinterPort');
+    expect(uninstallPs).toContain('Remove-PrintJob');
 
     const enriched = enrichVirtualPrinterInfo(
       {

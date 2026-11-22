@@ -104,4 +104,32 @@ describe('windows packaging layout', () => {
     expect(prepare).toContain('(?:src|href)=["\']\\/assets\\/');
     expect(mainProcess).toContain("default-src 'self' file:");
   });
+
+  it('wires NSIS installer and uninstaller hooks to provision and cleanly remove the Windows Virtual Printer without duplicates', () => {
+    const nsh = read('../../../build/installer.nsh');
+    const ps1 = read('../../../scripts/install-virtual-printer.ps1');
+    const prepare = read('../../../scripts/prepare-win-build.mjs');
+
+    expect(builder).toContain('include: build/installer.nsh');
+    expect(builder).toContain('allowElevation: true');
+    expect(builder).toContain('scripts/install-virtual-printer.ps1');
+
+    expect(nsh).toContain('!macro customInstall');
+    expect(nsh).toContain('!macro customUnInstall');
+    expect(nsh).toContain('${ifNot} ${isUpdated}');
+    expect(nsh).toContain('Sysnative');
+    expect(nsh).toContain('incoming-job.pdf');
+    expect(nsh).toContain('-Uninstall');
+    expect(nsh).toContain('$PLUGINSDIR\\install-virtual-printer.ps1');
+
+    expect(ps1).toContain('Test-IsVirtualPrinterMatch');
+    expect(ps1).toContain('Set-Printer');
+    expect(ps1).toContain('Add-Printer');
+    expect(ps1).toContain('Remove-Printer');
+    expect(ps1).toContain('Remove-PrinterPort');
+    expect(ps1).toContain('initialPrinters.Count -eq 1');
+
+    expect(prepare).toContain('install-virtual-printer.ps1');
+    expect(prepare).toContain('installer.nsh');
+  });
 });

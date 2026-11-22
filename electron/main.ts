@@ -1,9 +1,9 @@
-import { app, BrowserWindow, ipcMain, session } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, Menu, session } from 'electron';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
-import { IPC_CHANNELS, type LocalFilePayload } from '../shared/ipc-channels';
+import { IPC_CHANNELS, type ClipboardImagePayload, type LocalFilePayload } from '../shared/ipc-channels';
 import { PrinterSidecarClient } from './printerSidecarClient';
 import { SessionStore } from './sessionStore';
 import { listInstalledSystemFonts } from './systemFonts';
@@ -214,6 +214,7 @@ async function createMainWindow(): Promise<void> {
       spellcheck: false,
     },
   });
+  mainWindow.setMenuBarVisibility(false);
 
   // Files given to the *first* instance (`PrintStudio.exe scan.png`, Explorer "Open with…").
   const startupFiles = fileArguments(process.argv.slice(1));
@@ -650,6 +651,18 @@ function registerIpcHandlers(): void {
     };
   });
 
+  ipcMain.handle(IPC_CHANNELS.CLIPBOARD_READ_IMAGE, async (): Promise<ClipboardImagePayload | null> => {
+    const img = clipboard.readImage();
+    if (!img || img.isEmpty()) return null;
+    const png = img.toPNG();
+    if (!png || png.byteLength === 0) return null;
+    return {
+      name: `clipboard-image-${Date.now()}.png`,
+      mimeType: 'image/png',
+      bytes: new Uint8Array(png.buffer, png.byteOffset, png.byteLength),
+    };
+  });
+
   ipcMain.handle(IPC_CHANNELS.CACHE_CLEAR, async () => {
     if (mainWindow) {
       await mainWindow.webContents.session.clearCache();
@@ -659,6 +672,7 @@ function registerIpcHandlers(): void {
 }
 
 app.whenReady().then(async () => {
+  Menu.setApplicationMenu(null);
   registerIpcHandlers();
   await createMainWindow();
 });

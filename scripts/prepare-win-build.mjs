@@ -77,4 +77,11 @@ if (!existsSync(sidecarExe)) {
 } else {
   console.log(`[win-build] sidecar: ${from}`);
 }
+/* ── 3. Windows Virtual Printer & NSIS installer hooks ─────────────────────── */
+if (!existsSync(path.join(root, 'scripts', 'install-virtual-printer.ps1'))) {
+  fail('missing scripts/install-virtual-printer.ps1 — required by Windows installer to provision and remove the virtual printer');
+}
+if (!existsSync(path.join(root, 'build', 'installer.nsh'))) {
+  fail('missing build/installer.nsh — NSIS installer/uninstaller virtual printer hooks are missing');
+}
 console.log('[win-build] ready for electron-builder');

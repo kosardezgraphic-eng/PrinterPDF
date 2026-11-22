@@ -20,6 +20,7 @@ import {
   AlertCircle,
   Cpu,
   Ban,
+  ClipboardPaste,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { VirtualPrinterCard } from './VirtualPrinterCard';
@@ -49,6 +50,7 @@ export const BatchPrintWorkspace: React.FC = () => {
     setAppMode,
     selectBatchJob,
     addBatchFiles,
+    importFromClipboard,
     addCurrentWorkspaceToBatch,
     updateBatchJob,
     applyPrinterProfileToAllBatchJobs,
@@ -259,6 +261,17 @@ export const BatchPrintWorkspace: React.FC = () => {
           >
             <FolderPlus className="h-3.5 w-3.5" />
             <span>{isFa ? 'افزودن فایل PDF / عکس' : 'Add PDF / Image Files'}</span>
+          </button>
+
+          <button
+            type="button"
+            data-batch-paste-clipboard
+            title={isFa ? 'چسباندن تصویر از کلیپ‌بورد (Ctrl+V)' : 'Paste image from clipboard (Ctrl+V)'}
+            onClick={() => void importFromClipboard({ target: 'document' })}
+            className="flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-300 dark:hover:bg-emerald-500/25 cursor-pointer"
+          >
+            <ClipboardPaste className="h-3.5 w-3.5" />
+            <span>{isFa ? 'چسباندن از کلیپ‌بورد' : 'Paste Image'}</span>
           </button>
 
           <button

@@ -67,6 +67,7 @@ export const TRANSLATIONS = {
         reset: 'بازنشانی',
         saveProfile: 'ذخیره پروفایل',
         add: 'افزودن فایل',
+        pasteClipboard: 'چسباندن تصویر از کلیپ‌بورد',
         closeAll: 'بستن همه',
         blankPage: 'صفحه سفید',
         duplicatePage: 'تکثیر صفحه',
@@ -132,6 +133,7 @@ export const TRANSLATIONS = {
       emptyDesc:
         'فایل‌های PDF یا عکس را به هر جای این صفحه بکشید و رها کنید، یا از کلیپ‌بورد با Ctrl+V بچسبانید. تا وقتی فایلی نیامده، میز کار خالی می‌ماند.',
       browseFiles: 'انتخاب فایل‌های PDF / تصویر',
+      pasteClipboard: 'چسباندن تصویر از کلیپ‌بورد (Ctrl+V)',
       frontSide: 'رو (Front)',
       backSide: 'پشت (Back)',
       sheet: 'برگ',
@@ -224,6 +226,7 @@ export const TRANSLATIONS = {
         reset: 'Reset',
         saveProfile: 'SaveSheetProfile',
         add: 'Add',
+        pasteClipboard: 'Paste from Clipboard',
         closeAll: 'CloseAll',
         blankPage: 'BlankPage',
         duplicatePage: 'Duplicate Page',
@@ -289,6 +292,7 @@ export const TRANSLATIONS = {
       emptyDesc:
         'Drag & drop PDF or image files anywhere on this page, or paste from the clipboard (Ctrl+V). The desk stays empty until a file arrives.',
       browseFiles: 'Browse PDF / Image Files',
+      pasteClipboard: 'Paste Image from Clipboard (Ctrl+V)',
       frontSide: 'Front Side',
       backSide: 'Back Side',
       sheet: 'Sheet',

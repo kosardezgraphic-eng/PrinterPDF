@@ -231,4 +231,40 @@ describe('Duplicate page custom count & keyboard shortcuts UI', () => {
     expect(useAppStore.getState().showSettingsModal).toBe(false);
     expect(host.querySelector('[data-shortcuts-modal]')).not.toBeNull();
   });
+
+  it('handles Ctrl+W as Close All even when a select or input is focused or using Persian keyboard layout, and Electron disables default window menu', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const mainSource = fs.readFileSync(path.resolve(process.cwd(), 'electron/main.ts'), 'utf8');
+    expect(mainSource).toContain('Menu.setApplicationMenu(null)');
+
+    act(() => {
+      useAppStore.getState().addShapeOverlay('rectangle');
+    });
+    expect(useAppStore.getState().overlays).toHaveLength(1);
+
+    const selectEl = document.createElement('select');
+    host.appendChild(selectEl);
+    const ev = new KeyboardEvent('keydown', {
+      key: 'ص',
+      code: 'KeyW',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    let prevented = false;
+    Object.defineProperty(ev, 'preventDefault', {
+      value: () => {
+        prevented = true;
+      },
+    });
+    act(() => {
+      selectEl.dispatchEvent(ev);
+    });
+    expect(prevented).toBe(true);
+    expect(useAppStore.getState().documents).toHaveLength(0);
+    expect(useAppStore.getState().pages).toHaveLength(0);
+    expect(useAppStore.getState().overlays).toHaveLength(0);
+    selectEl.remove();
+  });
 });

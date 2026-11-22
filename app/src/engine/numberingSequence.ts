@@ -121,6 +121,17 @@ export function numberingSequence(input: NumberingSequenceInput): { index: numbe
   const basis = input.basis ?? 'page';
   if (basis === 'page') return { index: input.pageIndex, total: input.pageTotal };
   if (basis === 'sheet') return { index: input.sheet.sideIndex, total: Math.max(1, input.sheetTotal) };
+  if (basis === 'cut-stack') {
+    const order = sequenceOrder(sequenceCells(input.sheet), input.direction ?? 'ltr');
+    const slotIndex = Math.max(0, order.indexOf(input.pageId));
+    const perSheet = Math.max(1, input.sheet.cells.length);
+    const totalTickets = Math.max(1, input.pageTotal);
+    const sheetIndexZero = Math.max(0, input.sheet.sideIndex - 1);
+    const basePerPile = Math.floor(totalTickets / perSheet);
+    const remainder = totalTickets % perSheet;
+    const offsetBeforeSlot = slotIndex * basePerPile + Math.min(slotIndex, remainder);
+    return { index: offsetBeforeSlot + sheetIndexZero + 1, total: totalTickets };
+  }
   const order = sequenceOrder(sequenceCells(input.sheet), input.direction ?? 'ltr');
   const found = order.indexOf(input.pageId);
   return { index: found >= 0 ? found + 1 : 1, total: Math.max(1, order.length) };
