@@ -122,7 +122,7 @@ export function createDefaultTicketConfig(): TicketConfig {
     step: 1,
     padZeros: 0,
     format: 'english',
-    orderingMode: 'per-sheet',
+    orderingMode: 'cut-stack',
     direction: 'rtl',
     autoGridCutLines: true,
     gridCutLineColor: '#0284c7',
@@ -247,6 +247,38 @@ export function getTicketGridMetrics(config: TicketConfig): TicketGridMetrics {
     effectiveSheetCount,
     totalTickets,
   };
+}
+
+/**
+ * Returns the one-based sequence index for a physical ticket position.
+ * In cut-stack mode each position is its own pile: the same cell on the next
+ * printed sheet receives the immediately following number.
+ */
+export function ticketSequenceIndex(
+  config: TicketConfig,
+  row: number,
+  col: number,
+  sheetIndex = 0
+): number {
+  const metrics = getTicketGridMetrics(config);
+  const cells = Array.from({ length: metrics.rows * metrics.cols }, (_, index) => ({
+    row: Math.floor(index / metrics.cols),
+    col: index % metrics.cols,
+  }));
+  const ordered = [...cells].sort((a, b) => {
+    if (config.direction === 'ttb') return a.col - b.col || a.row - b.row;
+    if (config.direction === 'rtl') return a.row - b.row || b.col - a.col;
+    if (config.direction === 'zigzag') {
+      return a.row - b.row || (a.row % 2 === 0 ? a.col - b.col : b.col - a.col);
+    }
+    return a.row - b.row || a.col - b.col;
+  });
+  const slotIndex = Math.max(0, ordered.findIndex(cell => cell.row === row && cell.col === col));
+  if (config.orderingMode !== 'cut-stack') return slotIndex + 1;
+  const basePerPile = Math.floor(metrics.totalTickets / metrics.ticketsPerSheet);
+  const remainder = metrics.totalTickets % metrics.ticketsPerSheet;
+  const offsetBeforeSlot = slotIndex * basePerPile + Math.min(slotIndex, remainder);
+  return offsetBeforeSlot + Math.max(0, Math.trunc(sheetIndex)) + 1;
 }
 
 export function ticketDirectionToSheetOrder(direction: TicketDirection): SheetOrderMode {
