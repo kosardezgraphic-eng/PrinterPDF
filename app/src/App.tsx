@@ -11,6 +11,7 @@ import { PreviewWorkspace } from './components/PreviewWorkspace';
 import { StatusBar } from './components/StatusBar';
 import { ModalsAndToasts } from './components/Modals';
 import { BatchPrintWorkspace } from './components/BatchPrintWorkspace';
+import { TicketNumberingWorkspace } from './components/TicketNumberingWorkspace';
 import { routeDroppedFiles } from './engine/imageImport';
 import { extractFilesFromClipboardData } from './engine/clipboardImport';
 import { buildSheetPresetRows, findPresetIdByShortcut } from './engine/sheetPresets';
@@ -87,18 +88,12 @@ export const App: React.FC = () => {
     };
   }, [initializeWorkspace, refreshVirtualPrinterStatus, handleIncomingVirtualPrinterJob]);
 
-  // Settings and saved profiles are written to disk as they change, so they have to be read back once,
-  // before the operator touches anything — otherwise a restart quietly throws away the whole setup.
-  // Once per load, and only once: a StrictMode double-mount or a hot reload must not overwrite the
-  // values the operator has been editing in this session with whatever was on disk a moment ago.
   useEffect(() => {
     if (preferencesRestored) return;
     preferencesRestored = true;
     void restorePreferences();
   }, [restorePreferences]);
 
-  // A file opened from Explorer or the command line reaches the app as a path only, so it is read
-  // through the desktop bridge. In a browser there is no bridge and nothing subscribes at all.
   useEffect(() => {
     const stop = listenForNativeOpenFiles(
       (files) => {
@@ -115,14 +110,12 @@ export const App: React.FC = () => {
     return stop;
   }, [importFiles, addToast, settings.language]);
 
-  // Synchronize HTML dir (RTL/LTR) and lang
   useEffect(() => {
     const dir = settings.language === 'fa' ? 'rtl' : 'ltr';
     document.documentElement.setAttribute('dir', dir);
     document.documentElement.setAttribute('lang', settings.language);
   }, [settings.language]);
 
-  // Principle #1: Prevent any Unhandled Promise Rejection from crashing or going silent
   useEffect(() => {
     const onUnhandledRejection = (event: PromiseRejectionEvent) => {
       event.preventDefault();
@@ -140,7 +133,6 @@ export const App: React.FC = () => {
       window.removeEventListener('unhandledrejection', onUnhandledRejection);
   }, [addToast, settings.language]);
 
-  // Comprehensive Keyboard Shortcuts & Clipboard Paste (A1)
   useEffect(() => {
     const getTargetPageIds = (state: ReturnType<typeof useAppStore.getState>) => {
       const highlighted = state.pages.filter((p) => p.isHighlighted).map((p) => p.id);
@@ -206,7 +198,7 @@ export const App: React.FC = () => {
       }
 
       const state = useAppStore.getState();
-      if (state.appMode === 'batch') {
+      if (state.appMode === 'batch' || state.appMode === 'ticket') {
         if (e.ctrlKey || e.metaKey) {
           if (e.key === '/' || e.key === '?' || e.code === 'Slash') {
             e.preventDefault();
@@ -353,8 +345,11 @@ export const App: React.FC = () => {
       if (alreadyRouted || files.length === 0) return;
       const { documents } = routeDroppedFiles(files, false);
       if (documents.length === 0) return;
-      if (useAppStore.getState().appMode === 'batch') {
+      const mode = useAppStore.getState().appMode;
+      if (mode === 'batch') {
         void useAppStore.getState().addBatchFiles(documents);
+      } else if (mode === 'ticket') {
+        void useAppStore.getState().importTicketSourceFiles(files);
       } else {
         void importFiles(documents);
       }
@@ -379,8 +374,11 @@ export const App: React.FC = () => {
       }
 
       e.preventDefault();
-      if (useAppStore.getState().appMode === 'batch') {
+      const mode = useAppStore.getState().appMode;
+      if (mode === 'batch') {
         void useAppStore.getState().addBatchFiles(extracted);
+      } else if (mode === 'ticket') {
+        void useAppStore.getState().importTicketSourceFiles(extracted);
       } else {
         void importFiles(extracted);
       }
@@ -398,16 +396,20 @@ export const App: React.FC = () => {
     };
   }, [importFiles]);
 
+  const isStandaloneMode = appMode === 'batch' || appMode === 'ticket';
+
   return (
     <ErrorBoundary>
       <AppShell
         theme={settings.theme}
         labels={t(settings.language).shell}
         topbar={<QuickBar />}
-        navigation={appMode === 'batch' ? null : <TopToolRibbon />}
+        navigation={isStandaloneMode ? null : <TopToolRibbon />}
         workspace={
           appMode === 'batch' ? (
             <BatchPrintWorkspace />
+          ) : appMode === 'ticket' ? (
+            <TicketNumberingWorkspace />
           ) : (
             <div dir="ltr" className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
               <SidebarPages />
