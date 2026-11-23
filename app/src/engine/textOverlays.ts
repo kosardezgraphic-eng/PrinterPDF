@@ -1,6 +1,6 @@
 import type {ComputedSheetSide,PageItem,PageOverlay,PageOverlayText,PageOverlayNumbering} from '@shared/models';
 import {matchesOverlayScope,formatOverlayNumber} from './overlayRenderUtils';
-import {numberingSequence} from './numberingSequence';
+import {sequenceCells, sequenceOrder} from './numberingSequence';
 import {resolveTextTemplate} from './textFormatting';
 import type {TextScriptRange} from '@shared/models';
 
@@ -11,8 +11,13 @@ export interface TextPlacement {
 }
 /** `^{...}` raises and `_{...}` lowers a template segment; inner `{page}`-style tokens stay usable. */
 const NUMBERING_MARKER=/([\^_])\{((?:[^{}]|\{[^{}]*\})*)\}/;
-export function parseNumberingTemplate(template:string):{text:string;script?:'super'|'sub'}[]{
-  const spans:{text:string;script?:'super'|'sub'}[]=[];let rest=template;
+type ParsedTemplateSpan = {text:string;script?:'super'|'sub'};
+const parsedTemplateCache = new Map<string, ParsedTemplateSpan[]>();
+
+export function parseNumberingTemplate(template:string):ParsedTemplateSpan[]{
+  const cached = parsedTemplateCache.get(template);
+  if (cached) return cached;
+  const spans:ParsedTemplateSpan[]=[];let rest=template;
   for(;;){
     const match=NUMBERING_MARKER.exec(rest);
     if(!match){if(rest)spans.push({text:rest});break;}
@@ -21,6 +26,8 @@ export function parseNumberingTemplate(template:string):{text:string;script?:'su
     if(match[2])spans.push({text:match[2].replace(NUMBERING_MARKER,'$2'),script:match[1]==='^'?'super':'sub'});
     rest=rest.slice(match.index+match[0].length);
   }
+  if (parsedTemplateCache.size > 512) parsedTemplateCache.clear();
+  parsedTemplateCache.set(template, spans);
   return spans;
 }
 /** Resolves a numbering template, including its script markers, for one page/sheet position. */
@@ -40,6 +47,19 @@ export function textPlacements(sheet:ComputedSheetSide,totalSheets:number,pages:
   if(!texts.length)return [];
   const indices=pageIndices ?? new Map(pages.map((page,i)=>[page.id,i+1]));
   const sheetPageIds=sheet.cells.flatMap(c=>c.page?[c.page.id]:[]);
+  // Compute grid sequence order at most once per direction on this sheet so N slots don't re-sort the grid N times.
+  const sheetWalkCache = new Map<string, { indexByPageId: Map<string, number>; count: number }>();
+  const getSheetWalk = (direction: NonNullable<PageOverlayNumbering['sequenceDirection']>) => {
+    let entry = sheetWalkCache.get(direction);
+    if (!entry) {
+      const orderedIds = sequenceOrder(sequenceCells(sheet), direction);
+      const indexByPageId = new Map<string, number>();
+      for (let i = 0; i < orderedIds.length; i++) indexByPageId.set(orderedIds[i], i);
+      entry = { indexByPageId, count: Math.max(1, orderedIds.length) };
+      sheetWalkCache.set(direction, entry);
+    }
+    return entry;
+  };
   const result:TextPlacement[]=[];
   for(const item of texts){
     const add=(rect:{x:number;y:number;width:number;height:number},key:string,rotation:number,context:{page:number;total:number;sheet:number;file:string;docPage:number},clip?:TextPlacement['clip'],pageId?:string)=>{
@@ -60,11 +80,24 @@ export function textPlacements(sheet:ComputedSheetSide,totalSheets:number,pages:
     };
     // What the layer counts: the document's own page number, the cells read off the sheet, or one number per
     // output side. `page` keeps `{page}`/`{total}` meaning exactly what they always did.
-    const numberFor=(target:'sheet'|'cell'|'page',pageId:string|undefined,pageIndex:number,basisPage:number,basisTotal:number)=>{
-      if(item.kind!=='numbering' || (item.sequenceBasis??'page')==='page') return {page:basisPage,total:basisTotal};
-      const walk=numberingSequence({basis:item.sequenceBasis,direction:item.sequenceDirection,pageId:pageId??'',sheet,
-        pageIndex:basisPage,pageTotal:basisTotal,sheetTotal:totalSheets});
-      return {page:walk.index,total:walk.total};
+    const numberFor=(_target:'sheet'|'cell'|'page',pageId:string|undefined,_pageIndex:number,basisPage:number,basisTotal:number)=>{
+      const basis = item.kind === 'numbering' ? (item.sequenceBasis ?? 'page') : 'page';
+      if (basis === 'page') return {page:basisPage,total:basisTotal};
+      if (basis === 'sheet') return {page:sheet.sideIndex,total:Math.max(1,totalSheets)};
+      const direction = (item.kind === 'numbering' ? item.sequenceDirection : undefined) ?? 'ltr';
+      const walk = getSheetWalk(direction);
+      const slotIdx = pageId ? (walk.indexByPageId.get(pageId) ?? -1) : -1;
+      if (basis === 'cut-stack') {
+        const safeSlot = Math.max(0, slotIdx);
+        const perSheet = Math.max(1, sheet.cells.length);
+        const totalTickets = Math.max(1, basisTotal);
+        const sheetIndexZero = Math.max(0, sheet.sideIndex - 1);
+        const basePerPile = Math.floor(totalTickets / perSheet);
+        const remainder = totalTickets % perSheet;
+        const offsetBeforeSlot = safeSlot * basePerPile + Math.min(safeSlot, remainder);
+        return {page:offsetBeforeSlot + sheetIndexZero + 1, total:totalTickets};
+      }
+      return {page:slotIdx >= 0 ? slotIdx + 1 : 1, total:walk.count};
     };
     if(item.target==='sheet'){
       if(matchesOverlayScope(item,{pageIndex:0,total:totalSheets,sheetIndex:sheet.sideIndex,sheetPageIds})){

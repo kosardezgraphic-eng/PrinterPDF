@@ -592,5 +592,136 @@ class TestOffscreenCanvas {
     expect((await PDFDocument.load(exported4)).getPageCount()).toBe(4);
   });
 
+  it('reuses embedded Form XObjects when the same PDF form repeats across many tickets/sheets', async () => {
+    const source = await PDFDocument.create();
+    const formPage = source.addPage([100, 100]);
+    formPage.drawRectangle({ x: 10, y: 10, width: 80, height: 80, color: rgb(0.1, 0.4, 0.8) });
+    const doc = { id: 'ticket-form', fileType: 'pdf', rawBytes: await source.save() } as SourceDocument;
+
+    const repeatedPages: PageItem[] = Array.from({ length: 16 }, (_, idx) => ({
+      ...page(0),
+      id: `tk-${idx + 1}`,
+      documentId: 'ticket-form',
+      sourcePageNumber: 1,
+      widthMm: 100 * ptToMm,
+      heightMm: 100 * ptToMm,
+    }));
+
+    const outBytes = await exportImposedPdf({
+      documents: [doc],
+      pages: repeatedPages,
+      layout: { ...layout, rows: 2, cols: 2, duplexMode: 'none' },
+      effects: { ...DEFAULT_EFFECTS, enabled: false },
+      watermark: { ...getDefaultWatermarkSettings(), enabled: false },
+      pageNumbering: { ...getDefaultPageNumberSettings(), enabled: false },
+      userName: 'test',
+    });
+
+    const loaded = await PDFDocument.load(outBytes);
+    expect(loaded.getPageCount()).toBe(4);
+
+    // Every exported sheet should reference the exact same cached Form XObject ref for the embedded ticket form
+    const formRefs = new Set<string>();
+    for (let i = 0; i < loaded.getPageCount(); i++) {
+      const xobjects = loaded.getPage(i).node.Resources()?.lookup(PDFName.of('XObject'), PDFDict);
+      expect(xobjects?.keys().length).toBe(4);
+      for (const key of xobjects!.keys()) {
+        formRefs.add(String(xobjects!.get(key)));
+      }
+    }
+    expect(formRefs.size).toBe(1);
+  });
+
+  it('caches ticket background and reuses prefix/digit glyph atlas across hundreds of numbered tickets for small fast PDFs', async () => {
+    const ticketCanvas = createCanvas(120, 60);
+    const tCtx = ticketCanvas.getContext('2d');
+    tCtx.fillStyle = '#ffffff';
+    tCtx.fillRect(0, 0, 120, 60);
+    tCtx.strokeStyle = '#0284c7';
+    tCtx.lineWidth = 2;
+    tCtx.strokeRect(2, 2, 116, 56);
+    const ticketPng = new Uint8Array(await ticketCanvas.encode('png'));
+
+    const doc: SourceDocument = {
+      id: 'ticket-img',
+      name: 'ticket.png',
+      filePath: 'ticket.png',
+      fileSize: ticketPng.byteLength,
+      fileType: 'image',
+      mimeType: 'image/png',
+      pageCount: 1,
+      createdAt: new Date().toISOString(),
+      rawBytes: ticketPng,
+    };
+
+    const { buildTicketStudioLayout, buildTicketStudioOverlays, createDefaultTicketConfig, generateTicketPages } =
+      await import('./ticketNumbering');
+    const cfg = {
+      ...createDefaultTicketConfig(),
+      rows: 2,
+      cols: 2,
+      quantityMode: 'tickets' as const,
+      ticketCount: 120, // 30 A4 sheets, 240 number slots (1001..1120 twice per ticket)
+      startNumber: 1001,
+      orderingMode: 'cut-stack' as const,
+    };
+    const basePage: PageItem = {
+      ...page(0),
+      id: 'src-ticket',
+      documentId: 'ticket-img',
+      documentName: 'ticket.png',
+      sourcePageNumber: 1,
+      widthMm: 95,
+      heightMm: 50,
+    };
+    const pages = generateTicketPages(basePage, 120);
+    const ticketLayout = buildTicketStudioLayout(DEFAULT_LAYOUT, cfg);
+    const overlays = buildTicketStudioOverlays(cfg, ticketLayout, pages);
+
+    vi.stubGlobal('document', {
+      createElement: (tag: string) => {
+        if (tag === 'canvas') return createCanvas(1, 1);
+        throw new Error(`Unexpected element: ${tag}`);
+      },
+    });
+
+    try {
+      const outBytes = await exportImposedPdf({
+        documents: [doc],
+        pages,
+        allPages: pages,
+        layout: ticketLayout,
+        effects: { ...DEFAULT_EFFECTS, enabled: false },
+        watermark: { ...getDefaultWatermarkSettings(), enabled: false },
+        pageNumbering: { ...getDefaultPageNumberSettings(), enabled: false },
+        overlays,
+        userName: 'test',
+      });
+
+      const loaded = await PDFDocument.load(outBytes);
+      expect(loaded.getPageCount()).toBe(30);
+
+      // Count non-SMask Image XObjects across the entire 30-sheet / 120-ticket / 240-slot PDF:
+      // 1 source ticket background + 1 prefix ("شماره") + 10 digits ('0'..'9') = <= 14 total images, NOT 241!
+      let imageXObjectCount = 0;
+      const smaskRefs = new Set<string>();
+      for (const [, obj] of loaded.context.enumerateIndirectObjects()) {
+        if (obj instanceof PDFStream && obj.dict.get(PDFName.of('Subtype'))?.toString() === '/Image') {
+          const smask = obj.dict.get(PDFName.of('SMask'));
+          if (smask) smaskRefs.add(String(smask));
+          imageXObjectCount++;
+        }
+      }
+      const primaryImages = imageXObjectCount - smaskRefs.size;
+      expect(primaryImages).toBeLessThanOrEqual(16);
+
+      // First exported sheet should render cleanly without throwing
+      const sheet1Pixels = await render(outBytes);
+      expect(sheet1Pixels.width).toBeGreaterThan(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
 });
 

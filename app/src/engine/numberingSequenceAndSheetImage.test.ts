@@ -44,7 +44,7 @@ describe('the cell walk', () => {
 });
 
 describe('what a numbering layer counts', () => {
-  const at = (pageId: string, basis: 'page' | 'grid' | 'sheet', direction: 'ltr' | 'ttb' = 'ltr', sheetIndex = 0) =>
+  const at = (pageId: string, basis: 'page' | 'grid' | 'cut-stack' | 'sheet', direction: 'ltr' | 'rtl' | 'ttb' = 'ltr', sheetIndex = 0) =>
     numberingSequence({
       basis, direction, pageId, sheet: sides[sheetIndex], pageIndex: eight.findIndex(p => p.id === pageId) + 1,
       pageTotal: eight.length, sheetTotal: sides.length,
@@ -62,6 +62,15 @@ describe('what a numbering layer counts', () => {
     expect(at('c', 'grid', 'ttb')).toEqual({ index: 2, total: 4 });   // a c / b d read down the columns
   });
 
+  it('counts vertically down each cut-stack pile across sheets so stacked tickets stay sequential', () => {
+    // With 8 pages on 2 sheets of 2x2 LTR: pile 0 (top-left: a on sheet 1, e on sheet 2) is 1, 2;
+    // pile 1 (top-right: b, f) is 3, 4; pile 2 (bottom-left: c, g) is 5, 6; pile 3 (d, h) is 7, 8.
+    expect(at('a', 'cut-stack', 'ltr', 0)).toEqual({ index: 1, total: 8 });
+    expect(at('e', 'cut-stack', 'ltr', 1)).toEqual({ index: 2, total: 8 });
+    expect(at('b', 'cut-stack', 'ltr', 0)).toEqual({ index: 3, total: 8 });
+    expect(at('f', 'cut-stack', 'ltr', 1)).toEqual({ index: 4, total: 8 });
+  });
+
   it('numbers every cell of one side the same when the sheet is the unit', () => {
     // The total is the number of sides, not the number of cells: four cells sharing number 1 of 2 is the point.
     for (const id of ['a', 'b', 'c', 'd']) expect(at(id, 'sheet')).toEqual({ index: 1, total: 2 });
@@ -74,6 +83,7 @@ describe('what a numbering layer counts', () => {
 
   it('refuses junk from a panel or a project file instead of storing it', () => {
     expect(sanitizeSequence('grid', 'zigzag')).toEqual({ sequenceBasis: 'grid', sequenceDirection: 'zigzag' });
+    expect(sanitizeSequence('cut-stack', 'rtl')).toEqual({ sequenceBasis: 'cut-stack', sequenceDirection: 'rtl' });
     expect(sanitizeSequence('sideways', 'diagonal')).toEqual({ sequenceDirection: 'ltr' });
   });
 });

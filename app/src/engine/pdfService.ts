@@ -182,6 +182,10 @@ async function surfaceToPngBytes(canvas: HTMLCanvasElement | OffscreenCanvas): P
   throw new Error('Canvas PNG export is unavailable');
 }
 
+function yieldPdfExportTurn(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 async function surfaceToJpegBytes(
   canvas: HTMLCanvasElement | OffscreenCanvas,
   quality = 0.85
@@ -273,6 +277,97 @@ function buildResolvedEffectsKey(r: ResolvedPageEffects): string {
     r.blackText ? 1 : 0,
     r.threshold,
   ].join(':');
+}
+
+function parseCssColorRgba(color: string): { r: number; g: number; b: number; alpha: number } | null {
+  const trimmed = color.trim();
+  if (!trimmed || trimmed === 'transparent') return null;
+  if (trimmed.startsWith('#')) {
+    const hex = trimmed.slice(1);
+    if (/^[0-9a-f]{3}$/i.test(hex)) {
+      return {
+        r: parseInt(hex[0] + hex[0], 16) / 255,
+        g: parseInt(hex[1] + hex[1], 16) / 255,
+        b: parseInt(hex[2] + hex[2], 16) / 255,
+        alpha: 1,
+      };
+    }
+    if (/^[0-9a-f]{6}$/i.test(hex)) {
+      return {
+        r: parseInt(hex.slice(0, 2), 16) / 255,
+        g: parseInt(hex.slice(2, 4), 16) / 255,
+        b: parseInt(hex.slice(4, 6), 16) / 255,
+        alpha: 1,
+      };
+    }
+    if (/^[0-9a-f]{8}$/i.test(hex)) {
+      return {
+        r: parseInt(hex.slice(0, 2), 16) / 255,
+        g: parseInt(hex.slice(2, 4), 16) / 255,
+        b: parseInt(hex.slice(4, 6), 16) / 255,
+        alpha: parseInt(hex.slice(6, 8), 16) / 255,
+      };
+    }
+    return null;
+  }
+  const rgbMatch = trimmed.match(
+    /^rgba?\(\s*(\d+(?:\.\d+)?)\s*[,\s]\s*(\d+(?:\.\d+)?)\s*[,\s]\s*(\d+(?:\.\d+)?)(?:\s*[,/]\s*(\d*(?:\.\d+)?%?))?\s*\)$/i
+  );
+  if (rgbMatch) {
+    const r = Math.max(0, Math.min(255, Number(rgbMatch[1]))) / 255;
+    const g = Math.max(0, Math.min(255, Number(rgbMatch[2]))) / 255;
+    const b = Math.max(0, Math.min(255, Number(rgbMatch[3]))) / 255;
+    let alpha = 1;
+    if (rgbMatch[4] !== undefined) {
+      alpha = rgbMatch[4].endsWith('%')
+        ? Math.max(0, Math.min(100, Number(rgbMatch[4].slice(0, -1)))) / 100
+        : Math.max(0, Math.min(1, Number(rgbMatch[4])));
+    }
+    return { r, g, b, alpha };
+  }
+  return null;
+}
+
+type VisualTextToken =
+  | { kind: 'glyph'; text: string; isRtl: boolean }
+  | { kind: 'space'; text: string };
+
+const ANY_DIGIT_REGEX = /[0-9\u06F0-\u06F9\u0660-\u0669]/;
+const RTL_PREFIX_SINGLE_NUM_REGEX =
+  /^(\s*)([^0-9\u06F0-\u06F9\u0660-\u0669]*?)(\s*)([0-9\u06F0-\u06F9\u0660-\u0669]+)(\s*)$/;
+const LTR_TOKEN_SPLIT_REGEX = /(\s+|[0-9\u06F0-\u06F9\u0660-\u0669]|[^\s0-9\u06F0-\u06F9\u0660-\u0669]+)/g;
+
+function decomposeVisualTextTokens(text: string): VisualTextToken[] | null {
+  if (!text || !ANY_DIGIT_REGEX.test(text)) return null;
+  const hasRtl = /[\u0590-\u08ff]/.test(text);
+  if (!hasRtl) {
+    const out: VisualTextToken[] = [];
+    const parts = text.match(LTR_TOKEN_SPLIT_REGEX);
+    if (!parts || parts.length === 0) return null;
+    for (const part of parts) {
+      if (/^\s+$/.test(part)) {
+        out.push({ kind: 'space', text: part });
+      } else {
+        out.push({ kind: 'glyph', text: part, isRtl: false });
+      }
+    }
+    return out;
+  }
+
+  const m = text.match(RTL_PREFIX_SINGLE_NUM_REGEX);
+  if (!m) return null;
+  const [, leadingWs, prefixWord, midWs, digits, trailingWs] = m;
+  if (/[A-Za-z]/.test(prefixWord)) return null;
+
+  const out: VisualTextToken[] = [];
+  if (trailingWs) out.push({ kind: 'space', text: trailingWs });
+  for (let i = 0; i < digits.length; i++) {
+    out.push({ kind: 'glyph', text: digits[i], isRtl: false });
+  }
+  if (midWs) out.push({ kind: 'space', text: midWs });
+  if (prefixWord) out.push({ kind: 'glyph', text: prefixWord, isRtl: true });
+  if (leadingWs) out.push({ kind: 'space', text: leadingWs });
+  return out;
 }
 
 export interface ImportErrorItem {
@@ -848,12 +943,40 @@ export async function exportImposedPdf(params: {
   );
   const totalSides = Math.max(1, sheets.length);
   const textImages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPng>>>();
+  const textTokenCache = new Map<
+    string,
+    { image: Awaited<ReturnType<typeof outPdf.embedPng>>; advPx: number; padPx: number; tokW: number }
+  >();
+  const shapeSvgPathCache = new Map<string, string>();
+  const pdfPageBaseDims = new Map<string, { width: number; height: number }>();
   const pictureImages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPng>>>();
   const processedImages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPng>>>();
   const processedPdfPages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPng>>>();
+  const embeddedSourcePdfPages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPages>>[number]>();
   const loadedPdfJsTasks = new Map<string, ReturnType<PdfJsModule['getDocument']>>();
   const loadedPdfJsDocs = new Map<string, Promise<PdfJsDocumentProxy>>();
   const loadedTextFonts = new Set<string>();
+
+  const shapeOverlays = overlays.filter((o) => o.kind === 'shape');
+  const imageOverlays = overlays.filter((o) => o.kind === 'image');
+  const textOverlays = overlays.filter((o) => o.kind === 'text' || (o.kind === 'numbering' && o.enabled));
+  let measureCtxCache: CanvasRenderingContext2D | null | undefined;
+  const getMeasureCtx = (): CanvasRenderingContext2D | null => {
+    if (measureCtxCache !== undefined) return measureCtxCache;
+    if (typeof document === 'undefined') {
+      measureCtxCache = null;
+      return null;
+    }
+    try {
+      const mc = document.createElement('canvas');
+      mc.width = 1;
+      mc.height = 1;
+      measureCtxCache = mc.getContext('2d');
+    } catch {
+      measureCtxCache = null;
+    }
+    return measureCtxCache;
+  };
 
   const getPdfJsDoc = (docId: string, rawBytes: Uint8Array): Promise<PdfJsDocumentProxy> => {
     let promise = loadedPdfJsDocs.get(docId);
@@ -895,6 +1018,9 @@ export async function exportImposedPdf(params: {
     }
     return promise;
   };
+
+  let lastProgressReported = -1;
+  let lastYieldAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
 
   try {
   for (let sIdx = 0; sIdx < sheets.length; sIdx++) {
@@ -973,22 +1099,28 @@ export async function exportImposedPdf(params: {
             const targetCellH = rotated ? contentWPt : contentHPt;
             const visibleFractionW = Math.max(0.02, 1 - crop.left - crop.right);
             const visibleFractionH = Math.max(0.02, 1 - crop.top - crop.bottom);
-            const pdfJsDoc = await getPdfJsDoc(cell.page.documentId, sourceDoc.rawBytes);
-            const pdfPage = await pdfJsDoc.getPage(cell.page.sourcePageNumber);
-            try {
+            const baseKey = `${cell.page.documentId}:${cell.page.sourcePageNumber}`;
+            let baseDims = pdfPageBaseDims.get(baseKey);
+            let pdfPage: Awaited<ReturnType<PdfJsDocumentProxy['getPage']>> | null = null;
+            if (!baseDims) {
+              const pdfJsDoc = await getPdfJsDoc(cell.page.documentId, sourceDoc.rawBytes);
+              pdfPage = await pdfJsDoc.getPage(cell.page.sourcePageNumber);
               const baseViewport = pdfPage.getViewport({ scale: 1, rotation: 0 });
+              baseDims = { width: baseViewport.width, height: baseViewport.height };
+              pdfPageBaseDims.set(baseKey, baseDims);
+            }
+            try {
               const maxSidePx = Math.min(3200, maxRasterSidePx);
-              const desiredScaleW = (targetCellW * (targetRasterDpi / 72)) / Math.max(1, baseViewport.width * visibleFractionW);
-              const desiredScaleH = (targetCellH * (targetRasterDpi / 72)) / Math.max(1, baseViewport.height * visibleFractionH);
+              const desiredScaleW = (targetCellW * (targetRasterDpi / 72)) / Math.max(1, baseDims.width * visibleFractionW);
+              const desiredScaleH = (targetCellH * (targetRasterDpi / 72)) / Math.max(1, baseDims.height * visibleFractionH);
               const maxScale = Math.min(
-                maxSidePx / Math.max(1, baseViewport.width),
-                maxSidePx / Math.max(1, baseViewport.height)
+                maxSidePx / Math.max(1, baseDims.width),
+                maxSidePx / Math.max(1, baseDims.height)
               );
               const minScale = Math.min(maxScale, imageHandling === 'downsample-150' ? 1.25 : 2);
               const renderScale = Math.max(minScale, Math.min(maxScale, Math.max(desiredScaleW, desiredScaleH)));
-              const viewport = pdfPage.getViewport({ scale: renderScale, rotation: 0 });
-              const fullW = Math.max(1, Math.round(viewport.width));
-              const fullH = Math.max(1, Math.round(viewport.height));
+              const fullW = Math.max(1, Math.round(baseDims.width * renderScale));
+              const fullH = Math.max(1, Math.round(baseDims.height * renderScale));
               const cropX = Math.max(0, Math.min(fullW - 1, Math.round(crop.left * fullW)));
               const cropY = Math.max(0, Math.min(fullH - 1, Math.round(crop.top * fullH)));
               const cropW = Math.max(1, Math.min(fullW - cropX, Math.round(visibleFractionW * fullW)));
@@ -1009,15 +1141,26 @@ export async function exportImposedPdf(params: {
               ]);
               let processedPdfImg = processedPdfPages.get(pdfEffectKey);
               if (!processedPdfImg) {
-                const fullSurface = createCanvas2DSurface(fullW, fullH);
+                if (!pdfPage) {
+                  const pdfJsDoc = await getPdfJsDoc(cell.page.documentId, sourceDoc.rawBytes);
+                  pdfPage = await pdfJsDoc.getPage(cell.page.sourcePageNumber);
+                }
+                const viewport = pdfPage.getViewport({ scale: renderScale, rotation: 0 });
+                const renderW = Math.max(1, Math.round(viewport.width));
+                const renderH = Math.max(1, Math.round(viewport.height));
+                const fullSurface = createCanvas2DSurface(renderW, renderH);
                 if (!fullSurface) throw new Error('Effects export requires a Canvas 2D renderer');
                 fullSurface.ctx.fillStyle = '#ffffff';
-                fullSurface.ctx.fillRect(0, 0, fullW, fullH);
+                fullSurface.ctx.fillRect(0, 0, renderW, renderH);
                 await pdfPage.render({
                   canvasContext: fullSurface.ctx as unknown as CanvasRenderingContext2D,
                   viewport,
                 }).promise;
-                const imgData = fullSurface.ctx.getImageData(cropX, cropY, cropW, cropH);
+                const safeCropX = Math.max(0, Math.min(renderW - 1, Math.round(crop.left * renderW)));
+                const safeCropY = Math.max(0, Math.min(renderH - 1, Math.round(crop.top * renderH)));
+                const safeCropW = Math.max(1, Math.min(renderW - safeCropX, Math.round(visibleFractionW * renderW)));
+                const safeCropH = Math.max(1, Math.min(renderH - safeCropY, Math.round(visibleFractionH * renderH)));
+                const imgData = fullSurface.ctx.getImageData(safeCropX, safeCropY, safeCropW, safeCropH);
                 const processed = applyEffectsToRgbaBuffer(
                   imgData.data,
                   effects,
@@ -1025,20 +1168,28 @@ export async function exportImposedPdf(params: {
                   resolved.applyGlobal
                 );
                 const outSurface =
-                  cropX === 0 && cropY === 0 && cropW === fullW && cropH === fullH
+                  safeCropX === 0 && safeCropY === 0 && safeCropW === renderW && safeCropH === renderH
                     ? fullSurface
-                    : createCanvas2DSurface(cropW, cropH);
+                    : createCanvas2DSurface(safeCropW, safeCropH);
                 if (!outSurface) throw new Error('Effects export requires a Canvas 2D renderer');
                 const targetImgData =
-                  outSurface === fullSurface ? imgData : outSurface.ctx.createImageData(cropW, cropH);
+                  outSurface === fullSurface ? imgData : outSurface.ctx.createImageData(safeCropW, safeCropH);
                 targetImgData.data.set(processed);
                 outSurface.ctx.putImageData(targetImgData, 0, 0);
                 processedPdfImg = await embedSurfaceOpaque(outSurface.canvas);
                 processedPdfPages.set(pdfEffectKey, processedPdfImg);
+                if ('width' in outSurface.canvas) {
+                  outSurface.canvas.width = 0;
+                  outSurface.canvas.height = 0;
+                }
+                if (fullSurface !== outSurface && 'width' in fullSurface.canvas) {
+                  fullSurface.canvas.width = 0;
+                  fullSurface.canvas.height = 0;
+                }
               }
               outPage.drawImage(processedPdfImg, drawPlacement);
             } finally {
-              pdfPage.cleanup();
+              pdfPage?.cleanup();
             }
           }
         } else {
@@ -1048,12 +1199,18 @@ export async function exportImposedPdf(params: {
           if (sourcePage.node.Contents()) {
             const box = sourcePage.getCropBox();
             const crop = pageCropFractions(cell.page);
-            const [embeddedPage] = await outPdf.embedPages([sourcePage], [{
+            const cropBox = {
               left: box.x + box.width * crop.left,
               right: box.x + box.width * (1 - crop.right),
               bottom: box.y + box.height * crop.bottom,
               top: box.y + box.height * (1 - crop.top),
-            }]);
+            };
+            const embeddedKey = `${cell.page.documentId}|${cell.page.sourcePageNumber}|${cropBox.left.toFixed(3)},${cropBox.bottom.toFixed(3)},${cropBox.right.toFixed(3)},${cropBox.top.toFixed(3)}`;
+            let embeddedPage = embeddedSourcePdfPages.get(embeddedKey);
+            if (!embeddedPage) {
+              [embeddedPage] = await outPdf.embedPages([sourcePage], [cropBox]);
+              embeddedSourcePdfPages.set(embeddedKey, embeddedPage);
+            }
             outPage.drawPage(embeddedPage, drawPlacement);
           }
         }
@@ -1084,6 +1241,10 @@ export async function exportImposedPdf(params: {
               surface.ctx.putImageData(imgData, 0, 0);
               processedImg = await embedSurfaceOpaque(surface.canvas);
               processedImages.set(imgEffectKey, processedImg);
+              if ('width' in surface.canvas) {
+                surface.canvas.width = 0;
+                surface.canvas.height = 0;
+              }
             } finally {
               decoded.cleanup?.();
             }
@@ -1261,131 +1422,372 @@ export async function exportImposedPdf(params: {
     // Shapes go on the page as vector paths, not as a raster of the box: a 0.2 pt hairline printed from
     // a bitmap would arrive as a grey smear, and this is the same outline the preview paints from the
     // same command list. Filled first, so text and pictures keep their traditional position above them.
-    for (const placement of shapePlacements(sheetSide,totalSides,allPages,overlays,pageIndices)) {
-      const item=placement.shape;
-      if (!Number.isFinite(placement.width) || !Number.isFinite(placement.height) || placement.width <= 0 || placement.height <= 0) continue;
-      // The path is in millimetres around the centre of the box, and drawSvgPath multiplies it by `scale`
-      // while flipping y — so the line width and the dash have to be in millimetres too.
-      const lineWidthMm=item.strokeWidth*MM_PER_PT;
-      const fill=shapeHasFill(item)?shapeColorComponents(item.fillColor):null;
-      const stroke=item.strokeWidth>0?shapeColorComponents(item.strokeColor):null;
-      if(!fill&&!stroke)continue;                      // nothing to draw, so nothing to clip either
-      const dash=shapeDashPattern(item.strokeStyle,lineWidthMm);
-      outPage.pushOperators(pushGraphicsState());
-      if(placement.clip){const r=placement.clip;outPage.pushOperators(rectangle(r.x*MM_TO_PT,sheetHeightPt-(r.y+r.height)*MM_TO_PT,r.width*MM_TO_PT,r.height*MM_TO_PT),clip(),endPath());}
-      const parentAngle=-placement.parentRotation*Math.PI/180,pcx=(placement.parentX+placement.parentWidth/2)*MM_TO_PT,pcy=sheetHeightPt-(placement.parentY+placement.parentHeight/2)*MM_TO_PT;
-      if(parentAngle){const c=Math.cos(parentAngle),s=Math.sin(parentAngle);outPage.pushOperators(concatTransformationMatrix(c,s,-s,c,pcx-c*pcx+s*pcy,pcy-s*pcx-c*pcy));}
-      outPage.drawSvgPath(shapeSvgPath(shapeCommands(item,placement.width,placement.height)), {
-        x:(placement.x+placement.width/2)*MM_TO_PT,
-        y:sheetHeightPt-(placement.y+placement.height/2)*MM_TO_PT,
-        scale:MM_TO_PT,
-        rotate:degrees(-item.rotation),
-        ...(fill?{color:rgb(fill[0],fill[1],fill[2])}:{}),
-        ...(stroke?{borderColor:rgb(stroke[0],stroke[1],stroke[2])}:{}),
-        ...(lineWidthMm>0?{borderWidth:lineWidthMm}:{}),
-        ...(dash?{borderDashArray:dash.map(length=>Math.max(0.01,length))}:{}),
-        ...(item.lineCap==='round'?{borderLineCap:LineCapStyle.Round}:item.lineCap==='square'?{borderLineCap:LineCapStyle.Projecting}:{}),
-        opacity:clampOpacity(item.opacity),
-      });
-      outPage.pushOperators(popGraphicsState());
-    }
-
-    for (const placement of textPlacements(sheetSide,totalSides,allPages,overlays,pageIndices)) {
-      if (!Number.isFinite(placement.width) || !Number.isFinite(placement.height) || placement.width <= 0 || placement.height <= 0) continue;
-      if (typeof document === 'undefined') throw new Error('Text overlay export requires a Canvas 2D renderer');
-      if (placement.formulaError) throw new Error(`Invalid ${placement.text.kind==='numbering'?'numbering formula or format':'text formula'} in overlay ${placement.text.id}`);
-      const item=placement.renderText, w=placement.width*MM_TO_PT, h=placement.height*MM_TO_PT;
-      const scale=Math.min(200/72,4096/w,4096/h);
-      const key=JSON.stringify([item.text,item.fontFamily,item.fontSize,item.color,item.backgroundColor,item.bold,item.italic,item.underline,item.align,item.scriptRanges,item.lineHeight,item.letterSpacingPt,item.wordSpacingPt,w,h]);
-      let image=textImages.get(key);
-      if(!image){
-        if(document.fonts){const font=`${item.italic?'italic ':''}${item.bold?'bold':'normal'} 18px "${item.fontFamily.replace(/["\\]/g,'')}"`;
-          const fontKey=JSON.stringify([font,item.text]);if(!loadedTextFonts.has(fontKey)){try{await document.fonts.load(font,item.text);}catch{/* local system fonts may resolve natively */}loadedTextFonts.add(fontKey);}}
-
-        const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.ceil(w*scale));canvas.height=Math.max(1,Math.ceil(h*scale));
-        const ctx=canvas.getContext('2d');if(!ctx)throw new Error('Text overlay Canvas 2D is unavailable');
-        if ((item.letterSpacingPt??0)!==0 && !('letterSpacing' in ctx) || (item.wordSpacingPt??0)!==0 && !('wordSpacing' in ctx))
-          throw new Error('This environment cannot export the requested text spacing');
-        drawOverlayText(ctx,item,canvas.width,canvas.height,canvas.width/w);
-        image=await outPdf.embedPng(canvas.toDataURL('image/png'));textImages.set(key,image);
-      }
-      outPage.pushOperators(pushGraphicsState());
-      if(placement.clip){const r=placement.clip;outPage.pushOperators(rectangle(r.x*MM_TO_PT,sheetHeightPt-(r.y+r.height)*MM_TO_PT,r.width*MM_TO_PT,r.height*MM_TO_PT),clip(),endPath());}
-      const parentAngle=-placement.parentRotation*Math.PI/180,pcx=(placement.parentX+placement.parentWidth/2)*MM_TO_PT,pcy=sheetHeightPt-(placement.parentY+placement.parentHeight/2)*MM_TO_PT;
-      if(parentAngle){const c=Math.cos(parentAngle),s=Math.sin(parentAngle);outPage.pushOperators(concatTransformationMatrix(c,s,-s,c,pcx-c*pcx+s*pcy,pcy-s*pcx-c*pcy));}
-      const cx=(placement.x+placement.width/2)*MM_TO_PT,cy=sheetHeightPt-(placement.y+placement.height/2)*MM_TO_PT;
-      const angle=-item.rotation*Math.PI/180,c=Math.cos(angle),s=Math.sin(angle);
-      outPage.drawImage(image,{x:cx-c*w/2+s*h/2,y:cy-s*w/2-c*h/2,width:w,height:h,rotate:degrees(-item.rotation),opacity:clampOpacity(item.opacity)});
-      outPage.pushOperators(popGraphicsState());
-    }
-
-    for (const placement of imagePlacements(sheetSide,totalSides,allPages,overlays,pageIndices)) {
-      const item=placement.image;
-      if (!Number.isFinite(placement.width) || !Number.isFinite(placement.height) || placement.width <= 0 || placement.height <= 0) continue;
-      if (!item.src) throw new Error(`Image overlay ${item.id} lost its picture data`);
-      const w=placement.width*MM_TO_PT, h=placement.height*MM_TO_PT;
-      const rect=imageDrawRect(item,w,h);
-      // The file's own bytes decide the route, never the declared MIME type: a JPEG saved as
-      // data:image/png would otherwise be handed to the PNG decoder. Mirroring cannot be expressed
-      // with a plain rectangle either, so those go through the same Canvas the preview composites on.
-      const plan=planPictureEmbedding(item.src);
-      // The file's own bytes decide the route, and so do the two flags that only exist inside the model: a
-      // mirrored, inverted or eroded picture cannot be a raw embed any more, because the page has to show
-      // something other than what the file contains. The overlay itself is untouched either way.
-      const erase=eraseSignature(item.erase);
-      const needsRaster=plan.route==='raster'||!!item.flipHorizontal||!!item.flipVertical||!!item.invert||erase.length>0;
-      // Raw embeds depend on the bytes alone, so the same picture at two sizes is stored once.
-      const key=needsRaster?JSON.stringify([item.src,item.fit,item.flipHorizontal,item.flipVertical,!!item.invert,erase,Math.round(w*10),Math.round(h*10)]):item.src;
-      let image=pictureImages.get(key);
-      if(!image){
-        if(needsRaster){
-          if (typeof document === 'undefined') throw new Error('Exporting a flipped or unsupported picture needs a Canvas 2D renderer');
-          const scale = Math.min(targetRasterDpi / 72, maxRasterSidePx / w, maxRasterSidePx / h);
-          const png = await rasterizeOverlayImage(item.src, w * scale, h * scale, {
-            fit: item.fit,
-            naturalWidth: item.naturalWidth,
-            naturalHeight: item.naturalHeight,
-            flipHorizontal: item.flipHorizontal,
-            flipVertical: item.flipVertical,
-            drawRect: {
-              x: rect.x * scale,
-              y: rect.y * scale,
-              width: Math.max(1, rect.width * scale),
-              height: Math.max(1, rect.height * scale),
-            },
-            invert: item.invert,
-            erase: item.erase,
-            // `rect` is the fit rectangle in points; the eraser's percentages and its millimetre brush are
-            // measured on exactly that rectangle, which is the piece of the box the picture actually paints.
-            eraseWidthMm: rect.width / MM_TO_PT,
-            eraseHeightMm: rect.height / MM_TO_PT,
-          });
-          image = await outPdf.embedPng(png);
-        } else {
-          image=plan.route==='jpeg' ? await outPdf.embedJpg(item.src) : await outPdf.embedPng(item.src);
-          // pdf-lib complements every CMYK stream it stores, which turns a plain CMYK file into a
-          // colour negative; the image dictionary is shared, so one patch covers all placements.
-          if (plan.patchDecode) await applyCmykDecode(outPdf, image);
+    if (shapeOverlays.length > 0) {
+      for (const placement of shapePlacements(sheetSide, totalSides, allPages, shapeOverlays, pageIndices)) {
+        const item = placement.shape;
+        if (!Number.isFinite(placement.width) || !Number.isFinite(placement.height) || placement.width <= 0 || placement.height <= 0) continue;
+        // The path is in millimetres around the centre of the box, and drawSvgPath multiplies it by `scale`
+        // while flipping y — so the line width and the dash have to be in millimetres too.
+        const lineWidthMm = item.strokeWidth * MM_PER_PT;
+        const fill = shapeHasFill(item) ? shapeColorComponents(item.fillColor) : null;
+        const stroke = item.strokeWidth > 0 ? shapeColorComponents(item.strokeColor) : null;
+        if (!fill && !stroke) continue; // nothing to draw, so nothing to clip either
+        const dash = shapeDashPattern(item.strokeStyle, lineWidthMm);
+        const pathCacheKey = `${item.type}|${item.lineOrientation ?? ''}|${item.borderRadius}|${Math.round(placement.width * 1000)}|${Math.round(placement.height * 1000)}`;
+        let svgPath = shapeSvgPathCache.get(pathCacheKey);
+        if (!svgPath) {
+          svgPath = shapeSvgPath(shapeCommands(item, placement.width, placement.height));
+          shapeSvgPathCache.set(pathCacheKey, svgPath);
         }
-        pictureImages.set(key,image);
+        outPage.pushOperators(pushGraphicsState());
+        if (placement.clip) {
+          const r = placement.clip;
+          outPage.pushOperators(rectangle(r.x * MM_TO_PT, sheetHeightPt - (r.y + r.height) * MM_TO_PT, r.width * MM_TO_PT, r.height * MM_TO_PT), clip(), endPath());
+        }
+        const parentAngle = (-placement.parentRotation * Math.PI) / 180,
+          pcx = (placement.parentX + placement.parentWidth / 2) * MM_TO_PT,
+          pcy = sheetHeightPt - (placement.parentY + placement.parentHeight / 2) * MM_TO_PT;
+        if (parentAngle) {
+          const c = Math.cos(parentAngle),
+            s = Math.sin(parentAngle);
+          outPage.pushOperators(concatTransformationMatrix(c, s, -s, c, pcx - c * pcx + s * pcy, pcy - s * pcx - c * pcy));
+        }
+        outPage.drawSvgPath(svgPath, {
+          x: (placement.x + placement.width / 2) * MM_TO_PT,
+          y: sheetHeightPt - (placement.y + placement.height / 2) * MM_TO_PT,
+          scale: MM_TO_PT,
+          rotate: degrees(-item.rotation),
+          ...(fill ? { color: rgb(fill[0], fill[1], fill[2]) } : {}),
+          ...(stroke ? { borderColor: rgb(stroke[0], stroke[1], stroke[2]) } : {}),
+          ...(lineWidthMm > 0 ? { borderWidth: lineWidthMm } : {}),
+          ...(dash ? { borderDashArray: dash.map((length) => Math.max(0.01, length)) } : {}),
+          ...(item.lineCap === 'round'
+            ? { borderLineCap: LineCapStyle.Round }
+            : item.lineCap === 'square'
+              ? { borderLineCap: LineCapStyle.Projecting }
+              : {}),
+          opacity: clampOpacity(item.opacity),
+        });
+        outPage.pushOperators(popGraphicsState());
       }
-      outPage.pushOperators(pushGraphicsState());
-      if(placement.clip){const r=placement.clip;outPage.pushOperators(rectangle(r.x*MM_TO_PT,sheetHeightPt-(r.y+r.height)*MM_TO_PT,r.width*MM_TO_PT,r.height*MM_TO_PT),clip(),endPath());}
-      const parentAngle=-placement.parentRotation*Math.PI/180,pcx=(placement.parentX+placement.parentWidth/2)*MM_TO_PT,pcy=sheetHeightPt-(placement.parentY+placement.parentHeight/2)*MM_TO_PT;
-      if(parentAngle){const c=Math.cos(parentAngle),s=Math.sin(parentAngle);outPage.pushOperators(concatTransformationMatrix(c,s,-s,c,pcx-c*pcx+s*pcy,pcy-s*pcx-c*pcy));}
-      // The picture sits at its fit offset inside the box, and that offset rotates with the box.
-      const offsetX=needsRaster?0:rect.x+rect.width/2-w/2, offsetY=needsRaster?0:rect.y+rect.height/2-h/2;
-      const tilt=item.rotation*Math.PI/180,tc=Math.cos(tilt),ts=Math.sin(tilt);
-      const cx=(placement.x+placement.width/2)*MM_TO_PT+offsetX*tc-offsetY*ts;
-      const cy=sheetHeightPt-(placement.y+placement.height/2)*MM_TO_PT-(offsetX*ts+offsetY*tc);
-      const drawWidth=needsRaster?w:rect.width, drawHeight=needsRaster?h:rect.height;
-      const angle=-item.rotation*Math.PI/180,c=Math.cos(angle),s=Math.sin(angle);
-      outPage.drawImage(image,{x:cx-c*drawWidth/2+s*drawHeight/2,y:cy-s*drawWidth/2-c*drawHeight/2,width:drawWidth,height:drawHeight,
-        rotate:degrees(-item.rotation),opacity:clampOpacity(item.opacity)});
-      outPage.pushOperators(popGraphicsState());
     }
 
-    onProgress?.(Math.round(((sIdx + 1) / totalSides) * 100));
+    if (textOverlays.length > 0) {
+      for (const placement of textPlacements(sheetSide, totalSides, allPages, textOverlays, pageIndices)) {
+        if (!Number.isFinite(placement.width) || !Number.isFinite(placement.height) || placement.width <= 0 || placement.height <= 0) continue;
+        if (typeof document === 'undefined') throw new Error('Text overlay export requires a Canvas 2D renderer');
+        if (placement.formulaError) throw new Error(`Invalid ${placement.text.kind === 'numbering' ? 'numbering formula or format' : 'text formula'} in overlay ${placement.text.id}`);
+        const item = placement.renderText,
+          w = placement.width * MM_TO_PT,
+          h = placement.height * MM_TO_PT;
+        const scale = Math.min(200 / 72, 4096 / w, 4096 / h);
+
+        if (document.fonts) {
+          const fontSpec = `${item.italic ? 'italic ' : ''}${item.bold ? 'bold' : 'normal'} 18px "${item.fontFamily.replace(/["\\]/g, '')}"`;
+          const uniqueChars = Array.from(new Set(item.text)).sort().join('');
+          const fontKey = `${fontSpec}|${uniqueChars}`;
+          if (!loadedTextFonts.has(fontKey)) {
+            try {
+              await document.fonts.load(fontSpec, uniqueChars);
+            } catch {
+              /* local system fonts may resolve natively */
+            }
+            loadedTextFonts.add(fontKey);
+          }
+        }
+
+        const key = JSON.stringify([item.text, item.fontFamily, item.fontSize, item.color, item.backgroundColor, item.bold, item.italic, item.underline, item.align, item.scriptRanges, item.lineHeight, item.letterSpacingPt, item.wordSpacingPt, w, h]);
+        let wholeImage = textImages.get(key);
+
+        // Reuse cached prefix + digit XObjects for dynamic numbering / digit strings so 1,000+ tickets embed ~11 tiny PNGs instead of 4,000+ PNGs!
+        let drewCachedTokens = false;
+        if (
+          !wholeImage &&
+          !item.text.includes('\n') &&
+          !(item.scriptRanges?.length) &&
+          !item.underline &&
+          !(item.letterSpacingPt) &&
+          !(item.wordSpacingPt)
+        ) {
+          const tokens = decomposeVisualTextTokens(item.text);
+          const bgColor = item.backgroundColor && item.backgroundColor !== 'transparent' ? parseCssColorRgba(item.backgroundColor) : null;
+          const bgOk = !item.backgroundColor || item.backgroundColor === 'transparent' || bgColor !== null;
+          const measureCtx = bgOk ? getMeasureCtx() : null;
+          if (tokens && measureCtx && typeof measureCtx.measureText === 'function') {
+            const boxPxW = Math.max(1, Math.ceil(w * scale));
+            const boxPxH = Math.max(1, Math.ceil(h * scale));
+            const pxPerPt = scale;
+            const lineHeight = Math.max(0.8, Math.min(3, item.lineHeight ?? 1.25));
+            const requestedSize = Math.max(8, Math.min(80, item.fontSize)) * pxPerPt;
+            const fontPx = item.verticalAlign === 'middle' && boxPxH > 0 ? Math.max(1, Math.min(requestedSize, boxPxH / lineHeight)) : requestedSize;
+            const insetPx = item.verticalAlign === 'middle' ? Math.min(boxPxW * 0.06, fontPx * 0.35) : 0;
+            const maxTextWidthPx = Math.max(1, boxPxW - insetPx * 2);
+            const verticalOffsetPx = item.verticalAlign === 'middle' ? (boxPxH - fontPx * lineHeight) / 2 + fontPx / 2 : 0;
+            const fontStr = `${item.italic ? 'italic ' : ''}${item.bold ? 'bold ' : ''}${fontPx}px "${item.fontFamily.replace(/["\\]/g, '')}", sans-serif`;
+
+            measureCtx.font = fontStr;
+            const refZeroAdv = measureCtx.measureText('0').width;
+            const refZeroZeroAdv = measureCtx.measureText('00').width;
+            if (Number.isFinite(refZeroAdv) && refZeroAdv > 0.5) {
+              const padPx = Math.max(4, Math.ceil(fontPx * 0.25));
+              const resolvedRuns: Array<
+                | { kind: 'space'; widthPx: number }
+                | { kind: 'glyph'; entry: { image: Awaited<ReturnType<typeof outPdf.embedPng>>; advPx: number; padPx: number; tokW: number } }
+              > = [];
+              let totalAdvPx = 0;
+              let allValid = true;
+
+              for (const tok of tokens) {
+                if (tok.kind === 'space') {
+                  const measuredPair = measureCtx.measureText(`0${tok.text}0`).width;
+                  const gapPx = Number.isFinite(measuredPair) && refZeroZeroAdv > 0
+                    ? Math.max(0, measuredPair - refZeroZeroAdv)
+                    : Math.max(0, measureCtx.measureText(tok.text).width);
+                  resolvedRuns.push({ kind: 'space', widthPx: gapPx });
+                  totalAdvPx += gapPx;
+                } else {
+                  const tokKey = JSON.stringify([tok.text, tok.isRtl ? 1 : 0, item.fontFamily, fontPx.toFixed(2), item.color, item.bold, item.italic, boxPxH, item.verticalAlign ?? 'top']);
+                  let entry = textTokenCache.get(tokKey);
+                  if (!entry) {
+                    const advPx = measureCtx.measureText(tok.text).width;
+                    if (!Number.isFinite(advPx) || advPx <= 0.2) {
+                      allValid = false;
+                      break;
+                    }
+                    const tokW = Math.max(1, Math.ceil(advPx + padPx * 2));
+                    const tokCanvas = document.createElement('canvas');
+                    tokCanvas.width = tokW;
+                    tokCanvas.height = boxPxH;
+                    const tCtx = tokCanvas.getContext('2d');
+                    if (!tCtx) {
+                      allValid = false;
+                      break;
+                    }
+                    tCtx.clearRect(0, 0, tokW, boxPxH);
+                    tCtx.font = fontStr;
+                    tCtx.textBaseline = item.verticalAlign === 'middle' ? 'middle' : 'top';
+                    tCtx.textAlign = 'center';
+                    tCtx.direction = tok.isRtl ? 'rtl' : 'ltr';
+                    tCtx.fillStyle = item.color;
+                    tCtx.fillText(tok.text, padPx + advPx / 2, verticalOffsetPx);
+                    const pngBytes = await surfaceToPngBytes(tokCanvas);
+                    tokCanvas.width = 0;
+                    tokCanvas.height = 0;
+                    const embedded = await outPdf.embedPng(pngBytes);
+                    entry = { image: embedded, advPx, padPx, tokW };
+                    textTokenCache.set(tokKey, entry);
+                  }
+                  resolvedRuns.push({ kind: 'glyph', entry });
+                  totalAdvPx += entry.advPx;
+                }
+              }
+
+              if (allValid && resolvedRuns.length > 0 && totalAdvPx > 0) {
+                const fitScale = totalAdvPx > maxTextWidthPx ? maxTextWidthPx / totalAdvPx : 1;
+                const drawnWidthPx = totalAdvPx * fitScale;
+                let cursorPx =
+                  item.align === 'right'
+                    ? boxPxW - insetPx - drawnWidthPx
+                    : item.align === 'center'
+                      ? (boxPxW - drawnWidthPx) / 2
+                      : insetPx;
+                const opacity = clampOpacity(item.opacity);
+
+                outPage.pushOperators(pushGraphicsState());
+                if (placement.clip) {
+                  const r = placement.clip;
+                  outPage.pushOperators(rectangle(r.x * MM_TO_PT, sheetHeightPt - (r.y + r.height) * MM_TO_PT, r.width * MM_TO_PT, r.height * MM_TO_PT), clip(), endPath());
+                }
+                const parentAngle = (-placement.parentRotation * Math.PI) / 180,
+                  pcx = (placement.parentX + placement.parentWidth / 2) * MM_TO_PT,
+                  pcy = sheetHeightPt - (placement.parentY + placement.parentHeight / 2) * MM_TO_PT;
+                if (parentAngle) {
+                  const c = Math.cos(parentAngle),
+                    s = Math.sin(parentAngle);
+                  outPage.pushOperators(concatTransformationMatrix(c, s, -s, c, pcx - c * pcx + s * pcy, pcy - s * pcx - c * pcy));
+                }
+                const cx = (placement.x + placement.width / 2) * MM_TO_PT,
+                  cy = sheetHeightPt - (placement.y + placement.height / 2) * MM_TO_PT;
+                const angle = (-item.rotation * Math.PI) / 180,
+                  c = Math.cos(angle),
+                  s = Math.sin(angle);
+                const boxOriginX = cx - (c * w) / 2 + (s * h) / 2;
+                const boxOriginY = cy - (s * w) / 2 - (c * h) / 2;
+                outPage.pushOperators(pushGraphicsState(), concatTransformationMatrix(c, s, -s, c, boxOriginX, boxOriginY));
+
+                if (bgColor) {
+                  outPage.drawRectangle({
+                    x: 0,
+                    y: 0,
+                    width: w,
+                    height: h,
+                    color: rgb(bgColor.r, bgColor.g, bgColor.b),
+                    opacity: clampOpacity(opacity * bgColor.alpha),
+                  });
+                }
+
+                for (const run of resolvedRuns) {
+                  if (run.kind === 'space') {
+                    cursorPx += run.widthPx * fitScale;
+                  } else {
+                    const { image, advPx, padPx: entryPadPx, tokW } = run.entry;
+                    outPage.drawImage(image, {
+                      x: (cursorPx - entryPadPx * fitScale) / pxPerPt,
+                      y: 0,
+                      width: (tokW * fitScale) / pxPerPt,
+                      height: h,
+                      opacity,
+                    });
+                    cursorPx += advPx * fitScale;
+                  }
+                }
+                outPage.pushOperators(popGraphicsState(), popGraphicsState());
+                drewCachedTokens = true;
+              }
+            }
+          }
+        }
+
+        if (!drewCachedTokens) {
+          if (!wholeImage) {
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.ceil(w * scale));
+            canvas.height = Math.max(1, Math.ceil(h * scale));
+            const ctx = canvas.getContext('2d');
+            if (!ctx) throw new Error('Text overlay Canvas 2D is unavailable');
+            if (((item.letterSpacingPt ?? 0) !== 0 && !('letterSpacing' in ctx)) || ((item.wordSpacingPt ?? 0) !== 0 && !('wordSpacing' in ctx)))
+              throw new Error('This environment cannot export the requested text spacing');
+            drawOverlayText(ctx, item, canvas.width, canvas.height, canvas.width / w);
+            const pngBytes = await surfaceToPngBytes(canvas);
+            canvas.width = 0;
+            canvas.height = 0;
+            wholeImage = await outPdf.embedPng(pngBytes);
+            textImages.set(key, wholeImage);
+          }
+          outPage.pushOperators(pushGraphicsState());
+          if (placement.clip) {
+            const r = placement.clip;
+            outPage.pushOperators(rectangle(r.x * MM_TO_PT, sheetHeightPt - (r.y + r.height) * MM_TO_PT, r.width * MM_TO_PT, r.height * MM_TO_PT), clip(), endPath());
+          }
+          const parentAngle = (-placement.parentRotation * Math.PI) / 180,
+            pcx = (placement.parentX + placement.parentWidth / 2) * MM_TO_PT,
+            pcy = sheetHeightPt - (placement.parentY + placement.parentHeight / 2) * MM_TO_PT;
+          if (parentAngle) {
+            const c = Math.cos(parentAngle),
+              s = Math.sin(parentAngle);
+            outPage.pushOperators(concatTransformationMatrix(c, s, -s, c, pcx - c * pcx + s * pcy, pcy - s * pcx - c * pcy));
+          }
+          const cx = (placement.x + placement.width / 2) * MM_TO_PT,
+            cy = sheetHeightPt - (placement.y + placement.height / 2) * MM_TO_PT;
+          const angle = (-item.rotation * Math.PI) / 180,
+            c = Math.cos(angle),
+            s = Math.sin(angle);
+          outPage.drawImage(wholeImage, { x: cx - (c * w) / 2 + (s * h) / 2, y: cy - (s * w) / 2 - (c * h) / 2, width: w, height: h, rotate: degrees(-item.rotation), opacity: clampOpacity(item.opacity) });
+          outPage.pushOperators(popGraphicsState());
+        }
+      }
+    }
+
+    if (imageOverlays.length > 0) {
+      for (const placement of imagePlacements(sheetSide, totalSides, allPages, imageOverlays, pageIndices)) {
+        const item = placement.image;
+        if (!Number.isFinite(placement.width) || !Number.isFinite(placement.height) || placement.width <= 0 || placement.height <= 0) continue;
+        if (!item.src) throw new Error(`Image overlay ${item.id} lost its picture data`);
+        const w = placement.width * MM_TO_PT,
+          h = placement.height * MM_TO_PT;
+        const rect = imageDrawRect(item, w, h);
+        // The file's own bytes decide the route, never the declared MIME type: a JPEG saved as
+        // data:image/png would otherwise be handed to the PNG decoder. Mirroring cannot be expressed
+        // with a plain rectangle either, so those go through the same Canvas the preview composites on.
+        const plan = planPictureEmbedding(item.src);
+        // The file's own bytes decide the route, and so do the two flags that only exist inside the model: a
+        // mirrored, inverted or eroded picture cannot be a raw embed any more, because the page has to show
+        // something other than what the file contains. The overlay itself is untouched either way.
+        const erase = eraseSignature(item.erase);
+        const needsRaster = plan.route === 'raster' || !!item.flipHorizontal || !!item.flipVertical || !!item.invert || erase.length > 0;
+        // Raw embeds depend on the bytes alone, so the same picture at two sizes is stored once.
+        const key = needsRaster ? JSON.stringify([item.src, item.fit, item.flipHorizontal, item.flipVertical, !!item.invert, erase, Math.round(w * 10), Math.round(h * 10)]) : item.src;
+        let image = pictureImages.get(key);
+        if (!image) {
+          if (needsRaster) {
+            if (typeof document === 'undefined') throw new Error('Exporting a flipped or unsupported picture needs a Canvas 2D renderer');
+            const scale = Math.min(targetRasterDpi / 72, maxRasterSidePx / w, maxRasterSidePx / h);
+            const png = await rasterizeOverlayImage(item.src, w * scale, h * scale, {
+              fit: item.fit,
+              naturalWidth: item.naturalWidth,
+              naturalHeight: item.naturalHeight,
+              flipHorizontal: item.flipHorizontal,
+              flipVertical: item.flipVertical,
+              drawRect: {
+                x: rect.x * scale,
+                y: rect.y * scale,
+                width: Math.max(1, rect.width * scale),
+                height: Math.max(1, rect.height * scale),
+              },
+              invert: item.invert,
+              erase: item.erase,
+              // `rect` is the fit rectangle in points; the eraser's percentages and its millimetre brush are
+              // measured on exactly that rectangle, which is the piece of the box the picture actually paints.
+              eraseWidthMm: rect.width / MM_TO_PT,
+              eraseHeightMm: rect.height / MM_TO_PT,
+            });
+            image = await outPdf.embedPng(png);
+          } else {
+            image = plan.route === 'jpeg' ? await outPdf.embedJpg(item.src) : await outPdf.embedPng(item.src);
+            // pdf-lib complements every CMYK stream it stores, which turns a plain CMYK file into a
+            // colour negative; the image dictionary is shared, so one patch covers all placements.
+            if (plan.patchDecode) await applyCmykDecode(outPdf, image);
+          }
+          pictureImages.set(key, image);
+        }
+        outPage.pushOperators(pushGraphicsState());
+        if (placement.clip) {
+          const r = placement.clip;
+          outPage.pushOperators(rectangle(r.x * MM_TO_PT, sheetHeightPt - (r.y + r.height) * MM_TO_PT, r.width * MM_TO_PT, r.height * MM_TO_PT), clip(), endPath());
+        }
+        const parentAngle = (-placement.parentRotation * Math.PI) / 180,
+          pcx = (placement.parentX + placement.parentWidth / 2) * MM_TO_PT,
+          pcy = sheetHeightPt - (placement.parentY + placement.parentHeight / 2) * MM_TO_PT;
+        if (parentAngle) {
+          const c = Math.cos(parentAngle),
+            s = Math.sin(parentAngle);
+          outPage.pushOperators(concatTransformationMatrix(c, s, -s, c, pcx - c * pcx + s * pcy, pcy - s * pcx - c * pcy));
+        }
+        // The picture sits at its fit offset inside the box, and that offset rotates with the box.
+        const offsetX = needsRaster ? 0 : rect.x + rect.width / 2 - w / 2,
+          offsetY = needsRaster ? 0 : rect.y + rect.height / 2 - h / 2;
+        const tilt = (item.rotation * Math.PI) / 180,
+          tc = Math.cos(tilt),
+          ts = Math.sin(tilt);
+        const cx = (placement.x + placement.width / 2) * MM_TO_PT + offsetX * tc - offsetY * ts;
+        const cy = sheetHeightPt - (placement.y + placement.height / 2) * MM_TO_PT - (offsetX * ts + offsetY * tc);
+        const drawWidth = needsRaster ? w : rect.width,
+          drawHeight = needsRaster ? h : rect.height;
+        const angle = (-item.rotation * Math.PI) / 180,
+          c = Math.cos(angle),
+          s = Math.sin(angle);
+        outPage.drawImage(image, {
+          x: cx - (c * drawWidth) / 2 + (s * drawHeight) / 2,
+          y: cy - (s * drawWidth) / 2 - (c * drawHeight) / 2,
+          width: drawWidth,
+          height: drawHeight,
+          rotate: degrees(-item.rotation),
+          opacity: clampOpacity(item.opacity),
+        });
+        outPage.pushOperators(popGraphicsState());
+      }
+    }
+
+    const pct = Math.round(((sIdx + 1) / totalSides) * 100);
+    if (pct !== lastProgressReported) {
+      lastProgressReported = pct;
+      onProgress?.(pct);
+    }
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (sIdx + 1 < sheets.length && now - lastYieldAt >= 20) {
+      await yieldPdfExportTurn();
+      lastYieldAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    }
   }
   } finally {
     for (const task of loadedPdfJsTasks.values()) {
@@ -1408,10 +1810,13 @@ export function triggerBlobDownload(
   fileName: string,
   mimeType = 'application/pdf'
 ): void {
-  const blob =
+  const safeBytes =
     typeof bytes === 'string'
-      ? new Blob([bytes], { type: mimeType })
-      : new Blob([bytes.buffer as ArrayBuffer], { type: mimeType });
+      ? bytes
+      : bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
+        ? (bytes.buffer as ArrayBuffer)
+        : (bytes.slice().buffer as ArrayBuffer);
+  const blob = new Blob([safeBytes], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

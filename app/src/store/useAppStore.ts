@@ -724,6 +724,7 @@ interface AppState {
   useStudioActivePageAsTicketSource: () => boolean;
   clearTicketSource: () => void;
   generateTicketSheetsToStudio: () => number;
+  exportTicketPdfDirect: () => Promise<Uint8Array | null>;
 
   // Windows Virtual Printer
   refreshVirtualPrinterStatus: () => Promise<void>;
@@ -3993,6 +3994,69 @@ export const useAppStore = create<AppState>((set, get) => {
       });
 
       return generatedPages.length;
+    },
+
+    exportTicketPdfDirect: async () => {
+      if (get().textEdit) get().finishTextEdit();
+      const state = get();
+      const isFa = state.settings.language === 'fa';
+      const config = state.ticketConfig;
+      const metrics = getTicketGridMetrics(config);
+
+      let sourceDoc = state.ticketSourceDocument;
+      let sourcePage =
+        state.ticketSourcePages.find((p) => p.id === state.ticketSelectedSourcePageId) ??
+        state.ticketSourcePages[0];
+
+      if (!sourceDoc || !sourcePage) {
+        const blank = createBlankTicketSource(metrics.cellWidthMm, metrics.cellHeightMm, isFa);
+        sourceDoc = blank.document;
+        sourcePage = blank.page;
+      }
+
+      set({ isExportingPdf: true, exportProgress: 5 });
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+      try {
+        const generatedPages = generateTicketPages(sourcePage, metrics.totalTickets);
+        const nextLayout = buildTicketStudioLayout(state.layout, config);
+        const nextOverlays = buildTicketStudioOverlays(config, nextLayout, generatedPages);
+
+        const pdfBytes = await exportImposedPdf({
+          documents: [sourceDoc],
+          pages: generatedPages,
+          layout: nextLayout,
+          effects: state.effects,
+          watermark: state.watermark,
+          pageNumbering: { ...state.pageNumbering, enabled: false },
+          overlays: nextOverlays,
+          allPages: generatedPages,
+          userName: state.settings.userName,
+          exportOptions: state.pdfExportOptions,
+          onProgress: (percent) => set({ exportProgress: percent }),
+        });
+
+        const fileName = `PrintStudio-Tickets-${metrics.rows}x${metrics.cols}-${metrics.totalTickets}pcs-${Date.now()}.pdf`;
+        triggerBlobDownload(pdfBytes, fileName, 'application/pdf');
+
+        state.addToast({
+          type: 'success',
+          title: isFa
+            ? `فایل PDF قبض‌ها (${metrics.effectiveSheetCount} شیت / ${metrics.totalTickets} قبض) ساخته و ذخیره شد`
+            : `Ticket PDF (${metrics.effectiveSheetCount} sheets / ${metrics.totalTickets} tickets) saved`,
+        });
+
+        return pdfBytes;
+      } catch (error) {
+        state.addToast({
+          type: 'error',
+          title: isFa ? 'ساخت PDF قبض ناموفق بود' : 'Ticket PDF export failed',
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      } finally {
+        set({ isExportingPdf: false, exportProgress: 0 });
+      }
     },
 
     selectBatchJob: (id) => set({ batchSelectedJobId: id }),

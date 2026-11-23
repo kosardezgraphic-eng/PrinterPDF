@@ -25,6 +25,7 @@ import {
   Keyboard,
   LayoutGrid,
   Boxes,
+  Hash,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { PrinterRetryButton } from './PrinterStatus';
@@ -271,6 +272,25 @@ export const QuickBar: React.FC = () => {
               </span>
             )}
           </button>
+          <button
+            type="button"
+            data-app-mode-ticket
+            aria-pressed={appMode === 'ticket'}
+            onClick={() => setAppMode('ticket')}
+            title={
+              isFa
+                ? 'محیط مستقل شماره‌گذاری قبض، تقسیم‌بندی شیت و خطوط پرفراژ/برش'
+                : 'Standalone Ticket / Form Numbering & Sheet Division Environment'
+            }
+            className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] font-bold transition-colors whitespace-nowrap cursor-pointer ${
+              appMode === 'ticket'
+                ? 'bg-emerald-600 text-white shadow-xs dark:bg-emerald-500'
+                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'
+            }`}
+          >
+            <Hash className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>{isFa ? 'شماره قبض' : 'Tickets'}</span>
+          </button>
         </div>
 
         {appMode === 'batch' ? (
@@ -280,6 +300,15 @@ export const QuickBar: React.FC = () => {
               {isFa
                 ? 'محیط مجزای چاپ دسته‌ای — کنترل کامل بازه، تعداد سری، سخت‌افزار و پرینتر مجازی'
                 : 'Standalone Batch Print Environment — Ranges, Sets, Hardware & Virtual Printer'}
+            </span>
+          </div>
+        ) : appMode === 'ticket' ? (
+          <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-950/30 dark:text-emerald-200">
+            <Hash className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <span>
+              {isFa
+                ? 'محیط مجزای شماره‌گذاری قبض و فرم — تقسیم‌بندی صفحه، جابجایی با موس، برش و پرفراژ و تولید خودکار در استودیو'
+                : 'Standalone Ticket Numbering — Page Division, Mouse-Draggable Slots & Cut/Perforation Guides'}
             </span>
           </div>
         ) : (

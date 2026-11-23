@@ -11,6 +11,7 @@ import { PreviewWorkspace } from './components/PreviewWorkspace';
 import { StatusBar } from './components/StatusBar';
 import { ModalsAndToasts } from './components/Modals';
 import { BatchPrintWorkspace } from './components/BatchPrintWorkspace';
+import { TicketNumberingWorkspace } from './components/TicketNumberingWorkspace';
 import { routeDroppedFiles } from './engine/imageImport';
 import { extractFilesFromClipboardData } from './engine/clipboardImport';
 import { buildSheetPresetRows, findPresetIdByShortcut } from './engine/sheetPresets';
@@ -206,7 +207,7 @@ export const App: React.FC = () => {
       }
 
       const state = useAppStore.getState();
-      if (state.appMode === 'batch') {
+      if (state.appMode === 'batch' || state.appMode === 'ticket') {
         if (e.ctrlKey || e.metaKey) {
           if (e.key === '/' || e.key === '?' || e.code === 'Slash') {
             e.preventDefault();
@@ -353,8 +354,11 @@ export const App: React.FC = () => {
       if (alreadyRouted || files.length === 0) return;
       const { documents } = routeDroppedFiles(files, false);
       if (documents.length === 0) return;
-      if (useAppStore.getState().appMode === 'batch') {
+      const mode = useAppStore.getState().appMode;
+      if (mode === 'batch') {
         void useAppStore.getState().addBatchFiles(documents);
+      } else if (mode === 'ticket') {
+        void useAppStore.getState().importTicketSourceFiles(documents);
       } else {
         void importFiles(documents);
       }
@@ -379,8 +383,11 @@ export const App: React.FC = () => {
       }
 
       e.preventDefault();
-      if (useAppStore.getState().appMode === 'batch') {
+      const mode = useAppStore.getState().appMode;
+      if (mode === 'batch') {
         void useAppStore.getState().addBatchFiles(extracted);
+      } else if (mode === 'ticket') {
+        void useAppStore.getState().importTicketSourceFiles(extracted);
       } else {
         void importFiles(extracted);
       }
@@ -404,10 +411,12 @@ export const App: React.FC = () => {
         theme={settings.theme}
         labels={t(settings.language).shell}
         topbar={<QuickBar />}
-        navigation={appMode === 'batch' ? null : <TopToolRibbon />}
+        navigation={appMode === 'studio' ? <TopToolRibbon /> : null}
         workspace={
           appMode === 'batch' ? (
             <BatchPrintWorkspace />
+          ) : appMode === 'ticket' ? (
+            <TicketNumberingWorkspace />
           ) : (
             <div dir="ltr" className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
               <SidebarPages />

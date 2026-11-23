@@ -122,7 +122,7 @@ export function createDefaultTicketConfig(): TicketConfig {
     step: 1,
     padZeros: 0,
     format: 'english',
-    orderingMode: 'per-sheet',
+    orderingMode: 'cut-stack',
     direction: 'rtl',
     autoGridCutLines: true,
     gridCutLineColor: '#0284c7',
@@ -261,6 +261,48 @@ export function ticketDirectionToSheetOrder(direction: TicketDirection): SheetOr
     default:
       return 'ltr';
   }
+}
+
+/**
+ * Returns the 1-based sequential index for cell (row, col) on the given 0-based output sheet,
+ * or 0 when the trailing cell on a partial sheet is empty.
+ * Matches `computeImpositionSheets` + `numberingSequence` for both `cut-stack` and `per-sheet`.
+ */
+export function ticketSequenceIndex(
+  config: TicketConfig,
+  row: number,
+  col: number,
+  sheetIndex = 0
+): number {
+  const metrics = getTicketGridMetrics(config);
+  const rows = metrics.rows;
+  const cols = metrics.cols;
+  const r = Math.max(0, Math.min(rows - 1, Math.trunc(row)));
+  const c = Math.max(0, Math.min(cols - 1, Math.trunc(col)));
+  const s = Math.max(0, Math.min(metrics.effectiveSheetCount - 1, Math.trunc(sheetIndex)));
+
+  let slotIndex = r * cols + c;
+  if (config.direction === 'rtl') {
+    slotIndex = r * cols + (cols - 1 - c);
+  } else if (config.direction === 'ttb') {
+    slotIndex = c * rows + r;
+  } else if (config.direction === 'zigzag') {
+    slotIndex = r % 2 === 0 ? r * cols + c : r * cols + (cols - 1 - c);
+  }
+
+  const perSheet = Math.max(1, metrics.ticketsPerSheet);
+  if (s * perSheet + slotIndex >= metrics.totalTickets) {
+    return 0;
+  }
+
+  if (config.orderingMode === 'per-sheet') {
+    return s * perSheet + slotIndex + 1;
+  }
+
+  const basePerPile = Math.floor(metrics.totalTickets / perSheet);
+  const remainder = metrics.totalTickets % perSheet;
+  const offsetBeforeSlot = slotIndex * basePerPile + Math.min(slotIndex, remainder);
+  return offsetBeforeSlot + s + 1;
 }
 
 export function buildNumberingOverlayForSlot(
@@ -681,8 +723,8 @@ export function generateTicketPages(
 ): PageItem[] {
   const safeCount = Math.round(clamp(totalTickets, 1, MAX_TICKET_COUNT));
   const stamp = Date.now().toString(36);
-  const baseOverrides = sourcePage.overrides ? structuredClone(sourcePage.overrides) : undefined;
-  const baseErase = sourcePage.erase ? structuredClone(sourcePage.erase) : undefined;
+  const baseOverrides = sourcePage.overrides;
+  const baseErase = sourcePage.erase;
 
   const pages: PageItem[] = new Array(safeCount);
   for (let i = 0; i < safeCount; i++) {
@@ -691,8 +733,8 @@ export function generateTicketPages(
       id: `ticket-${stamp}-${i + 1}`,
       selectedForPrint: true,
       isHighlighted: i === 0,
-      ...(baseOverrides ? { overrides: structuredClone(baseOverrides) } : { overrides: undefined }),
-      ...(baseErase ? { erase: structuredClone(baseErase) } : { erase: undefined }),
+      ...(baseOverrides !== undefined ? { overrides: baseOverrides } : {}),
+      ...(baseErase !== undefined ? { erase: baseErase } : {}),
     };
   }
   return pages;
