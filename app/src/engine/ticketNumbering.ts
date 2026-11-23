@@ -713,8 +713,11 @@ export function generateTicketPages(
 ): PageItem[] {
   const safeCount = Math.round(clamp(totalTickets, 1, MAX_TICKET_COUNT));
   const stamp = Date.now().toString(36);
-  const baseOverrides = sourcePage.overrides ? structuredClone(sourcePage.overrides) : undefined;
-  const baseErase = sourcePage.erase ? structuredClone(sourcePage.erase) : undefined;
+  // Ticket pages share one immutable source artwork and its edit metadata. Page edits
+  // replace these objects through the store, so cloning the same nested structures
+  // thousands of times only wastes memory without providing isolation.
+  const sharedOverrides = sourcePage.overrides;
+  const sharedErase = sourcePage.erase;
 
   const pages: PageItem[] = new Array(safeCount);
   for (let i = 0; i < safeCount; i++) {
@@ -723,8 +726,8 @@ export function generateTicketPages(
       id: `ticket-${stamp}-${i + 1}`,
       selectedForPrint: true,
       isHighlighted: i === 0,
-      ...(baseOverrides ? { overrides: structuredClone(baseOverrides) } : { overrides: undefined }),
-      ...(baseErase ? { erase: structuredClone(baseErase) } : { erase: undefined }),
+      overrides: sharedOverrides,
+      erase: sharedErase,
     };
   }
   return pages;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createDefaultTicketConfig, getTicketGridMetrics, ticketSequenceIndex } from './ticketNumbering';
+import { createDefaultTicketConfig, generateTicketPages, getTicketGridMetrics, ticketSequenceIndex } from './ticketNumbering';
 
 describe('ticket numbering for cut stacks', () => {
   it('defaults to numbering each physical ticket position as its own stack', () => {
@@ -35,5 +35,36 @@ describe('ticket numbering for cut stacks', () => {
     expect(ticketSequenceIndex(config, 0, 1, 0)).toBe(1);
     expect(ticketSequenceIndex(config, 0, 1, 1)).toBe(1);
     expect(ticketSequenceIndex(config, 1, 0, 1)).toBe(4);
+  });
+});
+
+
+describe('ticket page memory sharing', () => {
+  it('reuses immutable source metadata instead of deep-cloning it for every ticket', () => {
+    const overrides = { crop: { top: 1, right: 2, bottom: 3, left: 4 } } as never;
+    const erase = [{ id: 'erase-1', points: [] }] as never;
+    const source = {
+      id: 'source-page',
+      documentId: 'source-document',
+      documentName: 'receipt.pdf',
+      sourcePageNumber: 0,
+      widthMm: 210,
+      heightMm: 297,
+      rotation: 0,
+      selectedForPrint: true,
+      isHighlighted: true,
+      overrides,
+      erase,
+    } as never;
+
+    const pages = generateTicketPages(source, 2000);
+    expect(pages).toHaveLength(2000);
+    expect(pages[0].id).not.toBe(pages[1].id);
+    expect(pages[0].overrides).toBe(overrides);
+    expect(pages[1999].overrides).toBe(overrides);
+    expect(pages[0].erase).toBe(erase);
+    expect(pages[1999].erase).toBe(erase);
+    expect(pages[0].isHighlighted).toBe(true);
+    expect(pages[1].isHighlighted).toBe(false);
   });
 });
