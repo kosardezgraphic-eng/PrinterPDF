@@ -68,6 +68,21 @@ describe('what a numbering layer counts', () => {
     expect(at('e', 'sheet', 'ltr', 1)).toEqual({ index: 2, total: 2 });
   });
 
+  it('keeps each physical cut-stack position consecutive across successive sheets', () => {
+    const onSheet = (sideIndex: number) => numberingSequence({
+      basis: 'cut-stack',
+      direction: 'rtl',
+      pageId: 'b',
+      sheet: { ...sides[0], sideIndex },
+      pageIndex: 1,
+      pageTotal: 4000,
+      sheetTotal: 1000,
+    });
+    // In a 2×2 RTL sheet, b is the upper-right ticket and therefore the first stack.
+    expect(onSheet(1001)).toEqual({ index: 1001, total: 4000 });
+    expect(onSheet(1002)).toEqual({ index: 1002, total: 4000 });
+  });
+
   it('answers with a number, never NaN, for a cell that is not on the sheet', () => {
     expect(at('nope', 'grid')).toEqual({ index: 1, total: 4 });
   });

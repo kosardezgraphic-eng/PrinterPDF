@@ -43,7 +43,7 @@ describe('interactive page numbers',()=>{
     layout:{...DEFAULT_LAYOUT,paperSize:'Custom',customWidthMm:200,customHeightMm:300,rows:2,cols:2,sheetOrder:'ltr',duplexMode:'none',rulerGuides:[]}}));
   act(()=>field('Add editable page number').click());
   const basis=field('Numbering basis') as HTMLSelectElement;
-  expect([...basis.options].map(o=>o.value)).toEqual(['page','grid','sheet']);
+  expect([...basis.options].map(o=>o.value)).toEqual(['page','grid','cut-stack','sheet']);
   expect(number().sequenceBasis).toBeUndefined();                                   // untouched means "document page"
   setValue(field('Number template') as HTMLTextAreaElement,'{page}');
   act(()=>{basis.value='grid';basis.dispatchEvent(new Event('change',{bubbles:true}));});
