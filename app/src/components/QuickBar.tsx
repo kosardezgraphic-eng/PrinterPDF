@@ -5,13 +5,13 @@ import {
   Undo2,
   Redo2,
   Settings,
-  CircleDollarSign,
+  Calculator,
   Sun,
   Moon,
   Languages,
   Save,
   FolderOpen,
-  Info,
+  HelpCircle,
   CheckCircle2,
   AlertCircle,
   Cpu,
@@ -19,18 +19,13 @@ import {
   Zap,
   Layers,
   X,
-  FileText,
-  RectangleVertical,
-  BookOpen,
-  Keyboard,
-  LayoutGrid,
-  Boxes,
-  Hash,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { PrinterRetryButton } from './PrinterStatus';
 import { t } from '../i18n/translations';
+import { computeCounterSummary } from '../engine/counterEngine';
 import { getSheetDimensionsMm } from '../engine/layoutEngine';
+import { formatLocalizedNumber } from '../i18n/shamsi';
 import {
   STANDARD_PAPER_SIZES,
   type DuplexMode,
@@ -41,13 +36,13 @@ import {
 export const QuickBar: React.FC = () => {
   const {
     appMode,
+    batchQueue,
+    documents,
     pages,
     layout,
     settings,
     printers,
     selectedPrinterName,
-    quickPrintCopies,
-    batchQueue,
     canUndo,
     canRedo,
     undoLabel,
@@ -59,9 +54,7 @@ export const QuickBar: React.FC = () => {
     selectPrinter,
     autoSelectBestPrinter,
     updatePrinterProfile,
-    updateLayout,
     openPrinterPreferences,
-    setQuickPrintCopies,
     silentPrintNow,
     exportMergedOrImposedPdf,
     savePspProject,
@@ -73,27 +66,14 @@ export const QuickBar: React.FC = () => {
   const pspInputRef = useRef<HTMLInputElement>(null);
   const hardwarePopoverRef = useRef<HTMLDivElement>(null);
   const [showHardwarePopover, setShowHardwarePopover] = useState(false);
-  const [copiesDraft, setCopiesDraft] = useState(() => String(quickPrintCopies ?? 1));
 
   const lang = settings.language;
   const isFa = lang === 'fa';
   const tr = t(lang);
 
+  const summary = computeCounterSummary(documents, pages, layout, settings);
   const currentPrinter = printers.find((p) => p.name === selectedPrinterName);
-  const maxCopies = currentPrinter?.capabilities.maxCopies ?? 999;
   const sheetDims = getSheetDimensionsMm(layout);
-
-  useEffect(() => {
-    setCopiesDraft(String(quickPrintCopies));
-  }, [quickPrintCopies]);
-
-  useEffect(() => {
-    const onOpenPsp = () => {
-      pspInputRef.current?.click();
-    };
-    window.addEventListener('printstudio:open-psp', onOpenPsp);
-    return () => window.removeEventListener('printstudio:open-psp', onOpenPsp);
-  }, []);
 
   useEffect(() => {
     if (!showHardwarePopover) return;
@@ -110,7 +90,7 @@ export const QuickBar: React.FC = () => {
   }, [showHardwarePopover]);
 
   const statusColor = (status?: string) => {
-    if (!status) return 'bg-slate-400 dark:bg-slate-500';
+    if (!status) return 'bg-slate-500';
     switch (status) {
       case 'Ready':
       case 'Printing':
@@ -123,183 +103,700 @@ export const QuickBar: React.FC = () => {
     }
   };
 
-  // NOTE: Full original QuickBar body restored with Ticket mode button.
-  // For brevity in this commit the remaining UI matches main with the mode switcher extended.
-  // Operators: open Studio / Batch / Tickets from the left cluster.
+  const paperOptions = currentPrinter?.capabilities.paperOptions?.length
+    ? currentPrinter.capabilities.paperOptions
+    : (currentPrinter?.capabilities.supportedPapers ?? (Object.keys(STANDARD_PAPER_SIZES) as PaperSizeId[])).map(
+        (id) => {
+          const dims = id !== 'Custom' ? STANDARD_PAPER_SIZES[id] : { widthMm: 210, heightMm: 297 };
+          return {
+            id,
+            name: id,
+            widthMm: dims.widthMm,
+            heightMm: dims.heightMm,
+          };
+        }
+      );
+
+  const selectedPaperValue = (() => {
+    if (!currentPrinter) return layout.paperSize;
+    const matchByName = paperOptions.find(
+      (o) =>
+        currentPrinter.activeProfile.paperName &&
+        o.name.toLowerCase() === currentPrinter.activeProfile.paperName.toLowerCase()
+    );
+    if (matchByName) return matchByName.name;
+    const matchById = paperOptions.find((o) => o.id === currentPrinter.activeProfile.paperSize);
+    return matchById?.name ?? paperOptions[0]?.name ?? layout.paperSize;
+  })();
+
+  const handleQuickPaperChange = (paperNameOrId: string) => {
+    const matched = paperOptions.find(
+      (o) => o.name === paperNameOrId || o.id === paperNameOrId
+    );
+    if (!currentPrinter || !matched) return;
+    void updatePrinterProfile(currentPrinter.name, {
+      paperSize: matched.id,
+      paperName: matched.name,
+      paperWidthMm: Math.min(matched.widthMm, matched.heightMm),
+      paperHeightMm: Math.max(matched.widthMm, matched.heightMm),
+    });
+  };
+
+  const handleTrayChange = (tray: string) => {
+    if (!currentPrinter) return;
+    void updatePrinterProfile(currentPrinter.name, { tray });
+  };
+
+  const trays = currentPrinter?.capabilities.supportedTrays?.length
+    ? currentPrinter.capabilities.supportedTrays
+    : ['Auto Select'];
+  const mediaTypes = currentPrinter?.capabilities.supportedMediaTypes?.length
+    ? currentPrinter.capabilities.supportedMediaTypes
+    : ['Plain Paper'];
+  const dpis = currentPrinter?.capabilities.supportedDpi?.length
+    ? currentPrinter.capabilities.supportedDpi
+    : [300, 600];
 
   return (
-    <header
-      dir="ltr"
-      className="relative z-40 flex min-h-10 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-2.5 py-1 text-slate-800 select-none dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
-    >
-      <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-        <div
-          data-app-mode-switcher
-          role="group"
-          aria-label={isFa ? 'تغییر محیط کاری' : 'Workspace Mode'}
-          className="flex h-7 items-center rounded-md border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-700 dark:bg-slate-800 shrink-0"
-        >
-          <button
-            type="button"
-            data-app-mode-studio
-            aria-pressed={appMode === 'studio'}
-            onClick={() => setAppMode('studio')}
-            title={isFa ? 'محیط طراحی و صفحه‌آرایی (Studio)' : 'Design & Imposition Studio'}
-            className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] font-bold transition-colors whitespace-nowrap cursor-pointer ${
-              appMode === 'studio'
-                ? 'bg-white text-sky-700 shadow-xs dark:bg-slate-700 dark:text-sky-300'
-                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'
-            }`}
-          >
-            <LayoutGrid className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span>{isFa ? 'استودیو' : 'Studio'}</span>
-          </button>
-          <button
-            type="button"
-            data-app-mode-batch
-            data-enter-batch-mode
-            aria-pressed={appMode === 'batch'}
-            onClick={() => setAppMode('batch')}
-            title={
-              isFa
-                ? 'محیط مستقل چاپ دسته‌ای چندفایلی و پرینتر مجازی'
-                : 'Standalone Batch Print & Virtual Printer Environment'
-            }
-            className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] font-bold transition-colors whitespace-nowrap cursor-pointer ${
-              appMode === 'batch'
-                ? 'bg-sky-600 text-white shadow-xs dark:bg-sky-500'
-                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'
-            }`}
-          >
-            <Boxes className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span>{isFa ? 'چاپ دسته‌ای' : 'Batch Print'}</span>
-            {batchQueue.length > 0 && (
-              <span
-                className={`rounded-full px-1.5 py-0 text-[10px] font-extrabold tabular-nums ${
-                  appMode === 'batch'
-                    ? 'bg-white/25 text-white'
-                    : 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300'
-                }`}
-              >
-                {batchQueue.length}
+    <header className="relative z-40 flex min-h-13 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-800 bg-slate-900/95 px-2.5 py-1 select-none">
+      {/* Workspace mode switcher retained alongside the original full toolbar. */}
+      <div data-app-mode-switcher role="group" aria-label={isFa ? 'تغییر محیط کاری' : 'Workspace Mode'} className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-950 px-1.5 py-1 shrink-0">
+        <button type="button" data-app-mode-studio aria-pressed={appMode === 'studio'} onClick={() => setAppMode('studio')} className={`rounded-md px-2 py-1 text-[11px] font-bold ${appMode === 'studio' ? 'bg-sky-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}>{isFa ? 'استودیو' : 'Studio'}</button>
+        <button type="button" data-app-mode-batch data-enter-batch-mode aria-pressed={appMode === 'batch'} onClick={() => setAppMode('batch')} className={`rounded-md px-2 py-1 text-[11px] font-bold ${appMode === 'batch' ? 'bg-sky-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}>{isFa ? 'چاپ دسته‌ای' : 'Batch Print'}{batchQueue.length > 0 ? ` (${batchQueue.length})` : ''}</button>
+        <button type="button" data-app-mode-ticket aria-pressed={appMode === 'ticket'} onClick={() => setAppMode('ticket')} className={`rounded-md px-2 py-1 text-[11px] font-bold ${appMode === 'ticket' ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}>{isFa ? 'شماره قبض' : 'Tickets'}</button>
+      </div>
+      {/* Start: Brand + Quick Print Hardware Cluster + Save PDF + Counter + Undo/Redo */}
+      <div className="flex items-center gap-1.5 min-w-0">
+        <div className="hidden 2xl:flex items-center gap-2 rounded-xl bg-gradient-to-l from-sky-600/20 to-indigo-600/20 border border-sky-500/30 px-2.5 py-1 shrink-0">
+          <Printer className="h-4 w-4 text-sky-400" />
+          <div className="leading-tight">
+            <div className="flex items-center gap-1">
+              <span className="text-xs font-black tracking-tight text-white whitespace-nowrap">
+                PrintStudio Pro
               </span>
-            )}
-          </button>
-          <button
-            type="button"
-            data-app-mode-ticket
-            aria-pressed={appMode === 'ticket'}
-            onClick={() => setAppMode('ticket')}
-            title={
-              isFa
-                ? 'محیط جداگانه شماره‌گذاری قبض و فرم چندقسمتی با برش و پرفراژ'
-                : 'Standalone receipt/ticket numbering with cut & perforation'
-            }
-            className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] font-bold transition-colors whitespace-nowrap cursor-pointer ${
-              appMode === 'ticket'
-                ? 'bg-emerald-600 text-white shadow-xs dark:bg-emerald-500'
-                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'
-            }`}
-          >
-            <Hash className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span>{isFa ? 'شماره قبض' : 'Tickets'}</span>
-          </button>
+              <span className="rounded bg-sky-500/20 px-1 py-0.5 text-[9px] font-bold text-sky-300">
+                v1.0
+              </span>
+            </div>
+          </div>
         </div>
 
-        {appMode === 'batch' ? (
-          <div className="flex items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-800 dark:border-sky-500/30 dark:bg-sky-950/30 dark:text-sky-200">
-            <Printer className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
-            <span>
-              {isFa
-                ? 'محیط مجزای چاپ دسته‌ای — کنترل کامل بازه، تعداد سری، سخت‌افزار و پرینتر مجازی'
-                : 'Standalone Batch Print Environment — Ranges, Sets, Hardware & Virtual Printer'}
+        {/* Quick Print + Direct Spooler Print + Tray + Paper Size + Hardware Settings Popover */}
+        <div
+          ref={hardwarePopoverRef}
+          className="relative flex items-center gap-1 rounded-xl border border-slate-700/90 bg-slate-950/90 p-0.5 shrink-0"
+        >
+          {/* Open Print Modal (G1/G2) */}
+          <button
+            type="button"
+            onClick={() => setModalState('print', true)}
+            title={
+              isFa
+                ? 'پنجره چاپ با پیش‌نمایش و تنظیمات کامل پرینتر (Ctrl+P)'
+                : 'Open Full Print Dialog (Ctrl+P)'
+            }
+            className="flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-sky-500 active:scale-[0.99] transition whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <Printer className="h-3.5 w-3.5 shrink-0" />
+            <span>{tr.quickBar.printNow}</span>
+          </button>
+
+          {/* 1-Click Direct Silent Print using active tray/paper/hardware profile */}
+          <button
+            type="button"
+            disabled={isExportingPdf || !currentPrinter || pages.length === 0}
+            onClick={() => void silentPrintNow()}
+            aria-label={isFa ? 'ارسال مستقیم چاپ فوری' : 'Direct Quick Print'}
+            title={
+              isFa
+                ? 'ارسال مستقیم به اسپولر ویندوز با تنظیمات سخت‌افزاری فعلی'
+                : 'Send directly to Windows Spooler with active hardware settings'
+            }
+            className="flex items-center gap-1 rounded-lg bg-indigo-600/85 px-2 py-1.5 text-[11px] font-bold text-white hover:bg-indigo-500 disabled:opacity-40 whitespace-nowrap shrink-0 cursor-pointer disabled:cursor-not-allowed"
+          >
+            <Zap className="h-3.5 w-3.5 shrink-0" />
+            <span className="hidden md:inline">{isFa ? 'ارسال آنی' : 'Quick'}</span>
+          </button>
+
+          {/* Paper Tray Selector right beside Quick Print (populated from printer driver) */}
+          <div className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-900 px-1.5 py-1">
+            <Layers className="h-3 w-3 text-amber-400 shrink-0" />
+            <select
+              aria-label={isFa ? 'سینی کاغذ چاپ فوری' : 'Quick Print Paper Tray'}
+              title={
+                isFa
+                  ? 'انتخاب سینی کاغذ از درایور پرینتر'
+                  : 'Select Paper Tray from printer driver'
+              }
+              disabled={!currentPrinter}
+              value={currentPrinter?.activeProfile.tray ?? trays[0]}
+              onChange={(e) => handleTrayChange(e.target.value)}
+              className="bg-transparent text-[11px] font-semibold text-slate-100 focus:outline-none max-w-[115px] truncate cursor-pointer disabled:opacity-50"
+            >
+              {trays.map((trayName) => (
+                <option key={trayName} value={trayName} className="bg-slate-900 text-slate-100">
+                  {trayName}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Driver Paper Size + exact mm badge beside Quick Print */}
+          <div className="hidden sm:flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-900 px-1.5 py-1">
+            <select
+              dir="ltr"
+              aria-label={isFa ? 'سایز کاغذ پرینتر' : 'Printer Paper Size'}
+              title={
+                isFa
+                  ? 'اندازه کاغذ پرینتر (شیت‌ها بر همین اساس چیده می‌شوند)'
+                  : 'Printer Paper Size (sheets size to this paper)'
+              }
+              disabled={!currentPrinter}
+              value={selectedPaperValue}
+              onChange={(e) => handleQuickPaperChange(e.target.value)}
+              className="bg-transparent text-[11px] font-semibold text-sky-300 focus:outline-none max-w-[140px] truncate cursor-pointer disabled:opacity-50"
+            >
+              {paperOptions.map((opt) => (
+                <option
+                  key={`${opt.name}-${opt.widthMm}x${opt.heightMm}`}
+                  value={opt.name}
+                  className="bg-slate-900 text-slate-100"
+                >
+                  {opt.name} ({Math.round(opt.widthMm)}×{Math.round(opt.heightMm)} mm)
+                </option>
+              ))}
+            </select>
+            <span className="hidden xl:inline font-mono tabular-nums text-[10px] text-slate-400 whitespace-nowrap">
+              {Math.round(sheetDims.widthMm)}×{Math.round(sheetDims.heightMm)}mm
             </span>
           </div>
-        ) : appMode === 'ticket' ? (
-          <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-950/30 dark:text-emerald-200">
-            <Hash className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <span>
-              {isFa
-                ? 'محیط شماره‌گذاری قبض — تقسیم صفحه، سریال پشت‌سرهم، برش و پرفراژ'
-                : 'Receipt Numbering — Page division, sequential serials, cut & perforation'}
-            </span>
-          </div>
-        ) : (
-          <>
-            <button
-              type="button"
-              disabled={isExportingPdf}
-              onClick={() => void exportMergedOrImposedPdf(false)}
-              className="flex h-7 items-center gap-1 rounded-md bg-emerald-500 px-2.5 text-[11px] font-bold text-white shadow-xs hover:bg-emerald-600 disabled:opacity-50 cursor-pointer"
-            >
-              <FileDown className="h-3.5 w-3.5" />
-              SavePDF
-            </button>
-            <button
-              type="button"
-              disabled={isExportingPdf || !currentPrinter || pages.length === 0}
-              onClick={() => void silentPrintNow()}
-              className="flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-slate-100 px-2.5 text-[11px] font-semibold text-slate-800 hover:bg-slate-200 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 cursor-pointer"
-            >
-              <Zap className="h-3.5 w-3.5 text-amber-500" />
-              Quick Print
-            </button>
-            <button
-              type="button"
-              onClick={() => setModalState('print', true)}
-              className="flex h-7 items-center gap-1 rounded-md border border-sky-500/30 bg-sky-50 px-2.5 text-[11px] font-semibold text-sky-800 hover:bg-sky-100 dark:border-sky-500/40 dark:bg-sky-600/20 dark:text-sky-200 cursor-pointer"
-            >
-              <Printer className="h-3.5 w-3.5 text-sky-600" />
-              {tr.quickBar.printNow}
-            </button>
-          </>
-        )}
+
+          {/* Hardware Driver Settings Popover Toggle */}
+          <button
+            type="button"
+            aria-expanded={showHardwarePopover}
+            aria-label={isFa ? 'تنظیمات سخت‌افزاری پرینتر' : 'Printer Hardware Settings'}
+            title={
+              isFa
+                ? 'تنظیمات سخت‌افزاری و درایور پرینتر برای چاپ فوری'
+                : 'Printer Hardware & Driver Settings for Quick Print'
+            }
+            onClick={() => setShowHardwarePopover((v) => !v)}
+            className={`flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold whitespace-nowrap shrink-0 transition cursor-pointer ${
+              showHardwarePopover
+                ? 'bg-sky-500/25 text-sky-200 border border-sky-500/50'
+                : 'bg-slate-800/90 text-slate-200 hover:bg-slate-700'
+            }`}
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-sky-400" />
+            <span className="hidden md:inline">{isFa ? 'سخت‌افزار' : 'Hardware'}</span>
+          </button>
+
+          {/* Hardware & Driver Settings Popover */}
+          {showHardwarePopover && (
+            <div className="absolute top-full start-0 mt-2 w-[360px] sm:w-[430px] rounded-2xl border border-slate-700 bg-slate-900 p-4 text-xs text-slate-100 shadow-2xl z-50">
+              <div className="mb-3 flex items-center justify-between border-b border-slate-800 pb-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <SlidersHorizontal className="h-4 w-4 text-sky-400 shrink-0" />
+                  <span className="font-bold truncate">
+                    {isFa
+                      ? 'تنظیمات سخت‌افزاری پرینتر (چاپ فوری)'
+                      : 'Printer Hardware Settings (Quick Print)'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowHardwarePopover(false)}
+                  className="rounded p-1 text-slate-400 hover:bg-slate-800 cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {!currentPrinter ? (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-950/30 p-3 text-amber-200">
+                  {isFa
+                    ? 'ابتدا یک پرینتر ویندوز را از لیست مرکزی انتخاب کنید.'
+                    : 'Select an installed Windows printer first.'}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/70 px-3 py-2 text-[11px]">
+                    <div className="font-bold text-sky-300 truncate">{currentPrinter.name}</div>
+                    <div className="text-slate-400 truncate">
+                      {currentPrinter.driverName} • {currentPrinter.portName}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="mb-1 block text-[11px] text-slate-400">
+                        {isFa ? 'اندازه کاغذ درایور:' : 'Paper Size:'}
+                      </label>
+                      <select
+                        dir="ltr"
+                        value={selectedPaperValue}
+                        onChange={(e) => handleQuickPaperChange(e.target.value)}
+                        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
+                      >
+                        {paperOptions.map((opt) => (
+                          <option key={opt.name} value={opt.name}>
+                            {opt.name} ({Math.round(opt.widthMm)}×{Math.round(opt.heightMm)} mm)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-[11px] text-slate-400">
+                        {isFa ? 'سینی کاغذ (Tray):' : 'Paper Tray:'}
+                      </label>
+                      <select
+                        value={currentPrinter.activeProfile.tray}
+                        onChange={(e) => handleTrayChange(e.target.value)}
+                        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
+                      >
+                        {trays.map((tName) => (
+                          <option key={tName} value={tName}>
+                            {tName}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-[11px] text-slate-400">
+                        {isFa ? 'جنس کاغذ (Media Type):' : 'Media Type:'}
+                      </label>
+                      <select
+                        value={currentPrinter.activeProfile.mediaType}
+                        onChange={(e) =>
+                          void updatePrinterProfile(currentPrinter.name, {
+                            mediaType: e.target.value,
+                          })
+                        }
+                        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
+                      >
+                        {mediaTypes.map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-[11px] text-slate-400">
+                        {isFa ? 'جهت چاپ:' : 'Orientation:'}
+                      </label>
+                      <select
+                        value={currentPrinter.activeProfile.orientation}
+                        onChange={(e) =>
+                          void updatePrinterProfile(currentPrinter.name, {
+                            orientation: e.target.value as PageOrientation,
+                          })
+                        }
+                        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
+                      >
+                        <option value="portrait">{isFa ? 'عمودی (Portrait)' : 'Portrait'}</option>
+                        <option value="landscape">{isFa ? 'افقی (Landscape)' : 'Landscape'}</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-[11px] text-slate-400">
+                        {isFa ? 'چاپ دورو (Duplex):' : 'Duplex Mode:'}
+                      </label>
+                      <select
+                        aria-label={isFa ? 'چاپ دورو سخت‌افزاری' : 'Hardware Duplex Mode'}
+                        value={currentPrinter.activeProfile.duplexMode}
+                        onChange={(e) =>
+                          void updatePrinterProfile(currentPrinter.name, {
+                            duplexMode: e.target.value as DuplexMode,
+                          })
+                        }
+                        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
+                      >
+                        <option value="none">{isFa ? 'تک‌رو (Simplex)' : 'Simplex'}</option>
+                        <option value="long-edge">{isFa ? 'دورو لبه بلند' : 'Long-Edge'}</option>
+                        <option value="short-edge">{isFa ? 'دورو لبه کوتاه' : 'Short-Edge'}</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-[11px] text-slate-400">
+                        {isFa ? 'رزولوشن و رنگ:' : 'DPI & Color:'}
+                      </label>
+                      <div className="flex gap-1">
+                        <select
+                          value={currentPrinter.activeProfile.dpi}
+                          onChange={(e) =>
+                            void updatePrinterProfile(currentPrinter.name, {
+                              dpi: Number(e.target.value),
+                            })
+                          }
+                          className="w-1/2 rounded-lg border border-slate-700 bg-slate-800 px-1.5 py-1.5 text-white"
+                        >
+                          {dpis.map((d) => (
+                            <option key={d} value={d}>
+                              {d} DPI
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          disabled={!currentPrinter.capabilities.supportsColor}
+                          value={
+                            currentPrinter.capabilities.supportsColor
+                              ? currentPrinter.activeProfile.colorMode
+                              : 'monochrome'
+                          }
+                          onChange={(e) =>
+                            void updatePrinterProfile(currentPrinter.name, {
+                              colorMode: e.target.value as 'color' | 'grayscale' | 'monochrome',
+                            })
+                          }
+                          className="w-1/2 rounded-lg border border-slate-700 bg-slate-800 px-1.5 py-1.5 text-white disabled:opacity-50"
+                        >
+                          <option value="color">{isFa ? 'رنگی' : 'Color'}</option>
+                          <option value="monochrome">{isFa ? 'سیاه‌وسفید' : 'Mono'}</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-[11px] text-slate-400">
+                        {isFa ? 'کیفیت چاپ:' : 'Quality:'}
+                      </label>
+                      <select
+                        value={currentPrinter.activeProfile.quality}
+                        onChange={(e) =>
+                          void updatePrinterProfile(currentPrinter.name, {
+                            quality: e.target.value as 'draft' | 'normal' | 'high',
+                          })
+                        }
+                        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
+                      >
+                        <option value="draft">{isFa ? 'سریع (Draft)' : 'Draft'}</option>
+                        <option value="normal">{isFa ? 'معمولی (Normal)' : 'Normal'}</option>
+                        <option value="high">{isFa ? 'عالی (High)' : 'High'}</option>
+                      </select>
+                    </div>
+
+                    {currentPrinter.capabilities.supportedStapleModes?.length ? (
+                      <div>
+                        <label className="mb-1 block text-[11px] text-slate-400">
+                          {isFa ? 'منگنه (Staple):' : 'Stapling:'}
+                        </label>
+                        <select
+                          value={currentPrinter.activeProfile.staple ?? ''}
+                          onChange={(e) =>
+                            void updatePrinterProfile(currentPrinter.name, {
+                              staple: e.target.value || undefined,
+                            })
+                          }
+                          className="w-full rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
+                        >
+                          <option value="">{isFa ? 'بدون منگنه' : 'None'}</option>
+                          {currentPrinter.capabilities.supportedStapleModes.map((m) => (
+                            <option key={m} value={m}>
+                              {m}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
+
+                    {currentPrinter.capabilities.supportedHolePunchModes?.length ? (
+                      <div>
+                        <label className="mb-1 block text-[11px] text-slate-400">
+                          {isFa ? 'پانچ (Hole Punch):' : 'Hole Punch:'}
+                        </label>
+                        <select
+                          value={currentPrinter.activeProfile.holePunch ?? ''}
+                          onChange={(e) =>
+                            void updatePrinterProfile(currentPrinter.name, {
+                              holePunch: e.target.value || undefined,
+                            })
+                          }
+                          className="w-full rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
+                        >
+                          <option value="">{isFa ? 'بدون پانچ' : 'None'}</option>
+                          {currentPrinter.capabilities.supportedHolePunchModes.map((m) => (
+                            <option key={m} value={m}>
+                              {m}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
+
+                    {currentPrinter.capabilities.supportedOutputBins?.length ? (
+                      <div>
+                        <label className="mb-1 block text-[11px] text-slate-400">
+                          {isFa ? 'سینی خروجی (Output Bin):' : 'Output Bin:'}
+                        </label>
+                        <select
+                          value={currentPrinter.activeProfile.outputBin ?? ''}
+                          onChange={(e) =>
+                            void updatePrinterProfile(currentPrinter.name, {
+                              outputBin: e.target.value || undefined,
+                            })
+                          }
+                          className="w-full rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-white"
+                        >
+                          <option value="">{isFa ? 'پیش‌فرض' : 'Default'}</option>
+                          {currentPrinter.capabilities.supportedOutputBins.map((m) => (
+                            <option key={m} value={m}>
+                              {m}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3 pt-1">
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={currentPrinter.activeProfile.collate ?? true}
+                        onChange={(e) =>
+                          void updatePrinterProfile(currentPrinter.name, {
+                            collate: e.target.checked,
+                          })
+                        }
+                        className="accent-sky-500"
+                      />
+                      <span>{isFa ? 'مرتب‌سازی (Collate)' : 'Collate'}</span>
+                    </label>
+                    {currentPrinter.capabilities.supportsBorderless && (
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(currentPrinter.activeProfile.borderless)}
+                          onChange={(e) =>
+                            void updatePrinterProfile(currentPrinter.name, {
+                              borderless: e.target.checked,
+                            })
+                          }
+                          className="accent-sky-500"
+                        />
+                        <span>{isFa ? 'چاپ بدون حاشیه (Borderless)' : 'Borderless'}</span>
+                      </label>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 border-t border-slate-800 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => void openPrinterPreferences(currentPrinter.name)}
+                      className="rounded-lg border border-emerald-500/40 bg-emerald-600/15 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-600/25 whitespace-nowrap cursor-pointer"
+                    >
+                      {isFa ? 'تنظیمات کامل درایور ویندوز' : 'Windows Driver UI'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isExportingPdf || pages.length === 0}
+                      onClick={() => {
+                        setShowHardwarePopover(false);
+                        void silentPrintNow();
+                      }}
+                      className="flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-sky-500 disabled:opacity-40 whitespace-nowrap cursor-pointer"
+                    >
+                      <Zap className="h-3.5 w-3.5" />
+                      <span>{isFa ? 'ارسال مستقیم به پرینتر' : 'Print Directly Now'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Save As PDF (C1/C2) */}
+        <button
+          type="button"
+          disabled={isExportingPdf}
+          onClick={() => void exportMergedOrImposedPdf(false)}
+          title={
+            isFa
+              ? 'ادغام و ساخت فایل PDF نهایی مطابق چیدمان و افکت‌ها (Ctrl+S)'
+              : 'Export imposed PDF (Ctrl+S)'
+          }
+          className="flex items-center gap-1.5 rounded-xl bg-emerald-600/90 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-50 transition whitespace-nowrap shrink-0 cursor-pointer"
+        >
+          <FileDown className="h-4 w-4 shrink-0" />
+          <span className="hidden xl:inline">{tr.quickBar.saveAsPdf}</span>
+        </button>
+
+        {/* Counter & Cost Dashboard (B1/B2) */}
+        <button
+          type="button"
+          onClick={() => setModalState('counter', true)}
+          className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/90 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:border-sky-500/50 hover:bg-slate-800 transition whitespace-nowrap shrink-0 cursor-pointer"
+        >
+          <Calculator className="h-4 w-4 text-amber-400 shrink-0" />
+          <span className="hidden xl:inline">{tr.quickBar.counterDashboard}</span>
+          <span className="rounded-md bg-amber-500/20 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-amber-300">
+            {formatLocalizedNumber(summary.totalPhysicalSheets, lang)}{' '}
+            {lang === 'fa' ? 'برگ' : 'sh'}
+          </span>
+        </button>
+
+        {/* Undo / Redo (A5) */}
+        <div className="hidden sm:flex items-center gap-1 shrink-0">
+          <button
+            type="button"
+            disabled={!canUndo}
+            onClick={undo}
+            title={undoLabel ? `${tr.quickBar.undo}: ${undoLabel}` : tr.quickBar.undo}
+            className="rounded-lg border border-slate-800 bg-slate-800/60 p-1.5 text-slate-300 hover:bg-slate-700 disabled:opacity-35 cursor-pointer disabled:cursor-not-allowed"
+          >
+            <Undo2 className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            disabled={!canRedo}
+            onClick={redo}
+            title={redoLabel ? `${tr.quickBar.redo}: ${redoLabel}` : tr.quickBar.redo}
+            className="rounded-lg border border-slate-800 bg-slate-800/60 p-1.5 text-slate-300 hover:bg-slate-700 disabled:opacity-35 cursor-pointer disabled:cursor-not-allowed"
+          >
+            <Redo2 className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
+      {/* Center: Live Printer Selector + Auto-Select (I1) */}
+      <div className="hidden lg:flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-950/80 px-2 py-1 min-w-0">
+        <span
+          className={`h-2.5 w-2.5 rounded-full shrink-0 ${statusColor(currentPrinter?.status)}`}
+          title={
+            currentPrinter
+              ? `${isFa ? 'وضعیت پرینتر:' : 'Printer status:'} ${currentPrinter.status}`
+              : isFa
+                ? 'پرینتر ویندوز متصل نیست'
+                : 'No Windows printer connected'
+          }
+        />
+        <select
+          aria-label="انتخاب پرینتر"
+          value={selectedPrinterName}
+          onChange={(e) => selectPrinter(e.target.value)}
+          className="bg-transparent text-xs font-medium text-slate-200 focus:outline-none max-w-[190px] xl:max-w-[240px] truncate cursor-pointer"
+        >
+          {printers.length === 0 && (
+            <option value="" className="bg-slate-900 text-slate-400">
+              {tr.quickBar.noPrinter}
+            </option>
+          )}
+          {printers.map((p) => (
+            <option key={p.name} value={p.name} className="bg-slate-900 text-slate-100">
+              {p.name} [{p.status}]
+            </option>
+          ))}
+        </select>
+
+        <PrinterRetryButton compact />
+
+        {currentPrinter?.status === 'Ready' ? (
+          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+        ) : (
+          <AlertCircle className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+        )}
+
         <button
           type="button"
-          disabled={!canUndo}
-          onClick={() => undo()}
-          title={undoLabel}
-          className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-700 hover:bg-white disabled:opacity-35 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+          onClick={autoSelectBestPrinter}
+          title={
+            isFa
+              ? 'انتخاب هوشمند بهترین پرینتر آماده بر اساس سایز کاغذ و رنگی/سیاه‌وسفید بودن سند'
+              : 'Smart auto-select optimal Ready printer by paper size & color'
+          }
+          className="flex items-center gap-1 rounded-lg bg-sky-500/15 px-2 py-1 text-[11px] font-semibold text-sky-300 hover:bg-sky-500/25 whitespace-nowrap shrink-0 cursor-pointer"
         >
-          <Undo2 className="h-3.5 w-3.5" />
+          <Cpu className="h-3 w-3 shrink-0" />
+          <span>{isFa ? 'خودکار' : 'Auto'}</span>
+        </button>
+      </div>
+
+      {/* End: Project .psp, Language, Theme, Tour, Settings */}
+      <div className="flex items-center gap-1 shrink-0">
+        <input
+          ref={pspInputRef}
+          type="file"
+          accept=".psp,.json"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void openPspProjectFile(f);
+            e.target.value = '';
+          }}
+        />
+        <button
+          type="button"
+          onClick={savePspProject}
+          title={tr.quickBar.saveProject}
+          className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-700 cursor-pointer"
+        >
+          <Save className="h-3.5 w-3.5 text-sky-400" />
+          <span className="hidden 2xl:inline">.psp</span>
         </button>
         <button
           type="button"
-          disabled={!canRedo}
-          onClick={() => redo()}
-          title={redoLabel}
-          className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-700 hover:bg-white disabled:opacity-35 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+          onClick={() => pspInputRef.current?.click()}
+          title={isFa ? 'باز کردن فایل پروژه .psp' : 'Open .psp Project'}
+          className="rounded-lg border border-slate-800 bg-slate-800/70 p-1.5 text-slate-300 hover:bg-slate-700 cursor-pointer"
         >
-          <Redo2 className="h-3.5 w-3.5" />
+          <FolderOpen className="h-3.5 w-3.5 text-amber-400" />
         </button>
-        <button
-          type="button"
-          onClick={() => updateSettings({ language: isFa ? 'en' : 'fa' })}
-          className="flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 text-[11px] font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
-        >
-          <Languages className="h-3.5 w-3.5" />
-          {isFa ? 'EN' : 'FA'}
-        </button>
+
+        {/* Live RTL/LTR Language Switcher */}
         <button
           type="button"
           onClick={() =>
-            updateSettings({
-              theme: settings.theme === 'dark' ? 'light' : 'dark',
-            })
+            updateSettings({ language: settings.language === 'fa' ? 'en' : 'fa' })
           }
-          className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+          title="تغییر زنده زبان فارسی (RTL) / انگلیسی (LTR)"
+          className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-800/70 px-2 py-1.5 text-xs font-bold text-slate-200 hover:bg-slate-700 whitespace-nowrap shrink-0 cursor-pointer"
         >
-          {settings.theme === 'dark' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+          <Languages className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+          <span>{settings.language === 'fa' ? 'FA' : 'EN'}</span>
         </button>
+
+        {/* Theme Switcher */}
+        <button
+          type="button"
+          onClick={() =>
+            updateSettings({ theme: settings.theme === 'dark' ? 'light' : 'dark' })
+          }
+          title="تغییر تم روشن / تیره"
+          className="rounded-lg border border-slate-800 bg-slate-800/70 p-1.5 text-slate-300 hover:bg-slate-700 cursor-pointer"
+        >
+          {settings.theme === 'dark' ? (
+            <Sun className="h-4 w-4 text-amber-400" />
+          ) : (
+            <Moon className="h-4 w-4 text-sky-400" />
+          )}
+        </button>
+
+        {/* Onboarding Tour */}
+        <button
+          type="button"
+          onClick={() => setModalState('tour', true)}
+          title={tr.quickBar.tour}
+          className="rounded-lg border border-slate-800 bg-slate-800/70 p-1.5 text-slate-300 hover:bg-slate-700 cursor-pointer"
+        >
+          <HelpCircle className="h-4 w-4 text-emerald-400" />
+        </button>
+
+        {/* Settings (K1) */}
         <button
           type="button"
           onClick={() => setModalState('settings', true)}
-          className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+          title={tr.quickBar.settings}
+          className="rounded-lg border border-slate-800 bg-slate-800/70 p-1.5 text-slate-300 hover:bg-slate-700 cursor-pointer"
         >
-          <Settings className="h-3.5 w-3.5" />
+          <Settings className="h-4 w-4 text-slate-300" />
         </button>
       </div>
     </header>
