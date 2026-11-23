@@ -15,6 +15,7 @@ import {
   Trash2,
   Upload,
   FileImage,
+  FileDown,
   Play,
   RotateCcw,
   ArrowLeft,
@@ -57,6 +58,7 @@ export const TicketNumberingWorkspace: React.FC = () => {
     useStudioActivePageAsTicketSource,
     clearTicketSource,
     generateTicketSheetsToStudio,
+    exportMergedOrImposedPdf,
     setAppMode,
     addToast,
   } = useAppStore();
@@ -233,6 +235,14 @@ export const TicketNumberingWorkspace: React.FC = () => {
     }
   };
 
+  const handleExportPdf = async () => {
+    const count = generateTicketSheetsToStudio();
+    if (count <= 0) return;
+    // Ticket generation updates the Zustand store synchronously; the normal PDF
+    // pipeline then exports the exact same vector overlays and source artwork.
+    await exportMergedOrImposedPdf(false);
+  };
+
   const previewSerials = useMemo(() => {
     return ticketConfig.numberSlots.map((slot) => ({
       id: slot.id,
@@ -284,6 +294,15 @@ export const TicketNumberingWorkspace: React.FC = () => {
           >
             <RotateCcw className="h-3.5 w-3.5" />
             {isFa ? 'بازنشانی' : 'Reset'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleExportPdf()}
+            className="flex h-8 items-center gap-1.5 rounded-md border border-emerald-300 bg-emerald-50 px-3 text-xs font-bold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-600/15 dark:text-emerald-300 cursor-pointer"
+            title={isFa ? 'ساخت PDF نهایی با حفظ متن و خطوط برداری' : 'Export final vector PDF'}
+          >
+            <FileDown className="h-3.5 w-3.5" />
+            {isFa ? 'خروجی PDF' : 'Export PDF'}
           </button>
           <button
             type="button"
@@ -829,6 +848,14 @@ export const TicketNumberingWorkspace: React.FC = () => {
                       <div key={`${r}-${c}`} data-ticket-cell={`${r}-${c}`} className="absolute box-border border border-dashed border-slate-300 bg-slate-50/80"
                         style={{ left: `${left}%`, top: `${top}%`, width: `${w}%`, height: `${h}%` }}
                       >
+                        {selectedSource?.thumbnailDataUrl && (
+                          <img
+                            src={selectedSource.thumbnailDataUrl}
+                            alt={isFa ? 'تصویر فرم اصلی قبض' : 'Receipt source artwork'}
+                            draggable={false}
+                            className="pointer-events-none absolute inset-0 h-full w-full select-none object-fill"
+                          />
+                        )}
                         {ticketConfig.numberSlots.map((slot) => (
                           <div key={slot.id} data-ticket-slot-id={slot.id} onPointerDown={event => beginSlotDrag(event, slot.id, r, c)} title={isFa ? 'برای جابه‌جایی شماره با ماوس بکشید' : 'Drag to move this number'} className="absolute flex items-center justify-center overflow-hidden text-[9px] font-bold leading-tight cursor-move select-none" style={{ touchAction: 'none',
                               left: `${slot.xPercent}%`,
