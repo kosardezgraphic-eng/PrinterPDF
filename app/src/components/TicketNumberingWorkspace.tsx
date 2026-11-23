@@ -59,6 +59,7 @@ export const TicketNumberingWorkspace: React.FC = () => {
     clearTicketSource,
     generateTicketSheetsToStudio,
     exportMergedOrImposedPdf,
+    setPdfExportOptions,
     setAppMode,
     addToast,
   } = useAppStore();
@@ -238,6 +239,8 @@ export const TicketNumberingWorkspace: React.FC = () => {
   const handleExportPdf = async () => {
     const count = generateTicketSheetsToStudio();
     if (count <= 0) return;
+    // Prefer a compact 300-DPI image profile while retaining vector text and line art.
+    setPdfExportOptions({ imageHandling: 'downsample-300', compression: 'compact' });
     // Ticket generation updates the Zustand store synchronously; the normal PDF
     // pipeline then exports the exact same vector overlays and source artwork.
     await exportMergedOrImposedPdf(false);
