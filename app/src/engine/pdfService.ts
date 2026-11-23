@@ -53,6 +53,11 @@ import type {
 
 const MM_TO_PT = 72 / 25.4; // 1 mm = 2.83464567 pt
 
+/** Yield between imposed sheets so large exports do not monopolize the renderer thread. */
+function yieldPdfExportTurn(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 /** The preview uses the model value directly, so the PDF must not clamp it differently. */
 function clampOpacity(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 1;
@@ -1307,7 +1312,13 @@ export async function exportImposedPdf(params: {
         if ((item.letterSpacingPt??0)!==0 && !('letterSpacing' in ctx) || (item.wordSpacingPt??0)!==0 && !('wordSpacing' in ctx))
           throw new Error('This environment cannot export the requested text spacing');
         drawOverlayText(ctx,item,canvas.width,canvas.height,canvas.width/w);
-        image=await outPdf.embedPng(canvas.toDataURL('image/png'));textImages.set(key,image);
+        // Encode directly to bytes instead of creating a large base64 data URL for every unique label.
+        const textPngBytes = await surfaceToPngBytes(canvas);
+        image = await outPdf.embedPng(textPngBytes);
+        textImages.set(key, image);
+        // pdf-lib has copied the encoded image into its object graph; release the temporary canvas now.
+        canvas.width = 0;
+        canvas.height = 0;
       }
       outPage.pushOperators(pushGraphicsState());
       if(placement.clip){const r=placement.clip;outPage.pushOperators(rectangle(r.x*MM_TO_PT,sheetHeightPt-(r.y+r.height)*MM_TO_PT,r.width*MM_TO_PT,r.height*MM_TO_PT),clip(),endPath());}
@@ -1386,6 +1397,9 @@ export async function exportImposedPdf(params: {
     }
 
     onProgress?.(Math.round(((sIdx + 1) / totalSides) * 100));
+    // A single export may contain thousands of sheets. Let React/Electron paint progress,
+    // process input and handle cancellation between sheets instead of blocking the UI thread.
+    await yieldPdfExportTurn();
   }
   } finally {
     for (const task of loadedPdfJsTasks.values()) {
