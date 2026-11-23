@@ -6,7 +6,7 @@
  * then auto-generate all sheets and open them in Studio for live preview and edit.
  */
 
-import React, { useMemo, useRef } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   LayoutGrid,
   Hash,
@@ -25,8 +25,7 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import {
   getTicketGridMetrics,
-  resolveTicketSlotText,
-  type TicketConfig,
+  resolveTicketSlotText,\n  ticketSequenceIndex,\n  type TicketConfig,
   type TicketGuideLine,
   type TicketNumberSlot,
 } from '../engine/ticketNumbering';
@@ -62,7 +61,7 @@ export const TicketNumberingWorkspace: React.FC = () => {
 
   const isFa = settings.language === 'fa';
   const fileRef = useRef<HTMLInputElement>(null);
-  const metrics = useMemo(() => getTicketGridMetrics(ticketConfig), [ticketConfig]);
+  const metrics = useMemo(() => getTicketGridMetrics(ticketConfig), [ticketConfig]);\n  const [guideTool, setGuideTool] = useState<TicketGuideLine['kind'] | null>(null);\n  const [guideOrientation, setGuideOrientation] = useState<TicketGuideLine['orientation']>('vertical');\n  const previewRef = useRef<HTMLDivElement>(null);\n  const dragRef = useRef<{ pointerId: number; kind: 'slot' | 'guide' | 'new-guide'; id: string; row: number; col: number; orientation: TicketGuideLine['orientation']; cell: { left: number; top: number; width: number; height: number } } | null>(null);
 
   const selectedSource =
     ticketSourcePages.find((p) => p.id === ticketSelectedSourcePageId) ?? ticketSourcePages[0] ?? null;
@@ -108,13 +107,12 @@ export const TicketNumberingWorkspace: React.FC = () => {
     patch({ numberSlots: ticketConfig.numberSlots.filter((s) => s.id !== id) });
   };
 
-  const addGuide = (kind: TicketGuideLine['kind'] = 'perforation') => {
+  const addGuide = (kind: TicketGuideLine['kind'] = 'perforation', orientation: TicketGuideLine['orientation'] = 'vertical', positionPercent = 40) => {
     const next: TicketGuideLine = {
       id: newId('guide'),
       label: kind === 'perforation' ? (isFa ? 'خط پرفراژ' : 'Perforation') : isFa ? 'خط برش' : 'Cut line',
       kind,
-      orientation: 'vertical',
-      positionPercent: 40,
+      orientation,\n      positionPercent: Math.max(0, Math.min(100, positionPercent)),
       extendFullSheet: true,
       strokeColor: kind === 'perforation' ? '#0284c7' : '#dc2626',
       strokeStyle: kind === 'perforation' ? 'dashed' : 'solid',
@@ -131,6 +129,83 @@ export const TicketNumberingWorkspace: React.FC = () => {
 
   const removeGuide = (id: string) => {
     patch({ guideLines: ticketConfig.guideLines.filter((g) => g.id !== id) });
+  };
+
+  const cellFrame = (row: number, col: number) => ({
+    left: ticketConfig.marginsMm.left + col * (metrics.cellWidthMm + ticketConfig.horizontalGutterMm),
+    top: ticketConfig.marginsMm.top + row * (metrics.cellHeightMm + ticketConfig.verticalGutterMm),
+    width: metrics.cellWidthMm,
+    height: metrics.cellHeightMm,
+  });
+
+  const guidePositionAt = (orientation: TicketGuideLine['orientation'], clientX: number, clientY: number, row: number, col: number) => {
+    const sheet = previewRef.current?.getBoundingClientRect();
+    if (!sheet) return 40;
+    const frame = cellFrame(row, col);
+    const localMm = orientation === 'vertical'
+      ? (clientX - sheet.left) / sheet.width * metrics.sheetWidthMm - frame.left
+      : (clientY - sheet.top) / sheet.height * metrics.sheetHeightMm - frame.top;
+    return Math.max(0, Math.min(100, localMm / (orientation === 'vertical' ? frame.width : frame.height) * 100));
+  };
+
+  const beginSlotDrag = (event: React.PointerEvent<HTMLElement>, id: string, row: number, col: number) => {
+    if (event.button !== 0) return;
+    const sheet = previewRef.current;
+    const cell = event.currentTarget.closest<HTMLElement>('[data-ticket-cell]');
+    const rect = cell?.getBoundingClientRect();
+    if (!sheet || !rect) return;
+    event.preventDefault(); event.stopPropagation(); sheet.setPointerCapture?.(event.pointerId);
+    dragRef.current = { pointerId: event.pointerId, kind: 'slot', id, row, col, orientation: 'vertical',
+      cell: { left: rect.left, top: rect.top, width: rect.width, height: rect.height } };
+  };
+
+  const beginGuideDrag = (event: React.PointerEvent<HTMLElement>, id: string, row: number, col: number, orientation: TicketGuideLine['orientation']) => {
+    if (event.button !== 0) return;
+    event.preventDefault(); event.stopPropagation(); previewRef.current?.setPointerCapture?.(event.pointerId);
+    dragRef.current = { pointerId: event.pointerId, kind: 'guide', id, row, col, orientation, cell: { left: 0, top: 0, width: 0, height: 0 } };
+  };
+
+  const beginManualGuide = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!guideTool || event.button !== 0) return;
+    const sheet = previewRef.current, rect = sheet?.getBoundingClientRect();
+    if (!sheet || !rect) return;
+    const xMm = (event.clientX - rect.left) / rect.width * metrics.sheetWidthMm;
+    const yMm = (event.clientY - rect.top) / rect.height * metrics.sheetHeightMm;
+    const col = Math.max(0, Math.min(metrics.cols - 1, Math.floor((xMm - ticketConfig.marginsMm.left) / (metrics.cellWidthMm + ticketConfig.horizontalGutterMm))));
+    const row = Math.max(0, Math.min(metrics.rows - 1, Math.floor((yMm - ticketConfig.marginsMm.top) / (metrics.cellHeightMm + ticketConfig.verticalGutterMm))));
+    const position = guidePositionAt(guideOrientation, event.clientX, event.clientY, row, col);
+    const id = newId('guide');
+    const next: TicketGuideLine = {
+      id, label: guideTool === 'perforation' ? (isFa ? 'خط پرفراژ' : 'Perforation') : (isFa ? 'خط برش' : 'Cut line'),
+      kind: guideTool, orientation: guideOrientation, positionPercent: position, extendFullSheet: true,
+      strokeColor: guideTool === 'perforation' ? '#0284c7' : '#dc2626',
+      strokeStyle: guideTool === 'perforation' ? 'dashed' : 'solid', strokeWidth: 0.9,
+    };
+    patch({ guideLines: [...ticketConfig.guideLines, next] });
+    event.preventDefault(); event.stopPropagation(); sheet.setPointerCapture?.(event.pointerId);
+    dragRef.current = { pointerId: event.pointerId, kind: 'new-guide', id, row, col, orientation: guideOrientation, cell: { left: 0, top: 0, width: 0, height: 0 } };
+    setGuideTool(null);
+  };
+
+  const movePreviewPointer = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (drag.kind === 'slot') {
+      const slot = ticketConfig.numberSlots.find(item => item.id === drag.id);
+      if (!slot) return;
+      const x = (event.clientX - drag.cell.left) / Math.max(1, drag.cell.width) * 100;
+      const y = (event.clientY - drag.cell.top) / Math.max(1, drag.cell.height) * 100;
+      updateSlot(drag.id, { xPercent: Math.max(0, Math.min(100 - slot.widthPercent, x - slot.widthPercent / 2)),
+        yPercent: Math.max(0, Math.min(100 - slot.heightPercent, y - slot.heightPercent / 2)) });
+      return;
+    }
+    updateGuide(drag.id, { positionPercent: guidePositionAt(drag.orientation, event.clientX, event.clientY, drag.row, drag.col) });
+  };
+
+  const finishPreviewPointer = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    if (previewRef.current?.hasPointerCapture?.(event.pointerId)) previewRef.current.releasePointerCapture(event.pointerId);
   };
 
   const handleGenerate = () => {
@@ -714,13 +789,10 @@ export const TicketNumberingWorkspace: React.FC = () => {
               <div className="text-xs font-bold text-slate-800 dark:text-slate-100">
                 {isFa ? 'پیش نمایش شماتیک یک شیت' : 'Schematic preview of one sheet'}
               </div>
-              <span className="text-[10px] text-slate-500">
-                {metrics.sheetWidthMm.toFixed(0)} x {metrics.sheetHeightMm.toFixed(0)} mm
-              </span>
+              <div className="flex items-center gap-1"><span className="text-[10px] text-slate-500">{metrics.sheetWidthMm.toFixed(0)} x {metrics.sheetHeightMm.toFixed(0)} mm</span><select aria-label={isFa ? 'جهت خط دستی' : 'Manual line orientation'} className={inputCls + ' !w-auto'} value={guideOrientation} onChange={e => setGuideOrientation(e.target.value as TicketGuideLine['orientation'])}><option value="vertical">{isFa ? 'عمودی' : 'Vertical'}</option><option value="horizontal">{isFa ? 'افقی' : 'Horizontal'}</option></select><button type="button" data-draw-ticket-guide="perforation" aria-pressed={guideTool === 'perforation'} onClick={() => setGuideTool(guideTool === 'perforation' ? null : 'perforation')} className={'rounded px-2 py-1 text-[10px] font-bold ' + (guideTool === 'perforation' ? 'bg-sky-600 text-white' : 'bg-sky-100 text-sky-800')}>{isFa ? 'رسم پرفراژ' : 'Draw perf.'}</button><button type="button" data-draw-ticket-guide="cut" aria-pressed={guideTool === 'cut'} onClick={() => setGuideTool(guideTool === 'cut' ? null : 'cut')} className={'rounded px-2 py-1 text-[10px] font-bold ' + (guideTool === 'cut' ? 'bg-rose-600 text-white' : 'bg-rose-100 text-rose-800')}>{isFa ? 'رسم برش' : 'Draw cut'}</button></div>
             </div>
             <div className="flex justify-center">
-              <div
-                className="relative border border-slate-300 bg-white shadow-md dark:border-slate-600"
+              <div ref={previewRef} data-ticket-sheet-preview onPointerDown={beginManualGuide} onPointerMove={movePreviewPointer} onPointerUp={finishPreviewPointer} onPointerCancel={finishPreviewPointer} className={'relative border border-slate-300 bg-white shadow-md dark:border-slate-600 ' + (guideTool ? 'cursor-crosshair' : '')}
                 style={{
                   width: Math.min(420, metrics.sheetWidthMm * 1.6),
                   aspectRatio: `${metrics.sheetWidthMm} / ${metrics.sheetHeightMm}`,
@@ -740,23 +812,13 @@ export const TicketNumberingWorkspace: React.FC = () => {
                       100;
                     const w = (metrics.cellWidthMm / metrics.sheetWidthMm) * 100;
                     const h = (metrics.cellHeightMm / metrics.sheetHeightMm) * 100;
-                    const cellIndex =
-                      ticketConfig.direction === 'rtl'
-                        ? r * metrics.cols + (metrics.cols - 1 - c)
-                        : r * metrics.cols + c;
-                    const serial =
-                      ticketConfig.startNumber + cellIndex * (ticketConfig.step || 1);
+                    const sequenceIndex = ticketSequenceIndex(ticketConfig, r, c, 0);
                     return (
-                      <div
-                        key={`${r}-${c}`}
-                        className="absolute box-border border border-dashed border-slate-300 bg-slate-50/80"
+                      <div key={`${r}-${c}`} data-ticket-cell={`${r}-${c}`} className="absolute box-border border border-dashed border-slate-300 bg-slate-50/80"
                         style={{ left: `${left}%`, top: `${top}%`, width: `${w}%`, height: `${h}%` }}
                       >
                         {ticketConfig.numberSlots.map((slot) => (
-                          <div
-                            key={slot.id}
-                            className="absolute flex items-center justify-center overflow-hidden text-[9px] font-bold leading-tight"
-                            style={{
+                          <div key={slot.id} data-ticket-slot-id={slot.id} onPointerDown={event => beginSlotDrag(event, slot.id, r, c)} title={isFa ? 'برای جابه‌جایی شماره با ماوس بکشید' : 'Drag to move this number'} className="absolute flex items-center justify-center overflow-hidden text-[9px] font-bold leading-tight cursor-move select-none" style={{ touchAction: 'none',
                               left: `${slot.xPercent}%`,
                               top: `${slot.yPercent}%`,
                               width: `${slot.widthPercent}%`,
@@ -767,19 +829,42 @@ export const TicketNumberingWorkspace: React.FC = () => {
                             }}
                             dir="auto"
                           >
-                            {slot.template.replace(
-                              /\{serial\}/g,
-                              String(serial + (slot.slotOffset || 0))
-                            )}
+                            {resolveTicketSlotText(slot, sequenceIndex, metrics.totalTickets, ticketConfig)}
                           </div>
                         ))}
                       </div>
                     );
                   })
-                )}
-              </div>
-            </div>
-            <p className="mt-3 text-center text-[11px] text-slate-500 dark:text-slate-400">
+                )}\n                {ticketConfig.guideLines.flatMap(guide => {
+                  const cells = guide.extendFullSheet
+                    ? (guide.orientation === 'vertical'
+                      ? Array.from({ length: metrics.cols }, (_, col) => ({ row: 0, col }))
+                      : Array.from({ length: metrics.rows }, (_, row) => ({ row, col: 0 })))
+                    : Array.from({ length: metrics.rows * metrics.cols }, (_, index) => ({ row: Math.floor(index / metrics.cols), col: index % metrics.cols }));
+                  return cells.map(({ row, col }) => {
+                    const frame = cellFrame(row, col);
+                    const left = frame.left / metrics.sheetWidthMm * 100;
+                    const top = frame.top / metrics.sheetHeightMm * 100;
+                    const width = frame.width / metrics.sheetWidthMm * 100;
+                    const height = frame.height / metrics.sheetHeightMm * 100;
+                    const lineLeft = left + (guide.orientation === 'vertical' ? width * guide.positionPercent / 100 : 0);
+                    const lineTop = top + (guide.orientation === 'horizontal' ? height * guide.positionPercent / 100 : 0);
+                    const gradient = guide.strokeStyle === 'dotted'
+                      ? (guide.orientation === 'vertical' ? `repeating-linear-gradient(to bottom, ${guide.strokeColor} 0 1px, transparent 1px 4px)` : `repeating-linear-gradient(to right, ${guide.strokeColor} 0 1px, transparent 1px 4px)`)
+                      : guide.strokeStyle === 'dashed'
+                        ? (guide.orientation === 'vertical' ? `repeating-linear-gradient(to bottom, ${guide.strokeColor} 0 5px, transparent 5px 9px)` : `repeating-linear-gradient(to right, ${guide.strokeColor} 0 5px, transparent 5px 9px)`)
+                        : guide.strokeColor;
+                    return <button key={guide.id + '-' + row + '-' + col} type="button"
+                      data-ticket-guide-id={guide.id} data-ticket-guide-row={row} data-ticket-guide-col={col}
+                      aria-label={guide.label} title={guide.label + (isFa ? '؛ برای جابه‌جایی بکشید' : '; drag to move')}
+                      onPointerDown={event => beginGuideDrag(event, guide.id, row, col, guide.orientation)}
+                      className="absolute z-20 p-0"
+                      style={guide.orientation === 'vertical'
+                        ? { left: `${lineLeft}%`, top: guide.extendFullSheet ? 0 : `${top}%`, height: guide.extendFullSheet ? '100%' : `${height}%`, width: 4, transform: 'translateX(-50%)', background: gradient, cursor: 'ew-resize', touchAction: 'none' }
+                        : { left: guide.extendFullSheet ? 0 : `${left}%`, top: `${lineTop}%`, width: guide.extendFullSheet ? '100%' : `${width}%`, height: 4, transform: 'translateY(-50%)', background: gradient, cursor: 'ns-resize', touchAction: 'none' }} />;
+                  });
+                })}
+              </div>\n            </div>\n            <p className="mt-3 text-center text-[11px] text-slate-500 dark:text-slate-400">
               {isFa
                 ? 'پس از تولید، تمام شیت ها در استودیو باز می شوند و قابل ویرایش هستند.'
                 : 'After generate, all sheets open in Studio and can be edited.'}
