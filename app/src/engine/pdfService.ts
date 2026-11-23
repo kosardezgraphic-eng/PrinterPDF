@@ -333,8 +333,14 @@ type VisualTextToken =
   | { kind: 'space'; text: string };
 
 const ANY_DIGIT_REGEX = /[0-9\u06F0-\u06F9\u0660-\u0669]/;
-const RTL_PREFIX_SINGLE_NUM_REGEX =
-  /^(\s*)([^0-9\u06F0-\u06F9\u0660-\u0669]*?)(\s*)([0-9\u06F0-\u06F9\u0660-\u0669]+)(\s*)$/;
+const DIGIT_RUN_ONLY_REGEX = /^[0-9\u06F0-\u06F9\u0660-\u0669]+$/;
+const RTL_UNSAFE_DECOMPOSE_REGEX = /[A-Za-z()[\]{}<>\u200E\u200F\u202A-\u202E\u2066-\u2069]/;
+const RTL_NON_LETTER_ADJ_BEFORE_DIGIT =
+  /[^\s\u0621-\u064A\u0671-\u06D50-9\u06F0-\u06F9\u0660-\u0669][0-9\u06F0-\u06F9\u0660-\u0669]/;
+const RTL_NON_LETTER_ADJ_AFTER_DIGIT =
+  /[0-9\u06F0-\u06F9\u0660-\u0669][^\s\u0621-\u064A\u0671-\u06D50-9\u06F0-\u06F9\u0660-\u0669]/;
+const RTL_TOKEN_SPLIT_REGEX =
+  /(\s+|[0-9\u06F0-\u06F9\u0660-\u0669]+|[^\s0-9\u06F0-\u06F9\u0660-\u0669]+)/g;
 const LTR_TOKEN_SPLIT_REGEX = /(\s+|[0-9\u06F0-\u06F9\u0660-\u0669]|[^\s0-9\u06F0-\u06F9\u0660-\u0669]+)/g;
 
 function decomposeVisualTextTokens(text: string): VisualTextToken[] | null {
@@ -354,19 +360,32 @@ function decomposeVisualTextTokens(text: string): VisualTextToken[] | null {
     return out;
   }
 
-  const m = text.match(RTL_PREFIX_SINGLE_NUM_REGEX);
-  if (!m) return null;
-  const [, leadingWs, prefixWord, midWs, digits, trailingWs] = m;
-  if (/[A-Za-z]/.test(prefixWord)) return null;
+  if (
+    RTL_UNSAFE_DECOMPOSE_REGEX.test(text) ||
+    RTL_NON_LETTER_ADJ_BEFORE_DIGIT.test(text) ||
+    RTL_NON_LETTER_ADJ_AFTER_DIGIT.test(text)
+  ) {
+    return null;
+  }
+
+  const parts = text.match(RTL_TOKEN_SPLIT_REGEX);
+  if (!parts || parts.length === 0) return null;
 
   const out: VisualTextToken[] = [];
-  if (trailingWs) out.push({ kind: 'space', text: trailingWs });
-  for (let i = 0; i < digits.length; i++) {
-    out.push({ kind: 'glyph', text: digits[i], isRtl: false });
+  // Visual left-to-right order in an RTL base paragraph reverses logical segment order,
+  // while digits inside each number run remain left-to-right.
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i];
+    if (/^\s+$/.test(part)) {
+      out.push({ kind: 'space', text: part });
+    } else if (DIGIT_RUN_ONLY_REGEX.test(part)) {
+      for (let d = 0; d < part.length; d++) {
+        out.push({ kind: 'glyph', text: part[d], isRtl: false });
+      }
+    } else {
+      out.push({ kind: 'glyph', text: part, isRtl: true });
+    }
   }
-  if (midWs) out.push({ kind: 'space', text: midWs });
-  if (prefixWord) out.push({ kind: 'glyph', text: prefixWord, isRtl: true });
-  if (leadingWs) out.push({ kind: 'space', text: leadingWs });
   return out;
 }
 
@@ -840,6 +859,7 @@ export async function exportImposedPdf(params: {
   userName: string;
   exportOptions?: PdfExportOptions;
   onProgress?: (percent: number) => void;
+  onMeta?: (meta: { sheetCount: number }) => void;
 }): Promise<Uint8Array> {
   const {
     documents,
@@ -853,6 +873,7 @@ export async function exportImposedPdf(params: {
     userName,
     exportOptions,
     onProgress,
+    onMeta,
   } = params;
 
   const imageHandling = exportOptions?.imageHandling ?? 'preserve';
@@ -889,11 +910,33 @@ export async function exportImposedPdf(params: {
   const font = await outPdf.embedFont(StandardFonts.Helvetica);
   const boldFont = await outPdf.embedFont(StandardFonts.HelveticaBold);
 
+  // Compute imposition sheets first so unused documents are never parsed or embedded into outPdf
+  const rawSheets = computeImpositionSheets(pages, layout);
+  const pageIndices = new Map(allPages.map((page, index) => [page.id, index + 1]));
+  const effectiveDuplex = layout.booklet?.enabled ? layout.booklet.duplexMode : layout.duplexMode;
+  const sheets = stripTrailingEmptyDuplexSides(rawSheets, effectiveDuplex, (side, originalTotal) =>
+    overlays.length > 0 &&
+    (shapePlacements(side, originalTotal, allPages, overlays, pageIndices).length > 0 ||
+      textPlacements(side, originalTotal, allPages, overlays, pageIndices).length > 0 ||
+      imagePlacements(side, originalTotal, allPages, overlays, pageIndices).length > 0)
+  );
+  onMeta?.({ sheetCount: sheets.length });
+
+  const usedDocIds = new Set<string>();
+  for (const sheetSide of sheets) {
+    for (const cell of sheetSide.cells) {
+      if (cell.page && cell.page.sourcePageNumber > 0) {
+        usedDocIds.add(cell.page.documentId);
+      }
+    }
+  }
+
   // Cache loaded source PDFDocuments and SourceDocuments by documentId
   const docById = new Map(documents.map((d) => [d.id, d]));
   const loadedSourceDocs = new Map<string, PDFDocument>();
   const loadedImages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPng>>>();
   for (const doc of documents) {
+    if (!usedDocIds.has(doc.id)) continue;
     if (doc.fileType === 'pdf' && doc.rawBytes) {
       const src = await PDFDocument.load(doc.rawBytes, { ignoreEncryption: false });
       loadedSourceDocs.set(doc.id, src);
@@ -932,15 +975,6 @@ export async function exportImposedPdf(params: {
     }
   }
 
-  const rawSheets = computeImpositionSheets(pages, layout);
-  const pageIndices = new Map(allPages.map((page,index)=>[page.id,index+1]));
-  const effectiveDuplex = layout.booklet?.enabled ? layout.booklet.duplexMode : layout.duplexMode;
-  const sheets = stripTrailingEmptyDuplexSides(rawSheets, effectiveDuplex, (side, originalTotal) =>
-    overlays.length > 0 &&
-    (shapePlacements(side, originalTotal, allPages, overlays, pageIndices).length > 0 ||
-      textPlacements(side, originalTotal, allPages, overlays, pageIndices).length > 0 ||
-      imagePlacements(side, originalTotal, allPages, overlays, pageIndices).length > 0)
-  );
   const totalSides = Math.max(1, sheets.length);
   const textImages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPng>>>();
   const textTokenCache = new Map<
@@ -949,6 +983,7 @@ export async function exportImposedPdf(params: {
   >();
   const shapeSvgPathCache = new Map<string, string>();
   const pdfPageBaseDims = new Map<string, { width: number; height: number }>();
+  const picturePlanCache = new Map<string, ReturnType<typeof planPictureEmbedding>>();
   const pictureImages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPng>>>();
   const processedImages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPng>>>();
   const processedPdfPages = new Map<string, Awaited<ReturnType<typeof outPdf.embedPng>>>();
@@ -960,6 +995,30 @@ export async function exportImposedPdf(params: {
   const shapeOverlays = overlays.filter((o) => o.kind === 'shape');
   const imageOverlays = overlays.filter((o) => o.kind === 'image');
   const textOverlays = overlays.filter((o) => o.kind === 'text' || (o.kind === 'numbering' && o.enabled));
+
+  const watermarkActive = watermark.enabled && watermark.text.trim().length > 0;
+  const watermarkHasMacros = watermarkActive && watermark.text.includes('{');
+  const watermarkHex = watermarkActive && /^#[0-9a-f]{6}$/i.test(watermark.colorHex) ? watermark.colorHex.slice(1) : '0d73bf';
+  const watermarkColor = watermarkActive
+    ? rgb(
+        parseInt(watermarkHex.slice(0, 2), 16) / 255,
+        parseInt(watermarkHex.slice(2, 4), 16) / 255,
+        parseInt(watermarkHex.slice(4, 6), 16) / 255,
+      )
+    : null;
+  const watermarkOptions = watermarkActive && watermarkColor
+    ? {
+        size: Math.max(6, Math.min(200, watermark.fontSizePt)),
+        font: watermark.fontFamily === 'Inter' ? font : boldFont,
+        color: watermarkColor,
+        opacity: Math.max(0.05, Math.min(1, watermark.opacity)),
+        rotate: degrees(Math.max(-90, Math.min(90, watermark.rotationDeg))),
+      }
+    : null;
+  const staticWatermarkText =
+    watermarkActive && !watermarkHasMacros
+      ? watermark.text.replace(/[^\x20-\x7E]/g, '').trim() || 'PrintStudio Pro'
+      : null;
   let measureCtxCache: CanvasRenderingContext2D | null | undefined;
   const getMeasureCtx = (): CanvasRenderingContext2D | null => {
     if (measureCtxCache !== undefined) return measureCtxCache;
@@ -1361,33 +1420,21 @@ export async function exportImposedPdf(params: {
     }
 
     // F1: Watermark on sheet. All visual controls are applied to the exported PDF.
-    if (watermark.enabled && watermark.text.trim().length > 0) {
-      const firstPage = sheetSide.cells.find((c) => c.page !== null)?.page;
-      const resolvedText = resolveTextMacros(watermark.text, {
-        pageNumber: firstPage?.sourcePageNumber ?? sIdx + 1,
-        totalPages: pages.length,
-        sheetNumber: sheetSide.sheetNumber,
-        totalSheets: totalSides,
-        fileName: firstPage?.documentName ?? 'PrintStudio',
-        userName,
-      });
-      // Standard PDF fonts are ASCII-only here; preserve the configured color and opacity.
-      const asciiSafeText = resolvedText.replace(/[^\x20-\x7E]/g, '').trim() || 'PrintStudio Pro';
-      const hex = /^#[0-9a-f]{6}$/i.test(watermark.colorHex) ? watermark.colorHex.slice(1) : '0d73bf';
-      const watermarkColor = rgb(
-        parseInt(hex.slice(0, 2), 16) / 255,
-        parseInt(hex.slice(2, 4), 16) / 255,
-        parseInt(hex.slice(4, 6), 16) / 255,
-      );
-      const watermarkFont = watermark.fontFamily === 'Inter' ? font : boldFont;
-      const watermarkSize = Math.max(6, Math.min(200, watermark.fontSizePt));
-      const watermarkOptions = {
-        size: watermarkSize,
-        font: watermarkFont,
-        color: watermarkColor,
-        opacity: Math.max(0.05, Math.min(1, watermark.opacity)),
-        rotate: degrees(Math.max(-90, Math.min(90, watermark.rotationDeg))),
-      };
+    if (watermarkActive && watermarkOptions) {
+      let asciiSafeText = staticWatermarkText;
+      if (asciiSafeText === null) {
+        const firstPage = sheetSide.cells.find((c) => c.page !== null)?.page;
+        const resolvedText = resolveTextMacros(watermark.text, {
+          pageNumber: firstPage?.sourcePageNumber ?? sIdx + 1,
+          totalPages: pages.length,
+          sheetNumber: sheetSide.sheetNumber,
+          totalSheets: totalSides,
+          fileName: firstPage?.documentName ?? 'PrintStudio',
+          userName,
+        });
+        // Standard PDF fonts are ASCII-only here; preserve the configured color and opacity.
+        asciiSafeText = resolvedText.replace(/[^\x20-\x7E]/g, '').trim() || 'PrintStudio Pro';
+      }
       if (watermark.tiled) {
         const spacingPt = Math.max(5, watermark.tileSpacingMm) * MM_TO_PT;
         for (let y = spacingPt / 2; y < sheetHeightPt; y += spacingPt) {
@@ -1699,7 +1746,11 @@ export async function exportImposedPdf(params: {
         // The file's own bytes decide the route, never the declared MIME type: a JPEG saved as
         // data:image/png would otherwise be handed to the PNG decoder. Mirroring cannot be expressed
         // with a plain rectangle either, so those go through the same Canvas the preview composites on.
-        const plan = planPictureEmbedding(item.src);
+        let plan = picturePlanCache.get(item.src);
+        if (!plan) {
+          plan = planPictureEmbedding(item.src);
+          picturePlanCache.set(item.src, plan);
+        }
         // The file's own bytes decide the route, and so do the two flags that only exist inside the model: a
         // mirrored, inverted or eroded picture cannot be a raw embed any more, because the page has to show
         // something other than what the file contains. The overlay itself is untouched either way.
@@ -1778,7 +1829,7 @@ export async function exportImposedPdf(params: {
       }
     }
 
-    const pct = Math.round(((sIdx + 1) / totalSides) * 100);
+    const pct = Math.min(95, Math.max(5, Math.round(5 + ((sIdx + 1) / totalSides) * 90)));
     if (pct !== lastProgressReported) {
       lastProgressReported = pct;
       onProgress?.(pct);
@@ -1799,7 +1850,13 @@ export async function exportImposedPdf(params: {
     }
   }
 
-  return outPdf.save({ useObjectStreams: true });
+  onProgress?.(98);
+  if (sheets.length >= 20) {
+    await yieldPdfExportTurn();
+  }
+  const finalBytes = await outPdf.save({ useObjectStreams: true });
+  onProgress?.(100);
+  return finalBytes;
 }
 
 /**

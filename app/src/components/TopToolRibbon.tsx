@@ -68,6 +68,7 @@ export const TopToolRibbon: React.FC = () => {
     showPreflight,
     pdfExportOptions,
     isExportingPdf,
+    exportProgress,
     isGeneratingPdfPreview,
     resetAllSettings,
     importFiles,
@@ -906,7 +907,11 @@ export const TopToolRibbon: React.FC = () => {
             className="flex h-[68px] w-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-1 text-slate-700 hover:border-slate-300 hover:bg-white disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
           >
             <FileDown className="h-6 w-6 text-rose-600 dark:text-rose-400" aria-hidden="true" />
-            <span className="text-[10px] font-semibold leading-tight text-center">{labels.saveAsPdf}</span>
+            <span className="text-[10px] font-semibold leading-tight text-center tabular-nums">
+              {isExportingPdf && !isGeneratingPdfPreview && exportProgress > 0
+                ? `${exportProgress}%`
+                : labels.saveAsPdf}
+            </span>
           </button>
         </Tooltip>
 
@@ -914,12 +919,14 @@ export const TopToolRibbon: React.FC = () => {
           <button
             type="button"
             data-ribbon-action="view-pdf"
-            disabled={isGeneratingPdfPreview}
+            disabled={isGeneratingPdfPreview || isExportingPdf}
             onClick={() => void openPdfPreviewModal()}
             className="flex h-[68px] w-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-1 text-slate-700 hover:border-slate-300 hover:bg-white disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
           >
             <FileSearch className="h-6 w-6 text-red-600 dark:text-red-400" aria-hidden="true" />
-            <span className="text-[10px] font-semibold leading-tight text-center">{labels.viewPdf}</span>
+            <span className="text-[10px] font-semibold leading-tight text-center tabular-nums">
+              {isGeneratingPdfPreview && exportProgress > 0 ? `${exportProgress}%` : labels.viewPdf}
+            </span>
           </button>
         </Tooltip>
 

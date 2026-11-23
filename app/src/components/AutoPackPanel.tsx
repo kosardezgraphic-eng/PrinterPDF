@@ -50,12 +50,23 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
     setSelectedTargetId(targetPage?.id);
   }, [targetPage?.id]);
 
-  const sourceDims = useMemo(
+  const baseTarget = useMemo(
     () =>
       resolvedTarget
-        ? getPageDisplayDimensionsMm(resolvedTarget)
-        : { widthMm: 30, heightMm: 40, aspectRatio: 0.75 },
+        ? {
+            ...resolvedTarget,
+            rotation: resolvedTarget.overrides?.autoPackBaseRotation ?? resolvedTarget.rotation,
+          }
+        : undefined,
     [resolvedTarget]
+  );
+
+  const sourceDims = useMemo(
+    () =>
+      baseTarget
+        ? getPageDisplayDimensionsMm(baseTarget)
+        : { widthMm: 30, heightMm: 40, aspectRatio: 0.75 },
+    [baseTarget]
   );
 
   const activePrinter = printers.find((p) => p.name === selectedPrinterName);
@@ -122,26 +133,59 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
 
   // Seed dimensions when a different page is selected (do not overwrite if the user already typed a custom target size on the same page)
   useEffect(() => {
-    if (!resolvedTarget) return;
-    if (seededPageRef.current === resolvedTarget.id) return;
-    seededPageRef.current = resolvedTarget.id;
-    const dims = getPageDisplayDimensionsMm(resolvedTarget);
+    if (!baseTarget) return;
+    if (seededPageRef.current === baseTarget.id) return;
+    seededPageRef.current = baseTarget.id;
+    const dims = getPageDisplayDimensionsMm(baseTarget);
     setWidthMm(dims.widthMm);
     setHeightMm(dims.heightMm);
     setWidthDraft(String(convertMmToUnit(dims.widthMm, unit)));
     setHeightDraft(String(convertMmToUnit(dims.heightMm, unit)));
-  }, [resolvedTarget, unit]);
+  }, [baseTarget, unit]);
 
   // Reformat drafts when measurement unit changes
   useEffect(() => {
     if (lastUnitRef.current === unit) return;
     lastUnitRef.current = unit;
-    setWidthDraft(String(convertMmToUnit(widthMm, unit)));
-    setHeightDraft(String(convertMmToUnit(heightMm, unit)));
+    if (widthDraft.trim() !== '') {
+      setWidthDraft(String(convertMmToUnit(widthMm, unit)));
+    }
+    if (heightDraft.trim() !== '') {
+      setHeightDraft(String(convertMmToUnit(heightMm, unit)));
+    }
     setGapHDraft(String(convertMmToUnit(gapHMm, unit)));
     setGapVDraft(String(convertMmToUnit(gapVMm, unit)));
     setOuterMarginDraft(String(convertMmToUnit(outerMarginMm, unit)));
-  }, [unit, widthMm, heightMm, gapHMm, gapVMm, outerMarginMm]);
+  }, [unit, widthMm, heightMm, gapHMm, gapVMm, outerMarginMm, widthDraft, heightDraft]);
+
+  const widthParsed = widthDraft.trim() === '' ? NaN : Number(widthDraft);
+  const heightParsed = heightDraft.trim() === '' ? NaN : Number(heightDraft);
+  const widthBlank = !Number.isFinite(widthParsed) || widthParsed <= 0;
+  const heightBlank = !Number.isFinite(heightParsed) || heightParsed <= 0;
+
+  const { effectiveWidthMm, effectiveHeightMm } = useMemo(() => {
+    if (!widthBlank && heightBlank) {
+      const next = resolveAutoPackTargetDimensions({
+        sourceWidthMm: sourceDims.widthMm,
+        sourceHeightMm: sourceDims.heightMm,
+        driver: 'width',
+        targetWidthMm: widthMm,
+        lockAspect: true,
+      });
+      return { effectiveWidthMm: next.widthMm, effectiveHeightMm: next.heightMm };
+    }
+    if (widthBlank && !heightBlank) {
+      const next = resolveAutoPackTargetDimensions({
+        sourceWidthMm: sourceDims.widthMm,
+        sourceHeightMm: sourceDims.heightMm,
+        driver: 'height',
+        targetHeightMm: heightMm,
+        lockAspect: true,
+      });
+      return { effectiveWidthMm: next.widthMm, effectiveHeightMm: next.heightMm };
+    }
+    return { effectiveWidthMm: widthMm, effectiveHeightMm: heightMm };
+  }, [widthBlank, heightBlank, widthMm, heightMm, sourceDims.widthMm, sourceDims.heightMm]);
 
   const sheetDims = useMemo(() => {
     const cleanLayout = layout.booklet?.enabled
@@ -166,8 +210,8 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
         sheetWidthMm: sheetDims.widthMm,
         sheetHeightMm: sheetDims.heightMm,
         baseMarginsMm: effectiveBaseMargins,
-        itemWidthMm: widthMm,
-        itemHeightMm: heightMm,
+        itemWidthMm: effectiveWidthMm,
+        itemHeightMm: effectiveHeightMm,
         horizontalGapMm: gapHMm,
         verticalGapMm: gapVMm,
         allowRotateForMax,
@@ -177,8 +221,8 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
       sheetDims.widthMm,
       sheetDims.heightMm,
       effectiveBaseMargins,
-      widthMm,
-      heightMm,
+      effectiveWidthMm,
+      effectiveHeightMm,
       gapHMm,
       gapVMm,
       allowRotateForMax,
@@ -201,7 +245,7 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
     });
     setWidthMm(next.widthMm);
     setHeightMm(next.heightMm);
-    if (lockAspect) {
+    if (lockAspect && heightDraft.trim() !== '') {
       setHeightDraft(String(convertMmToUnit(next.heightMm, unit)));
     }
   };
@@ -221,7 +265,7 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
     });
     setWidthMm(next.widthMm);
     setHeightMm(next.heightMm);
-    if (lockAspect) {
+    if (lockAspect && widthDraft.trim() !== '') {
       setWidthDraft(String(convertMmToUnit(next.widthMm, unit)));
     }
   };
@@ -230,25 +274,38 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
     const nextLock = !lockAspect;
     setLockAspect(nextLock);
     if (nextLock) {
+      const driver: 'width' | 'height' = widthBlank && !heightBlank ? 'height' : 'width';
       const next = resolveAutoPackTargetDimensions({
         sourceWidthMm: sourceDims.widthMm,
         sourceHeightMm: sourceDims.heightMm,
-        driver: 'width',
-        targetWidthMm: widthMm,
-        targetHeightMm: heightMm,
+        driver,
+        targetWidthMm: effectiveWidthMm,
+        targetHeightMm: effectiveHeightMm,
         lockAspect: true,
       });
       setWidthMm(next.widthMm);
       setHeightMm(next.heightMm);
-      setWidthDraft(String(convertMmToUnit(next.widthMm, unit)));
-      setHeightDraft(String(convertMmToUnit(next.heightMm, unit)));
+      if (!widthBlank || heightBlank) {
+        setWidthDraft(String(convertMmToUnit(next.widthMm, unit)));
+      }
+      if (!heightBlank || widthBlank) {
+        setHeightDraft(String(convertMmToUnit(next.heightMm, unit)));
+      }
     }
   };
 
   const handleGapHInput = (raw: string) => {
     setGapHDraft(raw);
+    if (raw.trim() === '') {
+      setGapHMm(0);
+      if (syncGaps) {
+        setGapVMm(0);
+        setGapVDraft('');
+      }
+      return;
+    }
     const parsed = Number(raw);
-    if (raw.trim() === '' || !Number.isFinite(parsed) || parsed < 0) return;
+    if (!Number.isFinite(parsed) || parsed < 0) return;
     const mm = Math.max(0, Math.min(200, convertUnitToMm(parsed, unit)));
     setGapHMm(mm);
     if (syncGaps) {
@@ -259,8 +316,16 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
 
   const handleGapVInput = (raw: string) => {
     setGapVDraft(raw);
+    if (raw.trim() === '') {
+      setGapVMm(0);
+      if (syncGaps) {
+        setGapHMm(0);
+        setGapHDraft('');
+      }
+      return;
+    }
     const parsed = Number(raw);
-    if (raw.trim() === '' || !Number.isFinite(parsed) || parsed < 0) return;
+    if (!Number.isFinite(parsed) || parsed < 0) return;
     const mm = Math.max(0, Math.min(200, convertUnitToMm(parsed, unit)));
     setGapVMm(mm);
     if (syncGaps) {
@@ -271,8 +336,12 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
 
   const handleOuterMarginInput = (raw: string) => {
     setOuterMarginDraft(raw);
+    if (raw.trim() === '') {
+      setOuterMarginMm(minPrinterMax);
+      return;
+    }
     const parsed = Number(raw);
-    if (raw.trim() === '' || !Number.isFinite(parsed) || parsed < 0) return;
+    if (!Number.isFinite(parsed) || parsed < 0) return;
     const mm = Math.max(minPrinterMax, Math.min(150, convertUnitToMm(parsed, unit)));
     setOuterMarginMm(mm);
   };
@@ -281,9 +350,9 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
     if (e) e.preventDefault();
     autoPackPageOnSheet({
       pageId: resolvedTarget?.id,
-      widthMm,
-      heightMm,
-      lockAspect,
+      widthMm: effectiveWidthMm,
+      heightMm: effectiveHeightMm,
+      lockAspect: lockAspect || widthBlank || heightBlank,
       horizontalGapMm: gapHMm,
       verticalGapMm: gapVMm,
       outerMarginMm,
@@ -322,9 +391,13 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
           }`}
         >
           {plan.fits
-            ? isFa
-              ? `${formatLocalizedNumber(plan.cols, lang)}×${formatLocalizedNumber(plan.rows, lang)} = ${formatLocalizedNumber(plan.totalPerSheet, lang)} عدد`
-              : `${plan.cols}×${plan.rows} = ${plan.totalPerSheet}/sheet`
+            ? plan.isHybrid
+              ? isFa
+                ? `${formatLocalizedNumber(plan.totalPerSheet, lang)} عدد (مختلط ۰°+۹۰°)`
+                : `${plan.totalPerSheet}/sheet (Mixed 0°+90°)`
+              : isFa
+                ? `${formatLocalizedNumber(plan.cols, lang)}×${formatLocalizedNumber(plan.rows, lang)} = ${formatLocalizedNumber(plan.totalPerSheet, lang)} عدد`
+                : `${plan.cols}×${plan.rows} = ${plan.totalPerSheet}/sheet`
             : isFa
               ? 'جا نمی‌شود'
               : 'Does not fit'}
@@ -364,8 +437,12 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
             aria-label={isFa ? 'عرض هدف تصویر' : 'Auto-pack target width'}
             data-auto-pack-width
             value={widthDraft}
+            placeholder={widthBlank ? `~${convertMmToUnit(effectiveWidthMm, unit)}` : undefined}
             onChange={(e) => handleWidthInput(e.target.value)}
-            onBlur={() => setWidthDraft(String(convertMmToUnit(widthMm, unit)))}
+            onBlur={() => {
+              if (widthDraft.trim() === '' && !heightBlank) return;
+              setWidthDraft(String(convertMmToUnit(effectiveWidthMm, unit)));
+            }}
             className={inputClass}
           />
         </label>
@@ -400,8 +477,12 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
             aria-label={isFa ? 'طول هدف تصویر' : 'Auto-pack target height'}
             data-auto-pack-height
             value={heightDraft}
+            placeholder={heightBlank ? `~${convertMmToUnit(effectiveHeightMm, unit)}` : undefined}
             onChange={(e) => handleHeightInput(e.target.value)}
-            onBlur={() => setHeightDraft(String(convertMmToUnit(heightMm, unit)))}
+            onBlur={() => {
+              if (heightDraft.trim() === '' && !widthBlank) return;
+              setHeightDraft(String(convertMmToUnit(effectiveHeightMm, unit)));
+            }}
             className={inputClass}
           />
         </label>
@@ -419,6 +500,7 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
             aria-label={isFa ? 'فاصله افقی بین عکس‌ها' : 'Auto-pack horizontal gap'}
             data-auto-pack-gap-h
             value={gapHDraft}
+            placeholder="0"
             onChange={(e) => handleGapHInput(e.target.value)}
             onBlur={() => setGapHDraft(String(convertMmToUnit(gapHMm, unit)))}
             className={inputClass}
@@ -458,6 +540,7 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
             aria-label={isFa ? 'فاصله عمودی بین عکس‌ها' : 'Auto-pack vertical gap'}
             data-auto-pack-gap-v
             value={gapVDraft}
+            placeholder="0"
             onChange={(e) => handleGapVInput(e.target.value)}
             onBlur={() => setGapVDraft(String(convertMmToUnit(gapVMm, unit)))}
             className={inputClass}
@@ -474,6 +557,7 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
             aria-label={isFa ? 'حاشیه بیرونی شیت' : 'Auto-pack outer margin'}
             data-auto-pack-margin
             value={outerMarginDraft}
+            placeholder={String(convertMmToUnit(minPrinterMax, unit))}
             onChange={(e) => handleOuterMarginInput(e.target.value)}
             onBlur={() => setOuterMarginDraft(String(convertMmToUnit(outerMarginMm, unit)))}
             className={inputClass}
@@ -522,14 +606,20 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
           {plan.fits ? (
             <>
               <span>
-                {convertMmToUnit(plan.cellWidthMm, unit)}×{convertMmToUnit(plan.cellHeightMm, unit)} {unit}
+                {convertMmToUnit(plan.isHybrid ? effectiveWidthMm : plan.cellWidthMm, unit)}×
+                {convertMmToUnit(plan.isHybrid ? effectiveHeightMm : plan.cellHeightMm, unit)} {unit}
               </span>
-              {plan.rotated90 && (
+              {plan.isHybrid ? (
+                <span className="inline-flex items-center gap-0.5 rounded bg-sky-100 px-1 py-0.5 text-[9px] font-semibold text-sky-700 dark:bg-sky-500/20 dark:text-sky-300">
+                  <RotateCw className="h-2.5 w-2.5" aria-hidden="true" />
+                  {isFa ? 'ترکیبی ۰°+۹۰°' : '0°+90° mix'}
+                </span>
+              ) : plan.rotated90 ? (
                 <span className="inline-flex items-center gap-0.5 rounded bg-sky-100 px-1 py-0.5 text-[9px] font-semibold text-sky-700 dark:bg-sky-500/20 dark:text-sky-300">
                   <RotateCw className="h-2.5 w-2.5" aria-hidden="true" />
                   {isFa ? '۹۰°' : '90°'}
                 </span>
-              )}
+              ) : null}
               <span>· {formatLocalizedNumber(plan.utilizationPercent, lang)}%</span>
             </>
           ) : (

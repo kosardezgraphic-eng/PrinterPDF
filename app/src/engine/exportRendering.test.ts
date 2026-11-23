@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, PDFStream, decodePDFRawStream, rgb } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
-import type { PageItem, SourceDocument } from '@shared/models';
+import type { PageItem, PageOverlay, SourceDocument } from '@shared/models';
 import { DEFAULT_EFFECTS, DEFAULT_LAYOUT, useAppStore } from '../store/useAppStore';
 import { getDefaultPageNumberSettings, getDefaultWatermarkSettings } from './watermarkEngine';
 import { exportImposedPdf, importFilesBatch } from './pdfService';
@@ -723,5 +723,124 @@ class TestOffscreenCanvas {
     }
   });
 
+  it('reuses token glyph atlas for Studio multi-number RTL/Persian numbering and skips unused documents', async () => {
+    const formCanvas = createCanvas(120, 80);
+    const fCtx = formCanvas.getContext('2d');
+    fCtx.fillStyle = '#ffffff';
+    fCtx.fillRect(0, 0, 120, 80);
+    fCtx.fillStyle = '#0f172a';
+    fCtx.fillRect(8, 8, 104, 64);
+    const formPng = new Uint8Array(await formCanvas.encode('png'));
+
+    const usedDoc: SourceDocument = {
+      id: 'used-form',
+      name: 'form.png',
+      filePath: 'form.png',
+      fileSize: formPng.byteLength,
+      fileType: 'image',
+      mimeType: 'image/png',
+      pageCount: 1,
+      createdAt: new Date().toISOString(),
+      rawBytes: formPng,
+    };
+
+    // Unreferenced document with invalid bytes — must be skipped instead of parsed/embedded
+    const unusedDoc: SourceDocument = {
+      id: 'unused-corrupt',
+      name: 'unused.pdf',
+      filePath: 'unused.pdf',
+      fileSize: 4,
+      fileType: 'pdf',
+      mimeType: 'application/pdf',
+      pageCount: 1,
+      createdAt: new Date().toISOString(),
+      rawBytes: new Uint8Array([0, 1, 2, 3]),
+    };
+
+    const studioPages: PageItem[] = Array.from({ length: 60 }, (_, idx) => ({
+      ...page(0),
+      id: `studio-p-${idx + 1}`,
+      documentId: 'used-form',
+      documentName: 'form.png',
+      sourcePageNumber: 1,
+      widthMm: 100,
+      heightMm: 70,
+    }));
+
+    const rtlPageNumberingOverlay: PageOverlay = {
+      id: 'studio-num-rtl',
+      kind: 'numbering',
+      enabled: true,
+      target: 'page',
+      targetScope: 'all',
+      targetPageIds: [],
+      targetSheetIndex: 1,
+      xPercent: 20,
+      yPercent: 85,
+      widthPercent: 60,
+      heightPercent: 10,
+      opacity: 1,
+      rotation: 0,
+      fontSize: 12,
+      fontFamily: 'Vazirmatn',
+      color: '#0f172a',
+      bold: false,
+      italic: false,
+      align: 'center',
+      format: 'persian',
+      template: 'صفحه {page} از {total}',
+      startOffset: 1,
+      padZeros: 0,
+      customScript: '',
+    };
+
+    vi.stubGlobal('document', {
+      createElement: (tag: string) => {
+        if (tag === 'canvas') return createCanvas(1, 1);
+        throw new Error(`Unexpected element: ${tag}`);
+      },
+    });
+
+    try {
+      const progressSteps: number[] = [];
+      let reportedSheets = 0;
+      const outBytes = await exportImposedPdf({
+        documents: [usedDoc, unusedDoc],
+        pages: studioPages,
+        allPages: studioPages,
+        layout: { ...layout, rows: 2, cols: 1, duplexMode: 'none' },
+        effects: { ...DEFAULT_EFFECTS, enabled: false },
+        watermark: { ...getDefaultWatermarkSettings(), enabled: false },
+        pageNumbering: { ...getDefaultPageNumberSettings(), enabled: false },
+        overlays: [rtlPageNumberingOverlay],
+        userName: 'test',
+        onProgress: (pct) => progressSteps.push(pct),
+        onMeta: ({ sheetCount }) => {
+          reportedSheets = sheetCount;
+        },
+      });
+
+      expect(reportedSheets).toBe(30);
+      expect(progressSteps[progressSteps.length - 1]).toBe(100);
+
+      const loaded = await PDFDocument.load(outBytes);
+      expect(loaded.getPageCount()).toBe(30);
+
+      // 1 form image + 2 cached words ("صفحه", "از") + <= 10 Persian digits = <= 16 primary images (not 61!)
+      let imageXObjectCount = 0;
+      const smaskRefs = new Set<string>();
+      for (const [, obj] of loaded.context.enumerateIndirectObjects()) {
+        if (obj instanceof PDFStream && obj.dict.get(PDFName.of('Subtype'))?.toString() === '/Image') {
+          const smask = obj.dict.get(PDFName.of('SMask'));
+          if (smask) smaskRefs.add(String(smask));
+          imageXObjectCount++;
+        }
+      }
+      const primaryImages = imageXObjectCount - smaskRefs.size;
+      expect(primaryImages).toBeLessThanOrEqual(16);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 

@@ -1592,7 +1592,7 @@ export const useAppStore = create<AppState>((set, get) => {
             ? {
                 ...p,
                 rotation: ((((displayed.get(p.id) ?? p.rotation) + deltaDeg) % 360) as PageRotation),
-                overrides: { ...p.overrides, manualRotation: true },
+                overrides: { ...p.overrides, manualRotation: true, autoPackBaseRotation: undefined },
               }
             : p
         ),
@@ -1885,9 +1885,18 @@ export const useAppStore = create<AppState>((set, get) => {
         const nextPatch = patch.marginsMm
           ? { ...patch, marginsMm: clampMarginsToMin(patch.marginsMm, minMargins) }
           : patch;
+        const clearCustomCells =
+          nextPatch.customCells === undefined &&
+          Boolean(state.layout.customCells?.length) &&
+          (paperOrOrientChanged ||
+            nextPatch.rows !== undefined ||
+            nextPatch.cols !== undefined ||
+            nextPatch.booklet?.enabled ||
+            nextPatch.placementMode === 'sequential');
         const mergedLayout: LayoutSettings = {
           ...state.layout,
           ...nextPatch,
+          ...(clearCustomCells ? { customCells: undefined } : {}),
           ...(nextPatch.marginsMm && !nextPatch.marginMode ? { marginMode: 'custom' as const } : {}),
         };
         const bookletDuplexChanged =
@@ -2015,6 +2024,7 @@ export const useAppStore = create<AppState>((set, get) => {
           rows: Math.max(1, Math.min(50, rows)),
           cols: Math.max(1, Math.min(50, cols)),
           placementMode: placementMode ?? state.layout.placementMode,
+          customCells: undefined,
         },
         activeSheetIndex: 0,
       }));
@@ -2083,9 +2093,12 @@ export const useAppStore = create<AppState>((set, get) => {
       }
 
       const before = captureSnapshot(state);
-      const nextRotation: PageRotation = plan.rotated90
-        ? (((targetPage.rotation + 90) % 360) as PageRotation)
-        : targetPage.rotation;
+      const baseRot: PageRotation = targetPage.overrides?.autoPackBaseRotation ?? targetPage.rotation;
+      const shouldRotateTarget = !plan.isHybrid && plan.rotated90;
+      const nextRotation: PageRotation = shouldRotateTarget
+        ? (((baseRot + 90) % 360) as PageRotation)
+        : baseRot;
+      const customSlots = plan.isHybrid && plan.slots?.length ? plan.slots : undefined;
 
       set((curr) => ({
         pages: curr.pages.map((page) => {
@@ -2100,15 +2113,12 @@ export const useAppStore = create<AppState>((set, get) => {
               ? { ...page, selectedForPrint: nextSelected }
               : page;
           }
-          const nextOverrides = page.overrides
-            ? {
-                ...page.overrides,
-                manualRotation: plan.rotated90 ? true : page.overrides.manualRotation,
-                transform: undefined,
-              }
-            : plan.rotated90
-              ? { manualRotation: true }
-              : undefined;
+          const nextOverrides: PageItem['overrides'] = {
+            ...page.overrides,
+            manualRotation: shouldRotateTarget ? true : page.overrides?.manualRotation,
+            autoPackBaseRotation: baseRot,
+            transform: undefined,
+          };
           return {
             ...page,
             rotation: nextRotation,
@@ -2131,6 +2141,7 @@ export const useAppStore = create<AppState>((set, get) => {
           marginsMm: plan.marginsMm,
           horizontalGutterMm: plan.horizontalGutterMm,
           verticalGutterMm: plan.verticalGutterMm,
+          customCells: customSlots,
           cellOverrides: undefined,
         },
         lastCustomMarginsMm: plan.marginsMm,
@@ -2139,16 +2150,23 @@ export const useAppStore = create<AppState>((set, get) => {
       }));
 
       pushUndo(
-        `چیدمان بیشینه ${plan.rows}×${plan.cols} (${plan.totalPerSheet} عدد در برگ)`,
-        `Auto-pack ${plan.rows}×${plan.cols} (${plan.totalPerSheet} per sheet)`,
+        plan.isHybrid
+          ? `چیدمان بیشینه مختلط (${plan.totalPerSheet} عدد در برگ)`
+          : `چیدمان بیشینه ${plan.rows}×${plan.cols} (${plan.totalPerSheet} عدد در برگ)`,
+        plan.isHybrid
+          ? `Auto-pack mixed (${plan.totalPerSheet} per sheet)`
+          : `Auto-pack ${plan.rows}×${plan.cols} (${plan.totalPerSheet} per sheet)`,
         before,
         captureSnapshot(get())
       );
 
       get().addToast({
         type: 'success',
-        title:
-          lang === 'fa'
+        title: plan.isHybrid
+          ? lang === 'fa'
+            ? `${plan.totalPerSheet} نسخه (چیدمان بهینه ترکیبی ۰°+۹۰°) روی برگ چیده شد`
+            : `Packed ${plan.totalPerSheet} copies (optimal mixed 0°+90° layout) per sheet`
+          : lang === 'fa'
             ? `${plan.totalPerSheet} نسخه (${plan.cols}×${plan.rows}) با اندازه ${plan.cellWidthMm}×${plan.cellHeightMm}mm روی برگ چیده شد`
             : `Packed ${plan.totalPerSheet} copies (${plan.cols}×${plan.rows}) at ${plan.cellWidthMm}×${plan.cellHeightMm} mm per sheet`,
       });
@@ -2912,11 +2930,15 @@ export const useAppStore = create<AppState>((set, get) => {
         return;
       }
 
-      set({ isExportingPdf: true, exportProgress: 10 });
+      set({ isExportingPdf: true, exportProgress: 5 });
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       try {
+        const exportPages = onlyHighlighted
+          ? targetPages.map((p) => (p.selectedForPrint ? p : { ...p, selectedForPrint: true }))
+          : targetPages;
         const pdfBytes = await exportImposedPdf({
           documents: state.documents,
-          pages: targetPages.map((p) => ({ ...p, selectedForPrint: true })),
+          pages: exportPages,
           layout: state.layout,
           effects: state.effects,
           watermark: state.watermark,
@@ -2964,11 +2986,13 @@ export const useAppStore = create<AppState>((set, get) => {
         return;
       }
       const prevUrl = state.pdfPreviewModal?.url;
-      set({ isGeneratingPdfPreview: true, isExportingPdf: true, exportProgress: 15 });
+      set({ isGeneratingPdfPreview: true, isExportingPdf: true, exportProgress: 5 });
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       try {
+        let previewPageCount: number | null = null;
         const pdfBytes = await exportImposedPdf({
           documents: state.documents,
-          pages: targetPages.map((p) => ({ ...p, selectedForPrint: true })),
+          pages: targetPages,
           layout: state.layout,
           effects: state.effects,
           watermark: state.watermark,
@@ -2978,9 +3002,16 @@ export const useAppStore = create<AppState>((set, get) => {
           userName: state.settings.userName,
           exportOptions: state.pdfExportOptions,
           onProgress: (percent) => set({ exportProgress: percent }),
+          onMeta: ({ sheetCount }) => {
+            previewPageCount = sheetCount;
+          },
         });
-        const loaded = await PDFDocument.load(pdfBytes);
-        const blob = new Blob([pdfBytes.buffer as ArrayBuffer], { type: 'application/pdf' });
+        const pageCount = previewPageCount ?? (await PDFDocument.load(pdfBytes)).getPageCount();
+        const safeBytes =
+          pdfBytes.byteOffset === 0 && pdfBytes.byteLength === pdfBytes.buffer.byteLength
+            ? (pdfBytes.buffer as ArrayBuffer)
+            : (pdfBytes.slice().buffer as ArrayBuffer);
+        const blob = new Blob([safeBytes], { type: 'application/pdf' });
         const url =
           typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
             ? URL.createObjectURL(blob)
@@ -2992,7 +3023,7 @@ export const useAppStore = create<AppState>((set, get) => {
           pdfPreviewModal: {
             url,
             fileName: `PrintStudio-Preview-${state.layout.rows}x${state.layout.cols}.pdf`,
-            pageCount: loaded.getPageCount(),
+            pageCount,
             byteLength: pdfBytes.byteLength,
           },
         });

@@ -210,9 +210,14 @@ export function computeImpositionSheets(
   const activePages = pages.filter((p) => p.selectedForPrint);
   const { widthMm: sheetW, heightMm: sheetH } = getSheetDimensionsMm(layout);
 
+  const customSlots =
+    !layout.booklet?.enabled && layout.customCells && layout.customCells.length > 0
+      ? layout.customCells
+      : null;
+
   const rows = Math.max(1, Math.min(50, Math.floor(layout.rows)));
   const cols = Math.max(1, Math.min(50, Math.floor(layout.cols)));
-  const cellsPerSide = rows * cols;
+  const cellsPerSide = customSlots ? customSlots.length : rows * cols;
 
   if (activePages.length === 0) {
     return [];
@@ -301,38 +306,60 @@ export function computeImpositionSheets(
     const sideMargins = getEffectiveSideMarginsMm(layout, side);
 
     // First pass: calculate individual scale factors & rotations
-    const rawPlacements = orderedGrid.map((coord, cellIndex) => {
-      const entry = group[cellIndex] ?? null;
-      const cellXMm =
-        sideMargins.left +
-        coord.col * (cellWidthMm + Math.max(0, layout.horizontalGutterMm));
-      const cellYMm =
-        sideMargins.top +
-        coord.row * (cellHeightMm + Math.max(0, layout.verticalGutterMm));
-
-      if (!entry) {
-        return {
+    const placementTemplates = customSlots
+      ? customSlots.map((slot, idx) => ({
+          cellIndex: idx,
+          row: slot.row,
+          col: slot.col,
+          cellXMm: sideMargins.left + slot.xMm,
+          cellYMm: sideMargins.top + slot.yMm,
+          cellWidthMm: Math.max(5, slot.widthMm),
+          cellHeightMm: Math.max(5, slot.heightMm),
+          rotated90: Boolean(slot.rotated90),
+        }))
+      : orderedGrid.map((coord, cellIndex) => ({
           cellIndex,
           row: coord.row,
           col: coord.col,
-          page: null,
-          globalPageNumber: null,
-          cellXMm,
-          cellYMm,
+          cellXMm:
+            sideMargins.left +
+            coord.col * (cellWidthMm + Math.max(0, layout.horizontalGutterMm)),
+          cellYMm:
+            sideMargins.top +
+            coord.row * (cellHeightMm + Math.max(0, layout.verticalGutterMm)),
           cellWidthMm,
           cellHeightMm,
-          pageW: cellWidthMm,
-          pageH: cellHeightMm,
+          rotated90: false,
+        }));
+
+    const rawPlacements = placementTemplates.map((slot) => {
+      const entry = group[slot.cellIndex] ?? null;
+
+      if (!entry) {
+        return {
+          cellIndex: slot.cellIndex,
+          row: slot.row,
+          col: slot.col,
+          page: null,
+          globalPageNumber: null,
+          cellXMm: slot.cellXMm,
+          cellYMm: slot.cellYMm,
+          cellWidthMm: slot.cellWidthMm,
+          cellHeightMm: slot.cellHeightMm,
+          pageW: slot.cellWidthMm,
+          pageH: slot.cellHeightMm,
           scaleFactor: 1,
           effectiveRotation: 0 as PageRotation,
         };
       }
 
       const { page, globalPageNumber } = entry;
-      let effectiveRotation: PageRotation = page.rotation;
+      let effectiveRotation: PageRotation = slot.rotated90
+        ? (((page.rotation + 90) % 360) as PageRotation)
+        : page.rotation;
       const crop = pageCropFractions(page);
-      const availableCellWidthMm = cellWidthMm;
-      const availableCellHeightMm = cellHeightMm;
+      const availableCellWidthMm = slot.cellWidthMm;
+      const availableCellHeightMm = slot.cellHeightMm;
       const croppedWidth = page.widthMm * (1 - crop.left - crop.right);
       const croppedHeight = page.heightMm * (1 - crop.top - crop.bottom);
       const isRotated90 = effectiveRotation === 90 || effectiveRotation === 270;
@@ -340,10 +367,10 @@ export function computeImpositionSheets(
       let pageH = isRotated90 ? croppedWidth : croppedHeight;
 
       // D3: Auto-rotate page to best fit the cell aspect ratio
-      if (layout.autoRotateToFit && !page.overrides?.manualRotation) {
+      if (!slot.rotated90 && layout.autoRotateToFit && !page.overrides?.manualRotation) {
         const cellIsLandscape = availableCellWidthMm > availableCellHeightMm;
         const pageIsLandscape = pageW > pageH;
-        if (cellIsLandscape !== pageIsLandscape && Math.abs(cellWidthMm - cellHeightMm) > 2) {
+        if (cellIsLandscape !== pageIsLandscape && Math.abs(slot.cellWidthMm - slot.cellHeightMm) > 2) {
           effectiveRotation = ((effectiveRotation + 90) % 360) as PageRotation;
           const tmp = pageW;
           pageW = pageH;
@@ -373,15 +400,15 @@ export function computeImpositionSheets(
       }
 
       return {
-        cellIndex,
-        row: coord.row,
-        col: coord.col,
+        cellIndex: slot.cellIndex,
+        row: slot.row,
+        col: slot.col,
         page,
         globalPageNumber,
-        cellXMm,
-        cellYMm,
-        cellWidthMm,
-        cellHeightMm,
+        cellXMm: slot.cellXMm,
+        cellYMm: slot.cellYMm,
+        cellWidthMm: slot.cellWidthMm,
+        cellHeightMm: slot.cellHeightMm,
         pageW,
         pageH,
         scaleFactor,

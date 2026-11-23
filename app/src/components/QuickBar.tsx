@@ -53,6 +53,7 @@ export const QuickBar: React.FC = () => {
     undoLabel,
     redoLabel,
     isExportingPdf,
+    exportProgress,
     setAppMode,
     undo,
     redo,
@@ -326,7 +327,7 @@ export const QuickBar: React.FC = () => {
           className="flex h-7 items-center gap-1 rounded-md bg-emerald-500 px-2.5 text-[11px] font-bold text-white shadow-xs hover:bg-emerald-600 active:scale-[0.99] disabled:opacity-50 transition whitespace-nowrap shrink-0 cursor-pointer"
         >
           <FileDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span>{isFa ? 'SavePDF' : 'SavePDF'}</span>
+          <span>{isExportingPdf && exportProgress > 0 ? `SavePDF ${exportProgress}%` : 'SavePDF'}</span>
         </button>
 
         {/* Quick Print */}

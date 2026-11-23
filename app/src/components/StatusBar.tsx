@@ -256,7 +256,10 @@ export const StatusBar: React.FC<StatusBarProps> = ({ cursorPos }) => {
           >
             {selectedPrinter?.activeProfile.paperName || layout.paperSize} (
             {Math.round(sheetDims.widthMm)}×{Math.round(sheetDims.heightMm)} mm ·{' '}
-            {layout.orientation}) • {layout.rows}×{layout.cols}
+            {layout.orientation}) •{' '}
+            {!layout.booklet?.enabled && layout.customCells?.length
+              ? `${layout.customCells.length}-Up`
+              : `${layout.rows}×${layout.cols}`}
           </span>
         </div>
 

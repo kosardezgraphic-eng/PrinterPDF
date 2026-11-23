@@ -64,7 +64,10 @@ export function computeCounterSummary(
     ? Math.ceil(populatedSides.length / 2)
     : populatedSides.length;
 
-  const cellsPerSheet = Math.max(1, layout.rows * layout.cols);
+  const cellsPerSheet =
+    !layout.booklet?.enabled && layout.customCells && layout.customCells.length > 0
+      ? layout.customCells.length
+      : Math.max(1, layout.rows * layout.cols);
 
   const totalInk = selectedPagesList.reduce(
     (acc, p) => acc + (p.inkCoveragePercent || 0),

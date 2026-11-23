@@ -242,4 +242,80 @@ describe('TopToolRibbon & ToolPanel routing', () => {
     }
     act(() => root.unmount());
   });
+
+  it('displays live exportProgress percentages in QuickBar SavePDF and TopToolRibbon buttons', () => {
+    const root = createRoot(container);
+    act(() => {
+      useAppStore.setState({ isExportingPdf: true, isGeneratingPdfPreview: false, exportProgress: 42 });
+      root.render(
+        React.createElement(
+          'div',
+          null,
+          React.createElement(QuickBar),
+          React.createElement(TopToolRibbon)
+        )
+      );
+    });
+
+    expect(container.textContent).toContain('SavePDF 42%');
+    expect(container.querySelector('[data-ribbon-action="save-as-pdf"]')?.textContent).toContain('42%');
+
+    act(() => {
+      useAppStore.setState({ isExportingPdf: true, isGeneratingPdfPreview: true, exportProgress: 76 });
+    });
+    expect(container.querySelector('[data-ribbon-action="view-pdf"]')?.textContent).toContain('76%');
+
+    act(() => {
+      useAppStore.setState({ isExportingPdf: false, isGeneratingPdfPreview: false, exportProgress: 0 });
+      root.unmount();
+    });
+  });
+
+  it('opens Studio PDF preview via openPdfPreviewModal without re-parsing pdfBytes when sheetCount metadata is emitted', async () => {
+    const origCreateObjectUrl = URL.createObjectURL;
+    const origRevokeObjectUrl = URL.revokeObjectURL;
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => 'blob:http://localhost/studio-preview-fast'),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(),
+    });
+
+    try {
+      const blankPage: PageItem = {
+        ...page,
+        id: 'blank-1',
+        sourcePageNumber: 0,
+        isBlankPage: true,
+      };
+      useAppStore.setState({
+        documents: [],
+        pages: [blankPage, { ...blankPage, id: 'blank-2' }],
+        layout: { ...DEFAULT_LAYOUT, rows: 1, cols: 1, duplexMode: 'none' },
+        pdfPreviewModal: null,
+      });
+
+      await useAppStore.getState().openPdfPreviewModal();
+      const modalState = useAppStore.getState().pdfPreviewModal;
+      expect(modalState).not.toBeNull();
+      expect(modalState?.url).toBe('blob:http://localhost/studio-preview-fast');
+      expect(modalState?.pageCount).toBe(2);
+      expect((modalState?.byteLength ?? 0) > 0).toBe(true);
+    } finally {
+      if (origCreateObjectUrl) {
+        Object.defineProperty(URL, 'createObjectURL', { configurable: true, writable: true, value: origCreateObjectUrl });
+      } else {
+        delete (URL as { createObjectURL?: unknown }).createObjectURL;
+      }
+      if (origRevokeObjectUrl) {
+        Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, writable: true, value: origRevokeObjectUrl });
+      } else {
+        delete (URL as { revokeObjectURL?: unknown }).revokeObjectURL;
+      }
+    }
+  });
 });
