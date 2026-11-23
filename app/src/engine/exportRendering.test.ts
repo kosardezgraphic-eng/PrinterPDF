@@ -592,5 +592,36 @@ class TestOffscreenCanvas {
     expect((await PDFDocument.load(exported4)).getPageCount()).toBe(4);
   });
 
+  it('yields between large PDF sheets so the renderer can process UI work', async () => {
+    const source = await PDFDocument.create();
+    source.addPage([100, 100]).drawRectangle({ x: 0, y: 0, width: 100, height: 100, color: rgb(1, 0, 0) });
+    const doc = { id: 'd', fileType: 'pdf', rawBytes: await source.save() } as SourceDocument;
+    const manyPages = Array.from({ length: 6 }, (_, index) => ({
+      ...page(0),
+      id: `large-${index + 1}`,
+      sourcePageNumber: 1,
+      widthMm: 100 * ptToMm,
+      heightMm: 100 * ptToMm,
+    }));
+    let progressAtScheduledTask = 0;
+    const outputPromise = exportImposedPdf({
+      documents: [doc],
+      pages: manyPages,
+      layout,
+      effects: { ...DEFAULT_EFFECTS, enabled: false },
+      watermark: { ...getDefaultWatermarkSettings(), enabled: false },
+      pageNumbering: { ...getDefaultPageNumberSettings(), enabled: false },
+      userName: 'test',
+      onProgress: (percent) => {
+        if (percent === 17) {
+          setTimeout(() => { progressAtScheduledTask = percent; }, 0);
+        }
+      },
+    });
+    const output = await outputPromise;
+    expect(progressAtScheduledTask).toBe(17);
+    expect((await PDFDocument.load(output)).getPageCount()).toBe(6);
+  });
+
 });
 
