@@ -67,7 +67,7 @@ export const TicketNumberingWorkspace: React.FC = () => {
   const [guideTool, setGuideTool] = useState<TicketGuideLine['kind'] | null>(null);
   const [guideOrientation, setGuideOrientation] = useState<TicketGuideLine['orientation']>('vertical');
   const previewRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ pointerId: number; kind: 'slot' | 'guide' | 'new-guide'; id: string; row: number; col: number; orientation: TicketGuideLine['orientation']; cell: { left: number; top: number; width: number; height: number } } | null>(null);
+  const dragRef = useRef<{ pointerId: number; kind: 'slot' | 'guide' | 'new-guide'; id: string; row: number; col: number; orientation: TicketGuideLine['orientation']; offsetX: number; offsetY: number; cell: { left: number; top: number; width: number; height: number } } | null>(null);
 
   const selectedSource =
     ticketSourcePages.find((p) => p.id === ticketSelectedSourcePageId) ?? ticketSourcePages[0] ?? null;
@@ -161,15 +161,20 @@ export const TicketNumberingWorkspace: React.FC = () => {
     const cell = event.currentTarget.closest<HTMLElement>('[data-ticket-cell]');
     const rect = cell?.getBoundingClientRect();
     if (!sheet || !rect) return;
+    const slot = ticketConfig.numberSlots.find(item => item.id === id);
+    if (!slot) return;
+    const pointerX = (event.clientX - rect.left) / Math.max(1, rect.width) * 100;
+    const pointerY = (event.clientY - rect.top) / Math.max(1, rect.height) * 100;
     event.preventDefault(); event.stopPropagation(); sheet.setPointerCapture?.(event.pointerId);
     dragRef.current = { pointerId: event.pointerId, kind: 'slot', id, row, col, orientation: 'vertical',
+      offsetX: pointerX - slot.xPercent, offsetY: pointerY - slot.yPercent,
       cell: { left: rect.left, top: rect.top, width: rect.width, height: rect.height } };
   };
 
   const beginGuideDrag = (event: React.PointerEvent<HTMLElement>, id: string, row: number, col: number, orientation: TicketGuideLine['orientation']) => {
     if (event.button !== 0) return;
     event.preventDefault(); event.stopPropagation(); previewRef.current?.setPointerCapture?.(event.pointerId);
-    dragRef.current = { pointerId: event.pointerId, kind: 'guide', id, row, col, orientation, cell: { left: 0, top: 0, width: 0, height: 0 } };
+    dragRef.current = { pointerId: event.pointerId, kind: 'guide', id, row, col, orientation, offsetX: 0, offsetY: 0, cell: { left: 0, top: 0, width: 0, height: 0 } };
   };
 
   const beginManualGuide = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -190,7 +195,7 @@ export const TicketNumberingWorkspace: React.FC = () => {
     };
     patch({ guideLines: [...ticketConfig.guideLines, next] });
     event.preventDefault(); event.stopPropagation(); sheet.setPointerCapture?.(event.pointerId);
-    dragRef.current = { pointerId: event.pointerId, kind: 'new-guide', id, row, col, orientation: guideOrientation, cell: { left: 0, top: 0, width: 0, height: 0 } };
+    dragRef.current = { pointerId: event.pointerId, kind: 'new-guide', id, row, col, orientation: guideOrientation, offsetX: 0, offsetY: 0, cell: { left: 0, top: 0, width: 0, height: 0 } };
     setGuideTool(null);
   };
 
@@ -202,8 +207,8 @@ export const TicketNumberingWorkspace: React.FC = () => {
       if (!slot) return;
       const x = (event.clientX - drag.cell.left) / Math.max(1, drag.cell.width) * 100;
       const y = (event.clientY - drag.cell.top) / Math.max(1, drag.cell.height) * 100;
-      updateSlot(drag.id, { xPercent: Math.max(0, Math.min(100 - slot.widthPercent, x - slot.widthPercent / 2)),
-        yPercent: Math.max(0, Math.min(100 - slot.heightPercent, y - slot.heightPercent / 2)) });
+      updateSlot(drag.id, { xPercent: Math.max(0, Math.min(100 - slot.widthPercent, x - drag.offsetX)),
+        yPercent: Math.max(0, Math.min(100 - slot.heightPercent, y - drag.offsetY)) });
       return;
     }
     updateGuide(drag.id, { positionPercent: guidePositionAt(drag.orientation, event.clientX, event.clientY, drag.row, drag.col) });
