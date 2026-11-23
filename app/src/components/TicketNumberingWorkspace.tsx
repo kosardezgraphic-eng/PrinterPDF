@@ -1,9 +1,9 @@
 /**
- * PrintStudio Pro — Standalone Ticket / Receipt (قبض) Numbering Environment
+ * PrintStudio Pro — Standalone Ticket / Receipt Numbering Environment
  *
- * Separate workspace for multi-part forms on a sheet (e.g. A4 → 3 slips),
+ * Separate workspace for multi-part forms on a sheet (e.g. A4 into 3 slips),
  * sequential serial numbers per slip, cut/perforation marks, quantity,
- * then auto-generate all sheets and open them in Studio for live preview & edit.
+ * then auto-generate all sheets and open them in Studio for live preview and edit.
  */
 
 import React, { useMemo, useRef } from 'react';
@@ -24,7 +24,6 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import {
-  createDefaultTicketConfig,
   getTicketGridMetrics,
   resolveTicketSlotText,
   type TicketConfig,
@@ -141,13 +140,12 @@ export const TicketNumberingWorkspace: React.FC = () => {
         type: 'success',
         title: isFa ? 'شیت‌ها ساخته شد' : 'Sheets generated',
         message: isFa
-          ? `${metrics.effectiveSheetCount} شیت (${metrics.totalTickets} قبض) در استودیو باز شد — قابل ویرایش و پیش‌نمایش`
-          : `${metrics.effectiveSheetCount} sheets (${metrics.totalTickets} tickets) opened in Studio — editable preview`,
+          ? `${metrics.effectiveSheetCount} شیت (${metrics.totalTickets} قبض) در استودیو باز شد`
+          : `${metrics.effectiveSheetCount} sheets (${metrics.totalTickets} tickets) opened in Studio`,
       });
     }
   };
 
-  // Live preview of first few serials on first ticket
   const previewSerials = useMemo(() => {
     return ticketConfig.numberSlots.map((slot) => ({
       id: slot.id,
@@ -162,7 +160,6 @@ export const TicketNumberingWorkspace: React.FC = () => {
       className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50 dark:bg-slate-950"
       data-ticket-numbering-workspace
     >
-      {/* Header */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-2.5 dark:border-slate-800 dark:bg-slate-900">
         <div className="flex items-center gap-3">
           <button
@@ -179,12 +176,12 @@ export const TicketNumberingWorkspace: React.FC = () => {
             </div>
             <div>
               <h1 className="text-sm font-bold text-slate-900 dark:text-white">
-                {isFa ? 'شماره‌گذاری قبض و فرم چندقسمتی' : 'Receipt / Ticket Numbering'}
+                {isFa ? 'شماره گذاری قبض و فرم چندقسمتی' : 'Receipt / Ticket Numbering'}
               </h1>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
                 {isFa
-                  ? 'تقسیم صفحه، شماره سریال پشت‌سرهم، محل برش و پرفراژ — تولید خودکار شیت‌ها'
-                  : 'Page division, sequential serials, cut & perforation — auto-generate sheets'}
+                  ? 'تقسیم صفحه، شماره سریال، محل برش و پرفراژ — تولید خودکار شیت ها'
+                  : 'Page division, sequential serials, cut and perforation — auto-generate sheets'}
               </p>
             </div>
           </div>
@@ -209,19 +206,17 @@ export const TicketNumberingWorkspace: React.FC = () => {
             <Play className="h-3.5 w-3.5" />
             {isFa
               ? `تولید ${metrics.effectiveSheetCount} شیت و باز کردن در استودیو`
-              : `Generate ${metrics.effectiveSheetCount} sheets → Studio`}
+              : `Generate ${metrics.effectiveSheetCount} sheets to Studio`}
           </button>
         </div>
       </div>
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Left: configuration panels */}
         <div className="flex w-[380px] shrink-0 flex-col gap-3 overflow-y-auto border-e border-slate-200 bg-slate-50/80 p-3 dark:border-slate-800 dark:bg-slate-950/50">
-          {/* 1. Paper & grid division */}
           <section className={sectionCls}>
             <div className="mb-2 flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-100">
               <LayoutGrid className="h-3.5 w-3.5 text-sky-600" />
-              {isFa ? '۱. تقسیم‌بندی برگه' : '1. Sheet division'}
+              {isFa ? '1. تقسیم بندی برگه' : '1. Sheet division'}
             </div>
             <div className="grid grid-cols-2 gap-2">
               <label className="block">
@@ -253,9 +248,9 @@ export const TicketNumberingWorkspace: React.FC = () => {
                 <select
                   className={inputCls}
                   value={ticketConfig.orientation}
-                  onChange={(e) =>
-                    patch({ orientation: e.target.value as TicketConfig['orientation'] })
-                  }
+                  onChange={(e) => {
+                    patch({ orientation: e.target.value as TicketConfig['orientation'] });
+                  }}
                 >
                   <option value="portrait">{isFa ? 'عمودی' : 'Portrait'}</option>
                   <option value="landscape">{isFa ? 'افقی' : 'Landscape'}</option>
@@ -264,7 +259,7 @@ export const TicketNumberingWorkspace: React.FC = () => {
               <label className="block">
                 <span className={labelCls}>
                   <Rows3 className="mr-1 inline h-3 w-3" />
-                  {isFa ? 'ردیف (قسمت‌ها)' : 'Rows (parts)'}
+                  {isFa ? 'ردیف' : 'Rows'}
                 </span>
                 <input
                   type="number"
@@ -292,8 +287,8 @@ export const TicketNumberingWorkspace: React.FC = () => {
             </div>
             <p className="mt-2 text-[10px] text-slate-500 dark:text-slate-400">
               {isFa
-                ? `هر برگه به ${metrics.rows}×${metrics.cols} = ${metrics.ticketsPerSheet} قسمت تقسیم می‌شود · اندازه هر قسمت ≈ ${metrics.cellWidthMm.toFixed(1)}×${metrics.cellHeightMm.toFixed(1)} mm`
-                : `Each sheet splits into ${metrics.rows}×${metrics.cols} = ${metrics.ticketsPerSheet} parts · part size ≈ ${metrics.cellWidthMm.toFixed(1)}×${metrics.cellHeightMm.toFixed(1)} mm`}
+                ? `هر برگه به ${metrics.rows}x${metrics.cols} = ${metrics.ticketsPerSheet} قسمت · اندازه قسمت حدود ${metrics.cellWidthMm.toFixed(1)}x${metrics.cellHeightMm.toFixed(1)} mm`
+                : `Each sheet: ${metrics.rows}x${metrics.cols} = ${metrics.ticketsPerSheet} parts · part about ${metrics.cellWidthMm.toFixed(1)}x${metrics.cellHeightMm.toFixed(1)} mm`}
             </p>
             <div className="mt-2 grid grid-cols-2 gap-2">
               <label className="block">
@@ -321,11 +316,10 @@ export const TicketNumberingWorkspace: React.FC = () => {
             </div>
           </section>
 
-          {/* 2. Quantity & sequence */}
           <section className={sectionCls}>
             <div className="mb-2 flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-100">
               <Settings2 className="h-3.5 w-3.5 text-sky-600" />
-              {isFa ? '۲. تعداد و شماره‌گذاری' : '2. Quantity & numbering'}
+              {isFa ? '2. تعداد و شماره گذاری' : '2. Quantity and numbering'}
             </div>
             <div className="mb-2 flex gap-1">
               {(['sheets', 'tickets'] as const).map((mode) => (
@@ -352,7 +346,7 @@ export const TicketNumberingWorkspace: React.FC = () => {
             <div className="grid grid-cols-2 gap-2">
               {ticketConfig.quantityMode === 'sheets' ? (
                 <label className="block col-span-2">
-                  <span className={labelCls}>{isFa ? 'تعداد شیت‌های چاپی' : 'Number of sheets'}</span>
+                  <span className={labelCls}>{isFa ? 'تعداد شیت های چاپی' : 'Number of sheets'}</span>
                   <input
                     type="number"
                     min={1}
@@ -366,7 +360,7 @@ export const TicketNumberingWorkspace: React.FC = () => {
                 </label>
               ) : (
                 <label className="block col-span-2">
-                  <span className={labelCls}>{isFa ? 'تعداد کل قبض‌ها' : 'Total tickets'}</span>
+                  <span className={labelCls}>{isFa ? 'تعداد کل قبض ها' : 'Total tickets'}</span>
                   <input
                     type="number"
                     min={1}
@@ -413,12 +407,13 @@ export const TicketNumberingWorkspace: React.FC = () => {
                 <select
                   className={inputCls}
                   value={ticketConfig.format}
-                  onChange={(e) =>
-                    patch({ format: e.target.value as TicketConfig['format'] })
-                  }
+                  onChange={(e) => {
+                    const nextFormat = e.target.value as TicketConfig['format'];
+                    patch({ format: nextFormat });
+                  }}
                 >
-                  <option value="english">{English 0-9</option>
-                  <option value="persian">{فارسی ۰-۹</option>
+                  <option value="english">English digits</option>
+                  <option value="persian">Persian digits</option>
                 </select>
               </label>
             </div>
@@ -428,12 +423,12 @@ export const TicketNumberingWorkspace: React.FC = () => {
                 <select
                   className={inputCls}
                   value={ticketConfig.orderingMode}
-                  onChange={(e) =>
-                    patch({ orderingMode: e.target.value as TicketConfig['orderingMode'] })
-                  }
+                  onChange={(e) => {
+                    patch({ orderingMode: e.target.value as TicketConfig['orderingMode'] });
+                  }}
                 >
                   <option value="per-sheet">{isFa ? 'شیت به شیت' : 'Per sheet'}</option>
-                  <option value="cut-stack">{isFa ? 'برش و چیدمان عمقی' : 'Cut & stack'}</option>
+                  <option value="cut-stack">{isFa ? 'برش و چیدمان عمقی' : 'Cut and stack'}</option>
                 </select>
               </label>
               <label className="block">
@@ -441,30 +436,29 @@ export const TicketNumberingWorkspace: React.FC = () => {
                 <select
                   className={inputCls}
                   value={ticketConfig.direction}
-                  onChange={(e) =>
-                    patch({ direction: e.target.value as TicketConfig['direction'] })
-                  }
+                  onChange={(e) => {
+                    patch({ direction: e.target.value as TicketConfig['direction'] });
+                  }}
                 >
-                  <option value="rtl">{isFa ? 'راست → چپ' : 'RTL'}</option>
-                  <option value="ltr">{isFa ? 'چپ → راست' : 'LTR'}</option>
-                  <option value="ttb">{isFa ? 'بالا → پایین' : 'Top → bottom'}</option>
+                  <option value="rtl">{isFa ? 'راست به چپ' : 'RTL'}</option>
+                  <option value="ltr">{isFa ? 'چپ به راست' : 'LTR'}</option>
+                  <option value="ttb">{isFa ? 'بالا به پایین' : 'Top to bottom'}</option>
                   <option value="zigzag">{isFa ? 'زیگزاگ' : 'Zigzag'}</option>
                 </select>
               </label>
             </div>
             <p className="mt-2 rounded bg-sky-50 px-2 py-1.5 text-[10px] font-medium text-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
               {isFa
-                ? `جمع: ${metrics.effectiveSheetCount} شیت · ${metrics.totalTickets} قبض · شماره‌ها پشت‌سرهم از ${ticketConfig.startNumber}`
-                : `Total: ${metrics.effectiveSheetCount} sheets · ${metrics.totalTickets} tickets · serials from ${ticketConfig.startNumber}`}
+                ? `جمع: ${metrics.effectiveSheetCount} شیت · ${metrics.totalTickets} قبض · از ${ticketConfig.startNumber}`
+                : `Total: ${metrics.effectiveSheetCount} sheets · ${metrics.totalTickets} tickets · from ${ticketConfig.startNumber}`}
             </p>
           </section>
 
-          {/* 3. Number slots */}
           <section className={sectionCls}>
             <div className="mb-2 flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-100">
                 <Hash className="h-3.5 w-3.5 text-sky-600" />
-                {isFa ? '۳. جایگاه شماره‌ها روی هر قسمت' : '3. Number positions on each part'}
+                {isFa ? '3. جایگاه شماره ها' : '3. Number positions'}
               </div>
               <button
                 type="button"
@@ -486,107 +480,39 @@ export const TicketNumberingWorkspace: React.FC = () => {
                       className={`${inputCls} flex-1`}
                       value={slot.label}
                       onChange={(e) => updateSlot(slot.id, { label: e.target.value })}
-                      placeholder={isFa ? 'برچسب' : 'Label'}
                     />
                     <button
                       type="button"
                       onClick={() => removeSlot(slot.id)}
-                      className="rounded p-1 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer"
-                      title={isFa ? 'حذف' : 'Remove'}
+                      className="rounded p-1 text-rose-500 hover:bg-rose-50 cursor-pointer"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
-                  <label className="block mb-1">
+                  <label className="mb-1 block">
                     <span className={labelCls}>{isFa ? 'قالب متن' : 'Template'}</span>
                     <input
                       className={inputCls}
                       dir="auto"
                       value={slot.template}
                       onChange={(e) => updateSlot(slot.id, { template: e.target.value })}
-                      placeholder="شماره {serial}"
                     />
                   </label>
                   <div className="grid grid-cols-4 gap-1">
-                    <label className="block">
-                      <span className={labelCls}>X%</span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={95}
-                        className={inputCls}
-                        value={slot.xPercent}
-                        onChange={(e) => updateSlot(slot.id, { xPercent: +e.target.value })}
-                      />
-                    </label>
-                    <label className="block">
-                      <span className={labelCls}>Y%</span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={95}
-                        className={inputCls}
-                        value={slot.yPercent}
-                        onChange={(e) => updateSlot(slot.id, { yPercent: +e.target.value })}
-                      />
-                    </label>
-                    <label className="block">
-                      <span className={labelCls}>W%</span>
-                      <input
-                        type="number"
-                        min={4}
-                        max={100}
-                        className={inputCls}
-                        value={slot.widthPercent}
-                        onChange={(e) => updateSlot(slot.id, { widthPercent: +e.target.value })}
-                      />
-                    </label>
-                    <label className="block">
-                      <span className={labelCls}>H%</span>
-                      <input
-                        type="number"
-                        min={4}
-                        max={100}
-                        className={inputCls}
-                        value={slot.heightPercent}
-                        onChange={(e) => updateSlot(slot.id, { heightPercent: +e.target.value })}
-                      />
-                    </label>
-                  </div>
-                  <div className="mt-1 grid grid-cols-3 gap-1">
-                    <label className="block">
-                      <span className={labelCls}>{isFa ? 'اندازه' : 'Size'}</span>
-                      <input
-                        type="number"
-                        min={6}
-                        max={72}
-                        className={inputCls}
-                        value={slot.fontSize}
-                        onChange={(e) => updateSlot(slot.id, { fontSize: +e.target.value })}
-                      />
-                    </label>
-                    <label className="block">
-                      <span className={labelCls}>{isFa ? 'آفست' : 'Offset'}</span>
-                      <input
-                        type="number"
-                        className={inputCls}
-                        value={slot.slotOffset}
-                        onChange={(e) => updateSlot(slot.id, { slotOffset: Math.trunc(+e.target.value || 0) })}
-                        title={isFa ? 'اختلاف نسبت به شماره اصلی' : 'Offset from main serial'}
-                      />
-                    </label>
-                    <label className="block">
-                      <span className={labelCls}>{isFa ? 'رنگ' : 'Color'}</span>
-                      <input
-                        type="color"
-                        className="h-8 w-full cursor-pointer rounded border border-slate-300 dark:border-slate-600"
-                        value={/^#[0-9a-f]{6}$/i.test(slot.color) ? slot.color : '#0f172a'}
-                        onChange={(e) => updateSlot(slot.id, { color: e.target.value })}
-                      />
-                    </label>
+                    {(['xPercent', 'yPercent', 'widthPercent', 'heightPercent'] as const).map((key, i) => (
+                      <label key={key} className="block">
+                        <span className={labelCls}>{['X%', 'Y%', 'W%', 'H%'][i]}</span>
+                        <input
+                          type="number"
+                          className={inputCls}
+                          value={slot[key]}
+                          onChange={(e) => updateSlot(slot.id, { [key]: +e.target.value })}
+                        />
+                      </label>
+                    ))}
                   </div>
                   <p className="mt-1 text-[10px] text-slate-500">
-                    {isFa ? 'پیش‌نمایش:' : 'Preview:'}{' '}
+                    {isFa ? 'پیش نمایش:' : 'Preview:'}{' '}
                     <span className="font-semibold text-slate-800 dark:text-slate-200" dir="auto">
                       {previewSerials[idx]?.text ?? '—'}
                     </span>
@@ -596,25 +522,24 @@ export const TicketNumberingWorkspace: React.FC = () => {
             </div>
           </section>
 
-          {/* 4. Cut & perforation */}
           <section className={sectionCls}>
             <div className="mb-2 flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-100">
                 <Scissors className="h-3.5 w-3.5 text-sky-600" />
-                {isFa ? '۴. محل برش و پرفراژ' : '4. Cut & perforation'}
+                {isFa ? '4. محل برش و پرفراژ' : '4. Cut and perforation'}
               </div>
               <div className="flex gap-1">
                 <button
                   type="button"
                   onClick={() => addGuide('perforation')}
-                  className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-800 dark:bg-sky-900/40 dark:text-sky-200 cursor-pointer"
+                  className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-800 cursor-pointer"
                 >
                   + {isFa ? 'پرفراژ' : 'Perf'}
                 </button>
                 <button
                   type="button"
                   onClick={() => addGuide('cut')}
-                  className="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-800 dark:bg-rose-900/40 dark:text-rose-200 cursor-pointer"
+                  className="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-800 cursor-pointer"
                 >
                   + {isFa ? 'برش' : 'Cut'}
                 </button>
@@ -626,7 +551,7 @@ export const TicketNumberingWorkspace: React.FC = () => {
                 checked={ticketConfig.autoGridCutLines}
                 onChange={(e) => patch({ autoGridCutLines: e.target.checked })}
               />
-              {isFa ? 'خطوط برش خودکار بین خانه‌ها' : 'Auto cut lines between cells'}
+              {isFa ? 'خطوط برش خودکار بین خانه ها' : 'Auto cut lines between cells'}
             </label>
             <div className="space-y-2">
               {ticketConfig.guideLines.map((guide) => (
@@ -654,11 +579,11 @@ export const TicketNumberingWorkspace: React.FC = () => {
                       <select
                         className={inputCls}
                         value={guide.kind}
-                        onChange={(e) =>
+                        onChange={(e) => {
                           updateGuide(guide.id, {
                             kind: e.target.value as TicketGuideLine['kind'],
-                          })
-                        }
+                          });
+                        }}
                       >
                         <option value="perforation">{isFa ? 'پرفراژ' : 'Perforation'}</option>
                         <option value="cut">{isFa ? 'برش' : 'Cut'}</option>
@@ -669,11 +594,11 @@ export const TicketNumberingWorkspace: React.FC = () => {
                       <select
                         className={inputCls}
                         value={guide.orientation}
-                        onChange={(e) =>
+                        onChange={(e) => {
                           updateGuide(guide.id, {
                             orientation: e.target.value as TicketGuideLine['orientation'],
-                          })
-                        }
+                          });
+                        }}
                       >
                         <option value="vertical">{isFa ? 'عمودی' : 'Vertical'}</option>
                         <option value="horizontal">{isFa ? 'افقی' : 'Horizontal'}</option>
@@ -703,30 +628,16 @@ export const TicketNumberingWorkspace: React.FC = () => {
                   </label>
                 </div>
               ))}
-              {ticketConfig.guideLines.length === 0 && (
-                <p className="text-[10px] text-slate-400">
-                  {isFa
-                    ? 'هنوز خطی تعریف نشده — با دکمه‌های بالا اضافه کنید.'
-                    : 'No guide lines yet — add with the buttons above.'}
-                </p>
-              )}
             </div>
           </section>
         </div>
 
-        {/* Right: source form + live sheet preview */}
         <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-          {/* Source form */}
           <section className={sectionCls}>
             <div className="mb-2 flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-100">
               <FileImage className="h-3.5 w-3.5 text-sky-600" />
               {isFa ? 'فرم پایه (اختیاری)' : 'Base form (optional)'}
             </div>
-            <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
-              {isFa
-                ? 'یک PDF یا تصویر از فرم خالی قبض بارگذاری کنید. اگر خالی بماند، شیت‌ها با پس‌زمینه سفید ساخته می‌شوند.'
-                : 'Upload a blank receipt PDF/image. If empty, sheets are generated with a white background.'}
-            </p>
             <div className="flex flex-wrap gap-2">
               <input
                 ref={fileRef}
@@ -754,7 +665,7 @@ export const TicketNumberingWorkspace: React.FC = () => {
                   if (!ok) {
                     addToast({
                       type: 'warning',
-                      title: isFa ? 'صفحه‌ای در استودیو انتخاب نشده' : 'No active Studio page',
+                      title: isFa ? 'صفحه ای در استودیو انتخاب نشده' : 'No active Studio page',
                     });
                   }
                 }}
@@ -766,7 +677,7 @@ export const TicketNumberingWorkspace: React.FC = () => {
                 <button
                   type="button"
                   onClick={clearTicketSource}
-                  className="flex items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-300 cursor-pointer"
+                  className="flex items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 cursor-pointer"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   {isFa ? 'پاک کردن منبع' : 'Clear source'}
@@ -779,46 +690,32 @@ export const TicketNumberingWorkspace: React.FC = () => {
                   <img
                     src={selectedSource.thumbnailDataUrl}
                     alt=""
-                    className="h-20 w-auto rounded border border-slate-200 object-contain dark:border-slate-600"
+                    className="h-20 w-auto rounded border border-slate-200 object-contain"
                   />
                 ) : (
                   <div className="flex h-20 w-16 items-center justify-center rounded border border-dashed border-slate-300 text-[10px] text-slate-400">
-                    {isFa ? 'بدون پیش‌نمایش' : 'No preview'}
+                    {isFa ? 'بدون پیش نمایش' : 'No preview'}
                   </div>
                 )}
                 <div className="min-w-0 flex-1 text-[11px] text-slate-600 dark:text-slate-300">
-                  <div className="font-semibold text-slate-800 dark:text-slate-100 truncate">
+                  <div className="truncate font-semibold text-slate-800 dark:text-slate-100">
                     {ticketSourceDocument?.name ?? selectedSource.documentName}
                   </div>
                   <div>
-                    {selectedSource.widthMm.toFixed(1)} × {selectedSource.heightMm.toFixed(1)} mm
+                    {selectedSource.widthMm.toFixed(1)} x {selectedSource.heightMm.toFixed(1)} mm
                   </div>
-                  {ticketSourcePages.length > 1 && (
-                    <select
-                      className={`${inputCls} mt-1`}
-                      value={ticketSelectedSourcePageId ?? ''}
-                      onChange={(e) => setTicketSelectedSourcePageId(e.target.value || null)}
-                    >
-                      {ticketSourcePages.map((p, i) => (
-                        <option key={p.id} value={p.id}>
-                          {isFa ? `صفحه ${i + 1}` : `Page ${i + 1}`}
-                        </option>
-                      ))}
-                    </select>
-                  )}
                 </div>
               </div>
             )}
           </section>
 
-          {/* Live schematic preview of one sheet */}
           <section className={`${sectionCls} flex-1`}>
             <div className="mb-3 flex items-center justify-between">
               <div className="text-xs font-bold text-slate-800 dark:text-slate-100">
-                {isFa ? 'پیش‌نمایش شماتیک یک شیت' : 'Schematic preview of one sheet'}
+                {isFa ? 'پیش نمایش شماتیک یک شیت' : 'Schematic preview of one sheet'}
               </div>
               <span className="text-[10px] text-slate-500">
-                {metrics.sheetWidthMm.toFixed(0)} × {metrics.sheetHeightMm.toFixed(0)} mm
+                {metrics.sheetWidthMm.toFixed(0)} x {metrics.sheetHeightMm.toFixed(0)} mm
               </span>
             </div>
             <div className="flex justify-center">
@@ -826,11 +723,9 @@ export const TicketNumberingWorkspace: React.FC = () => {
                 className="relative border border-slate-300 bg-white shadow-md dark:border-slate-600"
                 style={{
                   width: Math.min(420, metrics.sheetWidthMm * 1.6),
-                  height: Math.min(594, metrics.sheetHeightMm * 1.6),
                   aspectRatio: `${metrics.sheetWidthMm} / ${metrics.sheetHeightMm}`,
                 }}
               >
-                {/* cells */}
                 {Array.from({ length: metrics.rows }).map((_, r) =>
                   Array.from({ length: metrics.cols }).map((_, c) => {
                     const left =
@@ -878,84 +773,16 @@ export const TicketNumberingWorkspace: React.FC = () => {
                             )}
                           </div>
                         ))}
-                        {ticketConfig.guideLines
-                          .filter((g) => !g.extendFullSheet)
-                          .map((g) =>
-                            g.orientation === 'vertical' ? (
-                              <div
-                                key={g.id}
-                                className="absolute top-0 bottom-0 w-px"
-                                style={{
-                                  left: `${g.positionPercent}%`,
-                                  borderLeft: `1px ${g.strokeStyle} ${g.strokeColor}`,
-                                }}
-                              />
-                            ) : (
-                              <div
-                                key={g.id}
-                                className="absolute left-0 right-0 h-px"
-                                style={{
-                                  top: `${g.positionPercent}%`,
-                                  borderTop: `1px ${g.strokeStyle} ${g.strokeColor}`,
-                                }}
-                              />
-                            )
-                          )}
                       </div>
                     );
                   })
                 )}
-                {/* sheet-wide guides */}
-                {ticketConfig.guideLines
-                  .filter((g) => g.extendFullSheet)
-                  .map((g) => {
-                    if (g.orientation === 'vertical') {
-                      return Array.from({ length: metrics.cols }).map((_, c) => {
-                        const left =
-                          ((ticketConfig.marginsMm.left +
-                            c * (metrics.cellWidthMm + ticketConfig.horizontalGutterMm) +
-                            (g.positionPercent / 100) * metrics.cellWidthMm) /
-                            metrics.sheetWidthMm) *
-                          100;
-                        return (
-                          <div
-                            key={`${g.id}-c${c}`}
-                            className="pointer-events-none absolute top-0 bottom-0"
-                            style={{
-                              left: `${left}%`,
-                              width: 0,
-                              borderLeft: `1.5px ${g.strokeStyle} ${g.strokeColor}`,
-                            }}
-                          />
-                        );
-                      });
-                    }
-                    return Array.from({ length: metrics.rows }).map((_, r) => {
-                      const top =
-                        ((ticketConfig.marginsMm.top +
-                          r * (metrics.cellHeightMm + ticketConfig.verticalGutterMm) +
-                          (g.positionPercent / 100) * metrics.cellHeightMm) /
-                          metrics.sheetHeightMm) *
-                        100;
-                      return (
-                        <div
-                          key={`${g.id}-r${r}`}
-                          className="pointer-events-none absolute left-0 right-0"
-                          style={{
-                            top: `${top}%`,
-                            height: 0,
-                            borderTop: `1.5px ${g.strokeStyle} ${g.strokeColor}`,
-                          }}
-                        />
-                      );
-                    });
-                  })}
               </div>
             </div>
             <p className="mt-3 text-center text-[11px] text-slate-500 dark:text-slate-400">
               {isFa
-                ? 'پس از تولید، تمام شیت‌ها در استودیو باز می‌شوند و می‌توانید جای شماره‌ها، خطوط و محتوا را ویرایش کنید.'
-                : 'After generate, all sheets open in Studio where you can edit number positions, guides and content.'}
+                ? 'پس از تولید، تمام شیت ها در استودیو باز می شوند و قابل ویرایش هستند.'
+                : 'After generate, all sheets open in Studio and can be edited.'}
             </p>
           </section>
         </div>
