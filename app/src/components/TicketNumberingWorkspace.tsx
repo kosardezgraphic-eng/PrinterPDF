@@ -25,7 +25,9 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import {
   getTicketGridMetrics,
-  resolveTicketSlotText,\n  ticketSequenceIndex,\n  type TicketConfig,
+  resolveTicketSlotText,
+  ticketSequenceIndex,
+  type TicketConfig,
   type TicketGuideLine,
   type TicketNumberSlot,
 } from '../engine/ticketNumbering';
@@ -61,7 +63,11 @@ export const TicketNumberingWorkspace: React.FC = () => {
 
   const isFa = settings.language === 'fa';
   const fileRef = useRef<HTMLInputElement>(null);
-  const metrics = useMemo(() => getTicketGridMetrics(ticketConfig), [ticketConfig]);\n  const [guideTool, setGuideTool] = useState<TicketGuideLine['kind'] | null>(null);\n  const [guideOrientation, setGuideOrientation] = useState<TicketGuideLine['orientation']>('vertical');\n  const previewRef = useRef<HTMLDivElement>(null);\n  const dragRef = useRef<{ pointerId: number; kind: 'slot' | 'guide' | 'new-guide'; id: string; row: number; col: number; orientation: TicketGuideLine['orientation']; cell: { left: number; top: number; width: number; height: number } } | null>(null);
+  const metrics = useMemo(() => getTicketGridMetrics(ticketConfig), [ticketConfig]);
+  const [guideTool, setGuideTool] = useState<TicketGuideLine['kind'] | null>(null);
+  const [guideOrientation, setGuideOrientation] = useState<TicketGuideLine['orientation']>('vertical');
+  const previewRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ pointerId: number; kind: 'slot' | 'guide' | 'new-guide'; id: string; row: number; col: number; orientation: TicketGuideLine['orientation']; cell: { left: number; top: number; width: number; height: number } } | null>(null);
 
   const selectedSource =
     ticketSourcePages.find((p) => p.id === ticketSelectedSourcePageId) ?? ticketSourcePages[0] ?? null;
@@ -112,7 +118,8 @@ export const TicketNumberingWorkspace: React.FC = () => {
       id: newId('guide'),
       label: kind === 'perforation' ? (isFa ? 'خط پرفراژ' : 'Perforation') : isFa ? 'خط برش' : 'Cut line',
       kind,
-      orientation,\n      positionPercent: Math.max(0, Math.min(100, positionPercent)),
+      orientation,
+      positionPercent: Math.max(0, Math.min(100, positionPercent)),
       extendFullSheet: true,
       strokeColor: kind === 'perforation' ? '#0284c7' : '#dc2626',
       strokeStyle: kind === 'perforation' ? 'dashed' : 'solid',
@@ -835,7 +842,8 @@ export const TicketNumberingWorkspace: React.FC = () => {
                       </div>
                     );
                   })
-                )}\n                {ticketConfig.guideLines.flatMap(guide => {
+                )}
+                {ticketConfig.guideLines.flatMap(guide => {
                   const cells = guide.extendFullSheet
                     ? (guide.orientation === 'vertical'
                       ? Array.from({ length: metrics.cols }, (_, col) => ({ row: 0, col }))
@@ -864,7 +872,9 @@ export const TicketNumberingWorkspace: React.FC = () => {
                         : { left: guide.extendFullSheet ? 0 : `${left}%`, top: `${lineTop}%`, width: guide.extendFullSheet ? '100%' : `${width}%`, height: 4, transform: 'translateY(-50%)', background: gradient, cursor: 'ns-resize', touchAction: 'none' }} />;
                   });
                 })}
-              </div>\n            </div>\n            <p className="mt-3 text-center text-[11px] text-slate-500 dark:text-slate-400">
+              </div>
+            </div>
+            <p className="mt-3 text-center text-[11px] text-slate-500 dark:text-slate-400">
               {isFa
                 ? 'پس از تولید، تمام شیت ها در استودیو باز می شوند و قابل ویرایش هستند.'
                 : 'After generate, all sheets open in Studio and can be edited.'}
