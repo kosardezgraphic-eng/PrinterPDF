@@ -28,13 +28,15 @@ describe('matrix size inputs', () => {
     const cols=container.querySelector<HTMLInputElement>('[aria-label="Columns"]')!;
     change(rows,''); expect(rows.value).toBe(''); expect(useAppStore.getState().layout.rows).toBe(1);
     change(rows,'3'); expect(useAppStore.getState().layout.rows).toBe(3);
-    change(cols,'15'); expect(useAppStore.getState().layout.cols).toBe(1);
+    expect(rows.max).toBe('100');expect(cols.max).toBe('100');
+    change(cols,'15'); expect(useAppStore.getState().layout.cols).toBe(15);
     act(() => cols.dispatchEvent(new FocusEvent('focusout',{bubbles:true})));
-    expect(useAppStore.getState().layout.cols).toBe(10);expect(cols.value).toBe('10');
+    expect(useAppStore.getState().layout.cols).toBe(15);expect(cols.value).toBe('15');
+    change(cols,'100'); expect(useAppStore.getState().layout.cols).toBe(100);
     change(rows,'0'); act(() => rows.dispatchEvent(new FocusEvent('focusout',{bubbles:true})));
-    expect(useAppStore.getState().layout.rows).toBe(1);expect(useAppStore.getState().layout.cols).toBe(10);
+    expect(useAppStore.getState().layout.rows).toBe(1);expect(useAppStore.getState().layout.cols).toBe(100);
     change(cols,'');act(() => cols.dispatchEvent(new FocusEvent('focusout',{bubbles:true})));
-    expect(cols.value).toBe('10');expect(useAppStore.getState().layout.cols).toBe(10);
+    expect(cols.value).toBe('100');expect(useAppStore.getState().layout.cols).toBe(100);
   });
   it('uses named icon buttons with translated titles', () => {
     const tab=container.querySelector<HTMLButtonElement>('[aria-label="Page Layout"]');
