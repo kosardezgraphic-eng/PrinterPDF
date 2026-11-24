@@ -6,6 +6,7 @@ import { LithographyWorkspace } from '../components/LithographyWorkspace';
 import { QuickBar } from '../components/QuickBar';
 import { DEFAULT_SETTINGS, useAppStore } from '../store/useAppStore';
 import { createDefaultLithoColorSettings, createDefaultLithoPresets } from './lithographyColor';
+import * as lithographyPreflight from './lithographyPreflight';
 
 let root: Root;
 let host: HTMLDivElement;
@@ -119,4 +120,184 @@ describe('LithographyWorkspace & QuickBar UI', () => {
     expect(marksToggle).toBeTruthy();
     expect(marksToggle.checked).toBe(true);
   });
+
+  it('supports standard paper sizes (A3/B4), interactive form transform (move/resize/rotate), and ruler measurement tool in Lithography UI', async () => {
+    vi.spyOn(lithographyPreflight, 'renderPdfPageToRgba').mockResolvedValue({
+      width: 24,
+      height: 36,
+      rgba: new Uint8ClampedArray(24 * 36 * 4).fill(210),
+    });
+
+    const sampleJob = {
+      id: 'job-ui-form-1',
+      fileName: 'card-test.pdf',
+      sourceFormat: 'PDF' as const,
+      fileSizeBytes: 4096,
+      sourceBytes: new Uint8Array([37, 80, 68, 70]),
+      status: 'done' as const,
+      addedAt: new Date().toISOString(),
+      metadata: {
+        fileName: 'card-test.pdf',
+        sourceFormat: 'PDF' as const,
+        pdfVersion: '1.7',
+        pageCount: 1,
+        fileSizeBytes: 4096,
+        colorSpaces: ['DeviceCMYK'],
+        overallColorMode: 'CMYK' as const,
+        detectedSpots: [],
+        hasAnyTransparency: false,
+        hasAnyOverprint: false,
+        unembeddedFonts: [],
+        embeddedFontsCount: 1,
+        pages: [
+          {
+            pageNumber: 1,
+            widthMm: 100,
+            heightMm: 150,
+            mediaBoxMm: { x: 0, y: 0, width: 100, height: 150 },
+            trimBoxMm: { x: 3, y: 3, width: 94, height: 144 },
+            bleedBoxMm: { x: 0, y: 0, width: 100, height: 150 },
+            hasExplicitTrimBox: true,
+            hasExplicitBleedBox: true,
+            hasMinBleed3Mm: true,
+            minBleedMm: 3,
+            colorSpaces: ['DeviceCMYK'],
+            imageCount: 1,
+            minEffectiveDpi: 300,
+            lowResImages: [],
+            hairlineCount: 0,
+            hasRgbOrLab: false,
+            hasTransparency: false,
+            hasSuspiciousOverprint: false,
+            estimatedMaxTacPercent: 210,
+            tacExceedAreaPercent: 0,
+            textColorSummary: '100% K',
+          },
+        ],
+      },
+    };
+
+    useAppStore.setState({
+      lithoJobs: [sampleJob],
+      lithoSelectedJobId: sampleJob.id,
+      lithoSelectedPageNumber: 1,
+    });
+
+    await act(async () => {
+      root.render(React.createElement(LithographyWorkspace));
+    });
+
+    // Quick paper/plate selector supports A3 & B4 directly from toolbar
+    const quickSelect = host.querySelector('[data-litho-quick-plate-size]') as HTMLSelectElement;
+    expect(quickSelect).toBeTruthy();
+    await act(async () => {
+      quickSelect.value = 'a3';
+      quickSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(useAppStore.getState().lithoExportSettings.plateSizeId).toBe('a3');
+    expect(useAppStore.getState().lithoExportSettings.plateWidthMm).toBe(297);
+    expect(useAppStore.getState().lithoExportSettings.plateHeightMm).toBe(420);
+
+    // Switch to 'فرم و اندازه' inspector tab
+    const formTab = host.querySelector('[data-litho-tab="form"]') as HTMLButtonElement;
+    expect(formTab).toBeTruthy();
+    await act(async () => {
+      formTab.click();
+    });
+    expect(host.querySelector('[data-litho-form-panel]')).toBeTruthy();
+
+    // Rotate 90° and Fit onto A3
+    const rotate90Btn = host.querySelector('[data-litho-rotate-90]') as HTMLButtonElement;
+    await act(async () => {
+      rotate90Btn.click();
+    });
+    expect(useAppStore.getState().lithoExportSettings.formPlacement?.rotationDeg).toBe(90);
+
+    const fitBtn = host.querySelector('[data-litho-fit-form]') as HTMLButtonElement;
+    await act(async () => {
+      fitBtn.click();
+    });
+    expect(useAppStore.getState().lithoExportSettings.formPlacement?.scaleXPercent).toBeGreaterThan(150);
+
+    // Numeric Offset X / Scale X updates store accurately
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    const offXInput = host.querySelector('[data-litho-offset-x]') as HTMLInputElement;
+    await act(async () => {
+      setter.call(offXInput, '18');
+      offXInput.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(useAppStore.getState().lithoExportSettings.formPlacement?.offsetXMm).toBe(18);
+
+    // Pointer drag on artwork box moves artwork in form
+    const artBox = host.querySelector('[data-litho-artwork-box]') as HTMLElement;
+    expect(artBox).toBeTruthy();
+    const beforeX = useAppStore.getState().lithoExportSettings.formPlacement?.offsetXMm ?? 0;
+    await act(async () => {
+      artBox.dispatchEvent(
+        new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 100, clientY: 100 })
+      );
+      window.dispatchEvent(new Event('pointermove'));
+    });
+    const viewport = host.querySelector('[data-litho-plate-frame]')?.closest('[dir]') as HTMLElement;
+    expect(viewport).toBeTruthy();
+    await act(async () => {
+      artBox.dispatchEvent(
+        new MouseEvent('pointermove', { bubbles: true, clientX: 140, clientY: 120 })
+      );
+      artBox.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 140, clientY: 120 }));
+    });
+    expect(useAppStore.getState().lithoExportSettings.formPlacement?.offsetXMm).toBeGreaterThan(beforeX);
+
+    // Resize via SE handle scales artwork cleanly
+    const seHandle = host.querySelector('[data-litho-handle="se"]') as HTMLElement;
+    expect(seHandle).toBeTruthy();
+    const beforeScale = useAppStore.getState().lithoExportSettings.formPlacement?.scaleXPercent ?? 100;
+    await act(async () => {
+      seHandle.dispatchEvent(
+        new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 200, clientY: 200 })
+      );
+      seHandle.dispatchEvent(
+        new MouseEvent('pointermove', { bubbles: true, clientX: 250, clientY: 250 })
+      );
+      seHandle.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 250, clientY: 250 }));
+    });
+    expect(useAppStore.getState().lithoExportSettings.formPlacement?.scaleXPercent).toBeGreaterThan(
+      beforeScale
+    );
+
+    // Activate Measure / Ruler tool and drag a measurement line on the form
+    const measureBtn = host.querySelector('[data-litho-form-tool="measure"]') as HTMLButtonElement;
+    await act(async () => {
+      measureBtn.click();
+    });
+    const overlay = host.querySelector('[data-litho-measure-overlay]') as HTMLElement;
+    expect(overlay).toBeTruthy();
+
+    await act(async () => {
+      overlay.dispatchEvent(
+        new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 20, clientY: 20 })
+      );
+      overlay.dispatchEvent(
+        new MouseEvent('pointermove', { bubbles: true, clientX: 120, clientY: 20 })
+      );
+      overlay.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 120, clientY: 20 }));
+    });
+
+    expect(host.querySelector('[data-litho-measure-readout]')).toBeTruthy();
+    expect(host.querySelectorAll('[data-litho-measurement-item]').length).toBeGreaterThanOrEqual(1);
+
+    // Reset placement restores 100% / 0 offset / 0°
+    const resetBtn = host.querySelector('[data-litho-reset-placement]') as HTMLButtonElement;
+    await act(async () => {
+      resetBtn.click();
+    });
+    expect(useAppStore.getState().lithoExportSettings.formPlacement).toMatchObject({
+      offsetXMm: 0,
+      offsetYMm: 0,
+      scaleXPercent: 100,
+      scaleYPercent: 100,
+      rotationDeg: 0,
+    });
+  });
 });
+

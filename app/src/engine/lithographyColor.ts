@@ -15,11 +15,13 @@ import type {
   LithoColorSettings,
   LithoCustomIccProfile,
   LithoExportSettings,
+  LithoFormPlacement,
   LithoGcrLevel,
   LithoIccProfileId,
   LithoJobPreset,
   LithoPlateSizePreset,
   LithoSpotChannel,
+  MeasurementUnit,
 } from '@shared/models';
 
 export interface OffsetProfileSpec {
@@ -237,62 +239,98 @@ export const BUILT_IN_LITHO_PLATE_SIZES: LithoPlateSizePreset[] = [
     widthMm: 0,
     heightMm: 0,
     isBuiltIn: true,
+    category: 'auto',
+  },
+  // Standard ISO / Print Paper Sizes
+  {
+    id: 'a4',
+    nameFa: 'کاغذ استاندارد A4 (۲۱۰×۲۹۷ mm)',
+    nameEn: 'ISO A4 (210×297 mm)',
+    widthMm: 210,
+    heightMm: 297,
+    isBuiltIn: true,
+    category: 'paper',
   },
   {
-    id: 'gto46',
-    nameFa: 'پلیت GTO 46 (۳۷۰×۴۵۰ mm)',
-    nameEn: 'GTO 46 Plate (370×450 mm)',
-    widthMm: 370,
-    heightMm: 450,
+    id: 'a3',
+    nameFa: 'کاغذ استاندارد A3 (۲۹۷×۴۲۰ mm)',
+    nameEn: 'ISO A3 (297×420 mm)',
+    widthMm: 297,
+    heightMm: 420,
     isBuiltIn: true,
+    category: 'paper',
   },
   {
-    id: 'gto52',
-    nameFa: 'پلیت GTO 52 (۴۰۰×۵۱۰ mm)',
-    nameEn: 'GTO 52 Plate (400×510 mm)',
-    widthMm: 400,
-    heightMm: 510,
+    id: 'a5',
+    nameFa: 'کاغذ استاندارد A5 (۱۴۸×۲۱۰ mm)',
+    nameEn: 'ISO A5 (148×210 mm)',
+    widthMm: 148,
+    heightMm: 210,
     isBuiltIn: true,
+    category: 'paper',
   },
   {
-    id: 'sm52',
-    nameFa: 'پلیت هایدلبرگ SM 52 (۴۵۹×۵۲۵ mm)',
-    nameEn: 'Heidelberg SM 52 Plate (459×525 mm)',
-    widthMm: 459,
-    heightMm: 525,
+    id: 'a2',
+    nameFa: 'کاغذ استاندارد A2 (۴۲۰×۵۹۴ mm)',
+    nameEn: 'ISO A2 (420×594 mm)',
+    widthMm: 420,
+    heightMm: 594,
     isBuiltIn: true,
+    category: 'paper',
   },
   {
-    id: 'kord64',
-    nameFa: 'پلیت KORD 64 (۵۵۰×۶۵۰ mm)',
-    nameEn: 'KORD 64 Plate (550×650 mm)',
-    widthMm: 550,
-    heightMm: 650,
+    id: 'sra4',
+    nameFa: 'فرم SRA4 با حاشیه برش (۲۲۵×۳۲۰ mm)',
+    nameEn: 'SRA4 Sheet (225×320 mm)',
+    widthMm: 225,
+    heightMm: 320,
     isBuiltIn: true,
-  },
-  {
-    id: 'sm74',
-    nameFa: 'پلیت دوورقی SM 74 (۶۰۵×۷۴۵ mm)',
-    nameEn: 'Heidelberg SM 74 Plate (605×745 mm)',
-    widthMm: 605,
-    heightMm: 745,
-    isBuiltIn: true,
-  },
-  {
-    id: 'cd102',
-    nameFa: 'پلیت چهارورقی CD 102 (۷۹۰×۱۰۳۰ mm)',
-    nameEn: 'Heidelberg CD 102 Plate (790×1030 mm)',
-    widthMm: 790,
-    heightMm: 1030,
-    isBuiltIn: true,
+    category: 'paper',
   },
   {
     id: 'sra3',
-    nameFa: 'فرم SRA3 (۳۲۰×۴۵۰ mm)',
+    nameFa: 'فرم SRA3 با حاشیه برش (۳۲۰×۴۵۰ mm)',
     nameEn: 'SRA3 Sheet (320×450 mm)',
     widthMm: 320,
     heightMm: 450,
     isBuiltIn: true,
+    category: 'paper',
+  },
+  {
+    id: 'a3-plus',
+    nameFa: 'کاغذ +A3 / Super A3 (۳۳۰×۴۸۳ mm)',
+    nameEn: 'Super A3 / A3+ (330×483 mm)',
+    widthMm: 330,
+    heightMm: 483,
+    isBuiltIn: true,
+    category: 'paper',
+  },
+  {
+    id: 'b5',
+    nameFa: 'کاغذ استاندارد B5 (۱۷۶×۲۵۰ mm)',
+    nameEn: 'JIS B5 (176×250 mm)',
+    widthMm: 176,
+    heightMm: 250,
+    isBuiltIn: true,
+    category: 'paper',
+  },
+  {
+    id: 'b4',
+    nameFa: 'کاغذ استاندارد B4 (۲۵۰×۳۵۳ mm)',
+    nameEn: 'JIS B4 (250×353 mm)',
+    widthMm: 250,
+    heightMm: 353,
+    isBuiltIn: true,
+    category: 'paper',
+  },
+  {
+    id: 'b3',
+    nameFa: 'کاغذ استاندارد B3 (۳۵۳×۵۰۰ mm)',
+    nameEn: 'JIS B3 (353×500 mm)',
+    widthMm: 353,
+    heightMm: 500,
+    isBuiltIn: true,
+    category: 'paper',
   },
   {
     id: 'b2',
@@ -301,8 +339,233 @@ export const BUILT_IN_LITHO_PLATE_SIZES: LithoPlateSizePreset[] = [
     widthMm: 500,
     heightMm: 700,
     isBuiltIn: true,
+    category: 'paper',
+  },
+  {
+    id: 'b1',
+    nameFa: 'فرم چهارورقی B1 (۷۰۰×۱۰۰۰ mm)',
+    nameEn: 'B1 Sheet (700×1000 mm)',
+    widthMm: 700,
+    heightMm: 1000,
+    isBuiltIn: true,
+    category: 'paper',
+  },
+  {
+    id: 'letter',
+    nameFa: 'کاغذ US Letter (۲۱۵.۹×۲۷۹.۴ mm)',
+    nameEn: 'US Letter (215.9×279.4 mm)',
+    widthMm: 215.9,
+    heightMm: 279.4,
+    isBuiltIn: true,
+    category: 'paper',
+  },
+  {
+    id: 'legal',
+    nameFa: 'کاغذ US Legal (۲۱۵.۹×۳۵۵.۶ mm)',
+    nameEn: 'US Legal (215.9×355.6 mm)',
+    widthMm: 215.9,
+    heightMm: 355.6,
+    isBuiltIn: true,
+    category: 'paper',
+  },
+  // Offset Press Plate Sizes
+  {
+    id: 'gto46',
+    nameFa: 'پلیت GTO 46 (۳۷۰×۴۵۰ mm)',
+    nameEn: 'GTO 46 Plate (370×450 mm)',
+    widthMm: 370,
+    heightMm: 450,
+    isBuiltIn: true,
+    category: 'plate',
+  },
+  {
+    id: 'gto52',
+    nameFa: 'پلیت GTO 52 (۴۰۰×۵۱۰ mm)',
+    nameEn: 'GTO 52 Plate (400×510 mm)',
+    widthMm: 400,
+    heightMm: 510,
+    isBuiltIn: true,
+    category: 'plate',
+  },
+  {
+    id: 'sm52',
+    nameFa: 'پلیت هایدلبرگ SM 52 (۴۵۹×۵۲۵ mm)',
+    nameEn: 'Heidelberg SM 52 Plate (459×525 mm)',
+    widthMm: 459,
+    heightMm: 525,
+    isBuiltIn: true,
+    category: 'plate',
+  },
+  {
+    id: 'kord64',
+    nameFa: 'پلیت KORD 64 (۵۵۰×۶۵۰ mm)',
+    nameEn: 'KORD 64 Plate (550×650 mm)',
+    widthMm: 550,
+    heightMm: 650,
+    isBuiltIn: true,
+    category: 'plate',
+  },
+  {
+    id: 'sm74',
+    nameFa: 'پلیت دوورقی SM 74 (۶۰۵×۷۴۵ mm)',
+    nameEn: 'Heidelberg SM 74 Plate (605×745 mm)',
+    widthMm: 605,
+    heightMm: 745,
+    isBuiltIn: true,
+    category: 'plate',
+  },
+  {
+    id: 'cd102',
+    nameFa: 'پلیت چهارورقی CD 102 (۷۹۰×۱۰۳۰ mm)',
+    nameEn: 'Heidelberg CD 102 Plate (790×1030 mm)',
+    widthMm: 790,
+    heightMm: 1030,
+    isBuiltIn: true,
+    category: 'plate',
   },
 ];
+
+export function createDefaultLithoFormPlacement(): LithoFormPlacement {
+  return {
+    offsetXMm: 0,
+    offsetYMm: 0,
+    scaleXPercent: 100,
+    scaleYPercent: 100,
+    lockAspect: true,
+    rotationDeg: 0,
+  };
+}
+
+export function normalizeLithoFormPlacement(
+  raw?: Partial<LithoFormPlacement> | null
+): LithoFormPlacement {
+  const def = createDefaultLithoFormPlacement();
+  if (!raw) return def;
+  const num = (v: unknown, min: number, max: number, fallback: number): number =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback;
+  let rot = typeof raw.rotationDeg === 'number' && Number.isFinite(raw.rotationDeg) ? raw.rotationDeg : 0;
+  rot = ((rot + 180) % 360 + 360) % 360 - 180;
+  if (rot <= -180) rot += 360;
+  return {
+    offsetXMm: Math.round(num(raw.offsetXMm, -2000, 2000, def.offsetXMm) * 100) / 100,
+    offsetYMm: Math.round(num(raw.offsetYMm, -2000, 2000, def.offsetYMm) * 100) / 100,
+    scaleXPercent: Math.round(num(raw.scaleXPercent, 5, 500, def.scaleXPercent) * 100) / 100,
+    scaleYPercent: Math.round(num(raw.scaleYPercent, 5, 500, def.scaleYPercent) * 100) / 100,
+    lockAspect: typeof raw.lockAspect === 'boolean' ? raw.lockAspect : def.lockAspect,
+    rotationDeg: Math.round(rot * 100) / 100,
+  };
+}
+
+export interface LithoArtworkOnFormGeometry {
+  artWidthMm: number;
+  artHeightMm: number;
+  centerXMm: number;
+  centerYMm: number;
+  leftMm: number;
+  topMm: number;
+  bboxWidthMm: number;
+  bboxHeightMm: number;
+  bboxLeftMm: number;
+  bboxTopMm: number;
+  rotationDeg: number;
+}
+
+export function computeLithoArtworkOnFormMm(
+  formWidthMm: number,
+  formHeightMm: number,
+  docWidthMm: number,
+  docHeightMm: number,
+  placement?: Partial<LithoFormPlacement> | null
+): LithoArtworkOnFormGeometry {
+  const norm = normalizeLithoFormPlacement(placement);
+  const artWidthMm = Math.max(1, docWidthMm * (norm.scaleXPercent / 100));
+  const artHeightMm = Math.max(1, docHeightMm * (norm.scaleYPercent / 100));
+  const rad = (norm.rotationDeg * Math.PI) / 180;
+  const absCos = Math.abs(Math.cos(rad));
+  const absSin = Math.abs(Math.sin(rad));
+  const bboxWidthMm = artWidthMm * absCos + artHeightMm * absSin;
+  const bboxHeightMm = artWidthMm * absSin + artHeightMm * absCos;
+  const centerXMm = formWidthMm / 2 + norm.offsetXMm;
+  const centerYMm = formHeightMm / 2 + norm.offsetYMm;
+  return {
+    artWidthMm,
+    artHeightMm,
+    centerXMm,
+    centerYMm,
+    leftMm: centerXMm - artWidthMm / 2,
+    topMm: centerYMm - artHeightMm / 2,
+    bboxWidthMm,
+    bboxHeightMm,
+    bboxLeftMm: centerXMm - bboxWidthMm / 2,
+    bboxTopMm: centerYMm - bboxHeightMm / 2,
+    rotationDeg: norm.rotationDeg,
+  };
+}
+
+export function computeFitPlacementOnForm(
+  formWidthMm: number,
+  formHeightMm: number,
+  docWidthMm: number,
+  docHeightMm: number,
+  mode: 'fit' | 'fill' | 'actual',
+  currentPlacement?: Partial<LithoFormPlacement> | null,
+  marginMm = 8
+): LithoFormPlacement {
+  const norm = normalizeLithoFormPlacement(currentPlacement);
+  if (mode === 'actual') {
+    return {
+      ...norm,
+      offsetXMm: 0,
+      offsetYMm: 0,
+      scaleXPercent: 100,
+      scaleYPercent: 100,
+    };
+  }
+  const rad = (norm.rotationDeg * Math.PI) / 180;
+  const absCos = Math.abs(Math.cos(rad));
+  const absSin = Math.abs(Math.sin(rad));
+  const rotW = Math.max(1, docWidthMm * absCos + docHeightMm * absSin);
+  const rotH = Math.max(1, docWidthMm * absSin + docHeightMm * absCos);
+  const pad = mode === 'fit' ? Math.max(0, marginMm) * 2 : 0;
+  const availW = Math.max(10, formWidthMm - pad);
+  const availH = Math.max(10, formHeightMm - pad);
+  const ratio = mode === 'fit' ? Math.min(availW / rotW, availH / rotH) : Math.max(availW / rotW, availH / rotH);
+  const scale = Math.round(Math.min(500, Math.max(5, ratio * 100)) * 10) / 10;
+  return {
+    ...norm,
+    offsetXMm: 0,
+    offsetYMm: 0,
+    scaleXPercent: scale,
+    scaleYPercent: scale,
+  };
+}
+
+export interface FormMeasurementResult {
+  dxMm: number;
+  dyMm: number;
+  distanceMm: number;
+  angleDeg: number;
+}
+
+export function computeFormMeasurement(
+  x1Mm: number,
+  y1Mm: number,
+  x2Mm: number,
+  y2Mm: number
+): FormMeasurementResult {
+  const dxMm = Math.round((x2Mm - x1Mm) * 100) / 100;
+  const dyMm = Math.round((y2Mm - y1Mm) * 100) / 100;
+  const distanceMm = Math.round(Math.hypot(dxMm, dyMm) * 100) / 100;
+  // Angle in standard screen coordinates where 0° = right, 90° = down, reported smoothly in [-180, 180]
+  const angleDeg = Math.round(((Math.atan2(dyMm, dxMm) * 180) / Math.PI) * 10) / 10;
+  return { dxMm, dyMm, distanceMm, angleDeg };
+}
+
+export function formatFormLength(mm: number, unit: MeasurementUnit = 'mm'): string {
+  if (unit === 'cm') return `${(mm / 10).toFixed(2)} cm`;
+  if (unit === 'inch') return `${(mm / 25.4).toFixed(2)} in`;
+  return `${mm.toFixed(1)} mm`;
+}
 
 export interface ResolvedLithoPlateSize {
   plateSizeId: string;
@@ -323,6 +586,7 @@ export function resolveLithoPlateSizeMm(
     | 'includeRegistrationMarks'
     | 'includeColorBar'
     | 'includeSlug'
+    | 'formPlacement'
   >,
   pageWidthMm: number,
   pageHeightMm: number,
@@ -337,11 +601,18 @@ export function resolveLithoPlateSizeMm(
   const id = exportSettings.plateSizeId || 'fit-document';
 
   if (id === 'fit-document') {
+    const geom = computeLithoArtworkOnFormMm(
+      pageWidthMm,
+      pageHeightMm,
+      pageWidthMm,
+      pageHeightMm,
+      exportSettings.formPlacement
+    );
     return {
       plateSizeId: 'fit-document',
       isFitDocument: true,
-      widthMm: Math.round((pageWidthMm + markPadMm * 2) * 100) / 100,
-      heightMm: Math.round((pageHeightMm + markPadMm * 2) * 100) / 100,
+      widthMm: Math.round((geom.bboxWidthMm + markPadMm * 2) * 100) / 100,
+      heightMm: Math.round((geom.bboxHeightMm + markPadMm * 2) * 100) / 100,
       markPadMm,
     };
   }
@@ -350,11 +621,11 @@ export function resolveLithoPlateSizeMm(
   let rawW =
     id === 'custom'
       ? Number(exportSettings.plateWidthMm)
-      : Number(exportSettings.plateWidthMm || preset?.widthMm || 0);
+      : Number((preset && preset.widthMm > 0 ? preset.widthMm : exportSettings.plateWidthMm) || 0);
   let rawH =
     id === 'custom'
       ? Number(exportSettings.plateHeightMm)
-      : Number(exportSettings.plateHeightMm || preset?.heightMm || 0);
+      : Number((preset && preset.heightMm > 0 ? preset.heightMm : exportSettings.plateHeightMm) || 0);
 
   if (!Number.isFinite(rawW) || rawW < 20) rawW = preset?.widthMm || pageWidthMm + markPadMm * 2;
   if (!Number.isFinite(rawH) || rawH < 20) rawH = preset?.heightMm || pageHeightMm + markPadMm * 2;

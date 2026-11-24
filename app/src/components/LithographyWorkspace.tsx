@@ -24,14 +24,28 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
+  RotateCw,
   ChevronDown,
   ChevronUp,
+  Move,
+  Ruler,
+  Hand,
+  Maximize2,
+  AlignCenterHorizontal,
+  Lock,
+  Unlock,
+  X,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import {
   BUILT_IN_LITHO_PLATE_SIZES,
   OFFSET_ICC_PROFILES,
   buildSeparationBuffersFromRgba,
+  computeFitPlacementOnForm,
+  computeFormMeasurement,
+  computeLithoArtworkOnFormMm,
+  formatFormLength,
+  normalizeLithoFormPlacement,
   renderSeparationPreviewRgba,
   resolveLithoPlateSizeMm,
   type SeparationBuffers,
@@ -48,7 +62,17 @@ import type {
   LithoRenderingIntent,
 } from '@shared/models';
 
-type RightTabId = 'preflight' | 'color' | 'export';
+type RightTabId = 'preflight' | 'form' | 'color' | 'export';
+type FormToolMode = 'transform' | 'pan' | 'measure';
+type ResizeHandleId = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+
+interface PinnedMeasurement {
+  id: string;
+  x1Mm: number;
+  y1Mm: number;
+  x2Mm: number;
+  y2Mm: number;
+}
 
 interface HoverCoverage {
   c: number;
@@ -98,6 +122,8 @@ export const LithographyWorkspace: React.FC = () => {
     updateLithoColorSettings,
     setLithoSpotHandling,
     updateLithoExportSettings,
+    updateLithoFormPlacement,
+    resetLithoFormPlacement,
     setLithoTacThreshold,
     uploadCustomIccProfile,
     runPreflightForJob,
@@ -124,6 +150,7 @@ export const LithographyWorkspace: React.FC = () => {
   const iccInputRef = useRef<HTMLInputElement>(null);
   const hotFolderFileInputRef = useRef<HTMLInputElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
+  const plateFrameRef = useRef<HTMLDivElement>(null);
 
   const [rightTab, setRightTab] = useState<RightTabId>('preflight');
   const [presetNameInput, setPresetNameInput] = useState('');
@@ -139,6 +166,41 @@ export const LithographyWorkspace: React.FC = () => {
   const [monochromeSinglePlate, setMonochromeSinglePlate] = useState(false);
   const [highlightTacExceed, setHighlightTacExceed] = useState(false);
   const [showPressMarks, setShowPressMarks] = useState(true);
+  const [showFormRulers, setShowFormRulers] = useState(true);
+
+  // Form interaction tool, drag/resize/measure states
+  const [formTool, setFormTool] = useState<FormToolMode>('transform');
+  const [pinnedMeasurements, setPinnedMeasurements] = useState<PinnedMeasurement[]>([]);
+  const [activeMeasure, setActiveMeasure] = useState<{
+    x1Mm: number;
+    y1Mm: number;
+    x2Mm: number;
+    y2Mm: number;
+  } | null>(null);
+  const [formCursorMm, setFormCursorMm] = useState<{ xMm: number; yMm: number } | null>(null);
+  const [snapGuide, setSnapGuide] = useState<{ cx: boolean; cy: boolean }>({ cx: false, cy: false });
+  const [isFormTransforming, setIsFormTransforming] = useState(false);
+
+  const transformDragRef = useRef<{
+    kind: 'move' | 'resize';
+    handle?: ResizeHandleId;
+    startClientX: number;
+    startClientY: number;
+    pxPerMm: number;
+    docW: number;
+    docH: number;
+    startOffsetX: number;
+    startOffsetY: number;
+    startScaleX: number;
+    startScaleY: number;
+    rotationDeg: number;
+    lockAspect: boolean;
+  } | null>(null);
+
+  const measureDragRef = useRef<{
+    x1Mm: number;
+    y1Mm: number;
+  } | null>(null);
 
   // Viewport Zoom / Pan / Hover Coverage
   const [zoom, setZoom] = useState(1);
@@ -282,29 +344,45 @@ export const LithographyWorkspace: React.FC = () => {
 
   const handleCanvasPointerMove = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
-      if (panDragRef.current) {
-        const dx = e.clientX - panDragRef.current.startX;
-        const dy = e.clientY - panDragRef.current.startY;
-        setPan({ x: panDragRef.current.origX + dx, y: panDragRef.current.origY + dy });
+      if (panDragRef.current || transformDragRef.current || measureDragRef.current) {
         return;
       }
       const canvas = previewCanvasRef.current;
       if (!canvas || !separationBuffers) return;
       const rect = canvas.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
+
+      // Map screen coordinates back into unrotated artwork coordinates
+      const formRotDeg = normalizeLithoFormPlacement(lithoExportSettings.formPlacement).rotationDeg;
+      let uFrac = (e.clientX - rect.left) / rect.width;
+      let vFrac = (e.clientY - rect.top) / rect.height;
+      if (Math.abs(formRotDeg) > 0.05) {
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const dx = e.clientX - cx;
+        const dy = e.clientY - cy;
+        const rad = (formRotDeg * Math.PI) / 180;
+        const cosR = Math.cos(rad);
+        const sinR = Math.sin(rad);
+        const lx = dx * cosR + dy * sinR;
+        const ly = -dx * sinR + dy * cosR;
+        const docW = Math.max(20, activePageInfo?.widthMm ?? 210);
+        const docH = Math.max(20, activePageInfo?.heightMm ?? 297);
+        const absCos = Math.abs(cosR);
+        const absSin = Math.abs(sinR);
+        const unrotW = rect.width / Math.max(0.1, absCos + (docH / docW) * absSin);
+        const unrotH = rect.height / Math.max(0.1, (docW / docH) * absSin + absCos);
+        uFrac = lx / Math.max(1, unrotW) + 0.5;
+        vFrac = ly / Math.max(1, unrotH) + 0.5;
+      }
+
       const px = Math.max(
         0,
-        Math.min(
-          separationBuffers.width - 1,
-          Math.floor(((e.clientX - rect.left) / rect.width) * separationBuffers.width)
-        )
+        Math.min(separationBuffers.width - 1, Math.floor(uFrac * separationBuffers.width))
       );
       const py = Math.max(
         0,
-        Math.min(
-          separationBuffers.height - 1,
-          Math.floor(((e.clientY - rect.top) / rect.height) * separationBuffers.height)
-        )
+        Math.min(separationBuffers.height - 1, Math.floor(vFrac * separationBuffers.height))
       );
       const idx = py * separationBuffers.width + px;
       const spotVals: Record<string, number> = {};
@@ -324,7 +402,7 @@ export const LithographyWorkspace: React.FC = () => {
         yMm: Math.round(((py / Math.max(1, separationBuffers.height)) * pageH) * 10) / 10,
       });
     },
-    [separationBuffers, activePageInfo]
+    [separationBuffers, activePageInfo, lithoExportSettings.formPlacement]
   );
 
   const keptSpots = useMemo(
@@ -342,11 +420,270 @@ export const LithographyWorkspace: React.FC = () => {
     enabledK &&
     keptSpots.every((sp) => enabledSpots[sp.name] ?? true);
 
+  const formPlacement = useMemo(
+    () => normalizeLithoFormPlacement(lithoExportSettings.formPlacement),
+    [lithoExportSettings.formPlacement]
+  );
+
   const resolvedPlate = useMemo(() => {
     const docW = activePageInfo?.widthMm ?? 210;
     const docH = activePageInfo?.heightMm ?? 297;
     return resolveLithoPlateSizeMm(lithoExportSettings, docW, docH, lithoSavedPlateSizes);
   }, [lithoExportSettings, activePageInfo, lithoSavedPlateSizes]);
+
+  const docWidthMm = Math.max(20, activePageInfo?.widthMm ?? 210);
+  const docHeightMm = Math.max(20, activePageInfo?.heightMm ?? 297);
+
+  const artworkOnForm = useMemo(
+    () =>
+      computeLithoArtworkOnFormMm(
+        resolvedPlate.widthMm,
+        resolvedPlate.heightMm,
+        docWidthMm,
+        docHeightMm,
+        formPlacement
+      ),
+    [resolvedPlate.widthMm, resolvedPlate.heightMm, docWidthMm, docHeightMm, formPlacement]
+  );
+
+  const basePxPerMm = useMemo(
+    () => Math.min(480 / Math.max(20, resolvedPlate.widthMm), 410 / Math.max(20, resolvedPlate.heightMm)),
+    [resolvedPlate.widthMm, resolvedPlate.heightMm]
+  );
+
+  const paperPresets = useMemo(
+    () => BUILT_IN_LITHO_PLATE_SIZES.filter((p) => p.category === 'paper'),
+    []
+  );
+  const pressPlatePresets = useMemo(
+    () => BUILT_IN_LITHO_PLATE_SIZES.filter((p) => p.category === 'plate'),
+    []
+  );
+
+  const selectPlatePresetById = useCallback(
+    (id: string) => {
+      const matched = [...BUILT_IN_LITHO_PLATE_SIZES, ...lithoSavedPlateSizes].find(
+        (p) => p.id === id
+      );
+      updateLithoExportSettings({
+        plateSizeId: id,
+        ...(matched && matched.widthMm > 0
+          ? { plateWidthMm: matched.widthMm, plateHeightMm: matched.heightMm }
+          : {}),
+      });
+    },
+    [lithoSavedPlateSizes, updateLithoExportSettings]
+  );
+
+  const getEffectivePxPerMm = useCallback(() => {
+    const rect = plateFrameRef.current?.getBoundingClientRect();
+    if (rect && rect.width > 8 && resolvedPlate.widthMm > 0) {
+      return rect.width / resolvedPlate.widthMm;
+    }
+    return basePxPerMm * zoom;
+  }, [basePxPerMm, zoom, resolvedPlate.widthMm]);
+
+  const clientToFormMm = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = plateFrameRef.current?.getBoundingClientRect();
+      const pxPerMm = getEffectivePxPerMm();
+      const rawX = rect && rect.width > 0 ? (clientX - rect.left) / pxPerMm : clientX / pxPerMm;
+      const rawY = rect && rect.height > 0 ? (clientY - rect.top) / pxPerMm : clientY / pxPerMm;
+      return {
+        xMm: Math.round(Math.max(0, Math.min(resolvedPlate.widthMm, rawX)) * 100) / 100,
+        yMm: Math.round(Math.max(0, Math.min(resolvedPlate.heightMm, rawY)) * 100) / 100,
+      };
+    },
+    [getEffectivePxPerMm, resolvedPlate.widthMm, resolvedPlate.heightMm]
+  );
+
+  const alignArtworkOnForm = useCallback(
+    (
+      target:
+        | 'center'
+        | 'left'
+        | 'right'
+        | 'top'
+        | 'bottom'
+        | 'top-left'
+        | 'top-right'
+        | 'bottom-left'
+        | 'bottom-right'
+    ) => {
+      const margin = showPressMarks ? 6 : 0;
+      const halfBboxW = artworkOnForm.bboxWidthMm / 2;
+      const halfBboxH = artworkOnForm.bboxHeightMm / 2;
+      const halfFormW = resolvedPlate.widthMm / 2;
+      const halfFormH = resolvedPlate.heightMm / 2;
+
+      let nextX = formPlacement.offsetXMm;
+      let nextY = formPlacement.offsetYMm;
+
+      if (target === 'center') {
+        nextX = 0;
+        nextY = 0;
+      }
+      if (target.includes('left')) nextX = -(halfFormW - halfBboxW - margin);
+      if (target.includes('right')) nextX = halfFormW - halfBboxW - margin;
+      if (target.includes('top')) nextY = -(halfFormH - halfBboxH - margin);
+      if (target.includes('bottom')) nextY = halfFormH - halfBboxH - margin;
+
+      updateLithoFormPlacement({ offsetXMm: nextX, offsetYMm: nextY });
+    },
+    [
+      artworkOnForm.bboxWidthMm,
+      artworkOnForm.bboxHeightMm,
+      resolvedPlate.widthMm,
+      resolvedPlate.heightMm,
+      formPlacement.offsetXMm,
+      formPlacement.offsetYMm,
+      showPressMarks,
+      updateLithoFormPlacement,
+    ]
+  );
+
+  const handleViewportPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (panDragRef.current) {
+        const dx = e.clientX - panDragRef.current.startX;
+        const dy = e.clientY - panDragRef.current.startY;
+        setPan({ x: panDragRef.current.origX + dx, y: panDragRef.current.origY + dy });
+        return;
+      }
+
+      if (transformDragRef.current) {
+        const tr = transformDragRef.current;
+        const dxMm = (e.clientX - tr.startClientX) / tr.pxPerMm;
+        const dyMm = (e.clientY - tr.startClientY) / tr.pxPerMm;
+
+        if (tr.kind === 'move') {
+          let nextX = tr.startOffsetX + dxMm;
+          let nextY = tr.startOffsetY + dyMm;
+          let snapX = false;
+          let snapY = false;
+          if (!e.altKey) {
+            if (Math.abs(nextX) < 1.8) {
+              nextX = 0;
+              snapX = true;
+            }
+            if (Math.abs(nextY) < 1.8) {
+              nextY = 0;
+              snapY = true;
+            }
+          }
+          setSnapGuide({ cx: snapX, cy: snapY });
+          updateLithoFormPlacement({ offsetXMm: nextX, offsetYMm: nextY });
+          return;
+        }
+
+        if (tr.kind === 'resize' && tr.handle) {
+          const rad = (tr.rotationDeg * Math.PI) / 180;
+          const cosT = Math.cos(rad);
+          const sinT = Math.sin(rad);
+          const du = dxMm * cosT + dyMm * sinT;
+          const dv = -dxMm * sinT + dyMm * cosT;
+
+          const sx = tr.handle.includes('e') ? 1 : tr.handle.includes('w') ? -1 : 0;
+          const sy = tr.handle.includes('s') ? 1 : tr.handle.includes('n') ? -1 : 0;
+
+          const startArtW = tr.docW * (tr.startScaleX / 100);
+          const startArtH = tr.docH * (tr.startScaleY / 100);
+
+          let nextW = sx !== 0 ? Math.max(5, startArtW + sx * du) : startArtW;
+          let nextH = sy !== 0 ? Math.max(5, startArtH + sy * dv) : startArtH;
+
+          let nextScaleX = (nextW / Math.max(1, tr.docW)) * 100;
+          let nextScaleY = (nextH / Math.max(1, tr.docH)) * 100;
+
+          const keepAspect = tr.lockAspect || e.shiftKey;
+          if (keepAspect) {
+            const aspectScaleRatio = tr.startScaleY / Math.max(1, tr.startScaleX);
+            if (sx !== 0 && sy !== 0) {
+              const rx = Math.abs(du) / Math.max(1, startArtW);
+              const ry = Math.abs(dv) / Math.max(1, startArtH);
+              if (rx >= ry) {
+                nextScaleY = nextScaleX * aspectScaleRatio;
+              } else {
+                nextScaleX = nextScaleY / Math.max(0.05, aspectScaleRatio);
+              }
+            } else if (sx !== 0) {
+              nextScaleY = nextScaleX * aspectScaleRatio;
+            } else if (sy !== 0) {
+              nextScaleX = nextScaleY / Math.max(0.05, aspectScaleRatio);
+            }
+          }
+
+          nextScaleX = Math.min(500, Math.max(5, nextScaleX));
+          nextScaleY = Math.min(500, Math.max(5, nextScaleY));
+          nextW = tr.docW * (nextScaleX / 100);
+          nextH = tr.docH * (nextScaleY / 100);
+
+          const shiftU = sx !== 0 ? (sx * (nextW - startArtW)) / 2 : 0;
+          const shiftV = sy !== 0 ? (sy * (nextH - startArtH)) / 2 : 0;
+          const shiftX = shiftU * cosT - shiftV * sinT;
+          const shiftY = shiftU * sinT + shiftV * cosT;
+
+          updateLithoFormPlacement({
+            scaleXPercent: nextScaleX,
+            scaleYPercent: nextScaleY,
+            offsetXMm: tr.startOffsetX + shiftX,
+            offsetYMm: tr.startOffsetY + shiftY,
+          });
+        }
+        return;
+      }
+
+      if (measureDragRef.current) {
+        const pt = clientToFormMm(e.clientX, e.clientY);
+        let x2 = pt.xMm;
+        let y2 = pt.yMm;
+        if (e.shiftKey) {
+          const dx = x2 - measureDragRef.current.x1Mm;
+          const dy = y2 - measureDragRef.current.y1Mm;
+          const dist = Math.hypot(dx, dy);
+          const snappedAngle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+          x2 = Math.round((measureDragRef.current.x1Mm + dist * Math.cos(snappedAngle)) * 100) / 100;
+          y2 = Math.round((measureDragRef.current.y1Mm + dist * Math.sin(snappedAngle)) * 100) / 100;
+        }
+        setActiveMeasure({
+          x1Mm: measureDragRef.current.x1Mm,
+          y1Mm: measureDragRef.current.y1Mm,
+          x2Mm: x2,
+          y2Mm: y2,
+        });
+      }
+    },
+    [clientToFormMm, updateLithoFormPlacement]
+  );
+
+  const handleViewportPointerUp = useCallback(() => {
+    panDragRef.current = null;
+    if (transformDragRef.current) {
+      transformDragRef.current = null;
+      setSnapGuide({ cx: false, cy: false });
+      setIsFormTransforming(false);
+    }
+    if (measureDragRef.current && activeMeasure) {
+      const m = computeFormMeasurement(
+        activeMeasure.x1Mm,
+        activeMeasure.y1Mm,
+        activeMeasure.x2Mm,
+        activeMeasure.y2Mm
+      );
+      if (m.distanceMm >= 0.3) {
+        setPinnedMeasurements((prev) => [
+          ...prev.slice(-9),
+          {
+            id: `meas-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+            ...activeMeasure,
+          },
+        ]);
+      }
+      measureDragRef.current = null;
+    } else {
+      measureDragRef.current = null;
+    }
+  }, [activeMeasure]);
 
   const activePlatePreviewLabel = useMemo(() => {
     const activeSpots = keptSpots.filter((sp) => enabledSpots[sp.name] ?? true);
@@ -360,6 +697,15 @@ export const LithographyWorkspace: React.FC = () => {
   }, [enabledC, enabledM, enabledY, enabledK, keptSpots, enabledSpots]);
 
   const shamsiToday = useMemo(() => formatShamsiDate(new Date()), []);
+
+  const latestMeasurementSummary = useMemo(() => {
+    const src = activeMeasure ?? pinnedMeasurements[pinnedMeasurements.length - 1] ?? null;
+    if (!src) return null;
+    return {
+      ...src,
+      ...computeFormMeasurement(src.x1Mm, src.y1Mm, src.x2Mm, src.y2Mm),
+    };
+  }, [activeMeasure, pinnedMeasurements]);
 
   return (
     <div
@@ -961,6 +1307,161 @@ export const LithographyWorkspace: React.FC = () => {
             </div>
           </div>
 
+          {/* Form Layout & Measurement Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/90 px-3 py-1 dark:border-slate-800 dark:bg-slate-900/70">
+            <div className="flex flex-wrap items-center gap-1">
+              {(
+                [
+                  {
+                    id: 'transform',
+                    icon: Move,
+                    labelFa: 'جابجایی و اندازه فرم',
+                    labelEn: 'Move & Resize',
+                  },
+                  {
+                    id: 'pan',
+                    icon: Hand,
+                    labelFa: 'جا‌به‌جایی نما',
+                    labelEn: 'Pan View',
+                  },
+                  {
+                    id: 'measure',
+                    icon: Ruler,
+                    labelFa: 'اندازه‌گیری روی فرم',
+                    labelEn: 'Measure',
+                  },
+                ] as const
+              ).map((t) => {
+                const Icon = t.icon;
+                const active = formTool === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    data-litho-form-tool={t.id}
+                    onClick={() => setFormTool(t.id)}
+                    className={`flex h-6.5 items-center gap-1 rounded border px-2 text-[10.5px] font-bold transition-colors cursor-pointer ${
+                      active
+                        ? 'border-amber-500 bg-amber-500 text-slate-950 shadow-2xs dark:border-amber-400 dark:bg-amber-400'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
+                    }`}
+                  >
+                    <Icon className="h-3 w-3" />
+                    <span>{isFa ? t.labelFa : t.labelEn}</span>
+                  </button>
+                );
+              })}
+
+              <label className="flex h-6.5 items-center gap-1 rounded border border-slate-200 bg-white px-2 text-[10.5px] font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  data-litho-toggle-rulers
+                  checked={showFormRulers}
+                  onChange={(e) => setShowFormRulers(e.target.checked)}
+                  className="accent-amber-600"
+                />
+                <span>{isFa ? 'خط‌کش فرم' : 'Rulers'}</span>
+              </label>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              <select
+                data-litho-quick-plate-size
+                aria-label={isFa ? 'اندازه کاغذ یا پلیت فرم' : 'Form Paper or Plate Size'}
+                value={lithoExportSettings.plateSizeId || 'fit-document'}
+                onChange={(e) => selectPlatePresetById(e.target.value)}
+                className="h-6.5 max-w-[215px] rounded border border-slate-300 bg-white px-1.5 text-[10.5px] font-semibold text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              >
+                <option value="fit-document">
+                  {isFa ? 'هم‌اندازه سند (خودکار)' : 'Auto Fit Document'}
+                </option>
+                <optgroup label={isFa ? 'کاغذهای استاندارد (A / B / SRA)' : 'Standard Paper Sizes'}>
+                  {paperPresets.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {isFa ? p.nameFa : p.nameEn}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label={isFa ? 'پلیت‌های ماشین چاپ افست' : 'Offset Press Plates'}>
+                  {pressPlatePresets.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {isFa ? p.nameFa : p.nameEn}
+                    </option>
+                  ))}
+                </optgroup>
+                {lithoSavedPlateSizes.length > 0 && (
+                  <optgroup label={isFa ? 'اندازه‌های ذخیره‌شده شما' : 'Saved Custom Sizes'}>
+                    {lithoSavedPlateSizes.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {isFa ? p.nameFa : p.nameEn}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <option value="custom">
+                  {isFa ? 'اندازه سفارشی (mm)...' : 'Custom Size (mm)...'}
+                </option>
+              </select>
+
+              <button
+                type="button"
+                data-litho-align="center"
+                title={isFa ? 'مرکزچین در فرم' : 'Center on Form'}
+                onClick={() => alignArtworkOnForm('center')}
+                className="flex h-6.5 items-center gap-1 rounded border border-slate-200 bg-white px-1.5 text-[10.5px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+              >
+                <AlignCenterHorizontal className="h-3 w-3" />
+                <span>{isFa ? 'مرکز' : 'Center'}</span>
+              </button>
+              <button
+                type="button"
+                data-litho-fit-form
+                title={isFa ? 'متناسب‌سازی در فرم' : 'Fit Artwork to Form'}
+                onClick={() =>
+                  updateLithoFormPlacement(
+                    computeFitPlacementOnForm(
+                      resolvedPlate.widthMm,
+                      resolvedPlate.heightMm,
+                      docWidthMm,
+                      docHeightMm,
+                      'fit',
+                      formPlacement,
+                      showPressMarks ? 8 : 2
+                    )
+                  )
+                }
+                className="flex h-6.5 items-center gap-1 rounded border border-slate-200 bg-white px-1.5 text-[10.5px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+              >
+                <Maximize2 className="h-3 w-3" />
+                <span>{isFa ? 'فیت فرم' : 'Fit'}</span>
+              </button>
+              <button
+                type="button"
+                data-litho-rotate-90
+                title={isFa ? 'چرخش ۹۰ درجه ساعتگرد' : 'Rotate 90° CW'}
+                onClick={() =>
+                  updateLithoFormPlacement((prev) => ({
+                    ...prev,
+                    rotationDeg: prev.rotationDeg + 90,
+                  }))
+                }
+                className="flex h-6.5 items-center gap-1 rounded border border-slate-200 bg-white px-1.5 text-[10.5px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+              >
+                <RotateCw className="h-3 w-3" />
+                <span>۹۰°</span>
+              </button>
+              <button
+                type="button"
+                data-litho-reset-placement
+                title={isFa ? 'بازنشانی مکان و اندازه' : 'Reset Transform'}
+                onClick={() => resetLithoFormPlacement()}
+                className="flex h-6.5 items-center gap-1 rounded border border-slate-200 bg-white px-1.5 text-[10.5px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+              >
+                <span>{isFa ? '۱۰۰٪' : '100%'}</span>
+              </button>
+            </div>
+          </div>
+
           {/* Canvas Area */}
           <div
             onWheel={(e) => {
@@ -969,6 +1470,9 @@ export const LithographyWorkspace: React.FC = () => {
                 setZoom((z) => Math.max(0.3, Math.min(5, Math.round(z * factor * 100) / 100)));
               }
             }}
+            onPointerMove={handleViewportPointerMove}
+            onPointerUp={handleViewportPointerUp}
+            onPointerCancel={handleViewportPointerUp}
             className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4 select-none"
           >
             {lithoBusy && (
@@ -1030,8 +1534,6 @@ export const LithographyWorkspace: React.FC = () => {
                     : 'Canvas raster preview unavailable; structural inspection & export ready.'}
               </div>
             ) : (() => {
-              const docW = Math.max(20, activePageInfo?.widthMm ?? 210);
-              const docH = Math.max(20, activePageInfo?.heightMm ?? 297);
               const trim = activePageInfo?.trimBoxMm ?? activePageInfo?.mediaBoxMm;
               const media = activePageInfo?.mediaBoxMm;
               const trimLeftPct = trim && media && media.width > 0 ? Math.max(0, Math.min(20, ((trim.x - media.x) / media.width) * 100)) : 0;
@@ -1039,46 +1541,150 @@ export const LithographyWorkspace: React.FC = () => {
               const trimTopPct = trim && media && media.height > 0 ? Math.max(0, Math.min(20, (((media.y + media.height) - (trim.y + trim.height)) / media.height) * 100)) : 0;
               const trimBottomPct = trim && media && media.height > 0 ? Math.max(0, Math.min(20, ((trim.y - media.y) / media.height) * 100)) : 0;
 
-              const extraXRatio = resolvedPlate.isFitDocument ? 0.08 : Math.max(0.06, Math.min(0.65, (resolvedPlate.widthMm - docW) / docW / 2));
-              const extraYRatio = resolvedPlate.isFitDocument ? 0.09 : Math.max(0.07, Math.min(0.65, (resolvedPlate.heightMm - docH) / docH / 2));
-              const padX = showPressMarks ? Math.round(Math.max(24, Math.min(84, extraXRatio * 220))) : 8;
-              const padY = showPressMarks ? Math.round(Math.max(28, Math.min(84, extraYRatio * 220))) : 8;
+              const formWpx = Math.max(90, Math.round(resolvedPlate.widthMm * basePxPerMm * 100) / 100);
+              const formHpx = Math.max(90, Math.round(resolvedPlate.heightMm * basePxPerMm * 100) / 100);
+              const artLeftPx = artworkOnForm.leftMm * basePxPerMm;
+              const artTopPx = artworkOnForm.topMm * basePxPerMm;
+              const artWpx = artworkOnForm.artWidthMm * basePxPerMm;
+              const artHpx = artworkOnForm.artHeightMm * basePxPerMm;
+
+              const tickStepMm = Math.max(resolvedPlate.widthMm, resolvedPlate.heightMm) > 600 ? 100 : 50;
+              const xTicks: number[] = [];
+              for (let x = 0; x <= resolvedPlate.widthMm; x += tickStepMm) xTicks.push(x);
+              const yTicks: number[] = [];
+              for (let y = 0; y <= resolvedPlate.heightMm; y += tickStepMm) yTicks.push(y);
+
+              const handles: Array<{ id: ResizeHandleId; cls: string; cursor: string }> = [
+                { id: 'nw', cls: '-top-1.5 -left-1.5', cursor: 'nwse-resize' },
+                { id: 'n', cls: '-top-1.5 left-1/2 -translate-x-1/2', cursor: 'ns-resize' },
+                { id: 'ne', cls: '-top-1.5 -right-1.5', cursor: 'nesw-resize' },
+                { id: 'e', cls: 'top-1/2 -right-1.5 -translate-y-1/2', cursor: 'ew-resize' },
+                { id: 'se', cls: '-bottom-1.5 -right-1.5', cursor: 'nwse-resize' },
+                { id: 's', cls: '-bottom-1.5 left-1/2 -translate-x-1/2', cursor: 'ns-resize' },
+                { id: 'sw', cls: '-bottom-1.5 -left-1.5', cursor: 'nesw-resize' },
+                { id: 'w', cls: 'top-1/2 -left-1.5 -translate-y-1/2', cursor: 'ew-resize' },
+              ];
+
+              const startResizeHandle = (handle: ResizeHandleId, e: React.PointerEvent) => {
+                e.stopPropagation();
+                e.preventDefault();
+                transformDragRef.current = {
+                  kind: 'resize',
+                  handle,
+                  startClientX: e.clientX,
+                  startClientY: e.clientY,
+                  pxPerMm: getEffectivePxPerMm(),
+                  docW: docWidthMm,
+                  docH: docHeightMm,
+                  startOffsetX: formPlacement.offsetXMm,
+                  startOffsetY: formPlacement.offsetYMm,
+                  startScaleX: formPlacement.scaleXPercent,
+                  startScaleY: formPlacement.scaleYPercent,
+                  rotationDeg: formPlacement.rotationDeg,
+                  lockAspect: formPlacement.lockAspect,
+                };
+                setIsFormTransforming(true);
+              };
 
               return (
                 <div
                   style={{
                     transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
                     transformOrigin: 'center center',
-                    paddingLeft: `${padX}px`,
-                    paddingRight: `${padX}px`,
-                    paddingTop: `${padY}px`,
-                    paddingBottom: `${padY + (showPressMarks && !resolvedPlate.isFitDocument ? 10 : 0)}px`,
+                    width: `${formWpx}px`,
+                    height: `${formHpx}px`,
                   }}
+                  ref={plateFrameRef}
                   data-litho-plate-frame
-                  className="relative shadow-2xl border border-slate-400 bg-slate-100/95 dark:border-slate-600 dark:bg-slate-200"
+                  data-form-width-mm={resolvedPlate.widthMm}
+                  data-form-height-mm={resolvedPlate.heightMm}
+                  onPointerDown={(e) => {
+                    if (formTool === 'pan' && e.button === 0) {
+                      panDragRef.current = {
+                        startX: e.clientX,
+                        startY: e.clientY,
+                        origX: pan.x,
+                        origY: pan.y,
+                      };
+                    }
+                  }}
+                  className="relative shrink-0 shadow-2xl border border-slate-400 bg-slate-100/95 dark:border-slate-600 dark:bg-slate-200 overflow-visible"
                 >
-                  {/* Plate dimension tag at top */}
+                  {/* Calibrated Form Edge Rulers (mm) */}
+                  {showFormRulers && (
+                    <div data-litho-form-rulers className="pointer-events-none">
+                      <div className="absolute -top-4.5 left-0 right-0 h-4 border-b border-slate-400 bg-slate-200/90 text-[7.5px] font-mono text-slate-700">
+                        {xTicks.map((xMm) => (
+                          <div
+                            key={xMm}
+                            style={{ left: `${(xMm / resolvedPlate.widthMm) * 100}%` }}
+                            className="absolute bottom-0 flex flex-col items-start"
+                          >
+                            <span className="h-1.5 w-px bg-slate-600" />
+                            <span className="-translate-x-1/2 -translate-y-2.5 px-0.5 leading-none">
+                              {Math.round(xMm)}
+                            </span>
+                          </div>
+                        ))}
+                        {formCursorMm && (
+                          <span
+                            style={{ left: `${(formCursorMm.xMm / resolvedPlate.widthMm) * 100}%` }}
+                            className="absolute bottom-0 h-3 w-0.5 bg-amber-600"
+                          />
+                        )}
+                      </div>
+                      <div className="absolute -left-5 top-0 bottom-0 w-4.5 border-r border-slate-400 bg-slate-200/90 text-[7.5px] font-mono text-slate-700">
+                        {yTicks.map((yMm) => (
+                          <div
+                            key={yMm}
+                            style={{ top: `${(yMm / resolvedPlate.heightMm) * 100}%` }}
+                            className="absolute right-0 flex items-center"
+                          >
+                            <span className="-translate-x-1 text-[7px] leading-none">
+                              {Math.round(yMm)}
+                            </span>
+                            <span className="h-px w-1.5 bg-slate-600" />
+                          </div>
+                        ))}
+                        {formCursorMm && (
+                          <span
+                            style={{ top: `${(formCursorMm.yMm / resolvedPlate.heightMm) * 100}%` }}
+                            className="absolute right-0 h-0.5 w-3 bg-amber-600"
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Center Snap Guides when dragging near form center */}
+                  {snapGuide.cx && (
+                    <div className="pointer-events-none absolute top-0 bottom-0 left-1/2 w-px border-l border-dashed border-amber-500 z-20" />
+                  )}
+                  {snapGuide.cy && (
+                    <div className="pointer-events-none absolute left-0 right-0 top-1/2 h-px border-t border-dashed border-amber-500 z-20" />
+                  )}
+
+                  {/* Plate dimension tag, Color Bar, Registration Marks & Slug */}
                   {showPressMarks && (
                     <div
                       data-litho-press-marks
-                      className="pointer-events-none absolute inset-0"
+                      className="pointer-events-none absolute inset-0 z-10"
                     >
-                      <div className="absolute top-1 left-2 right-2 flex items-center justify-between text-[8.5px] font-mono font-semibold text-slate-600">
+                      <div className="absolute top-1 left-2 right-2 flex items-center justify-between text-[8px] font-mono font-semibold text-slate-600">
                         <span>
                           {resolvedPlate.isFitDocument
                             ? `Sheet: ${Math.round(resolvedPlate.widthMm)}×${Math.round(resolvedPlate.heightMm)} mm`
-                            : `Plate: ${Math.round(resolvedPlate.widthMm)}×${Math.round(resolvedPlate.heightMm)} mm`}
+                            : `Form: ${Math.round(resolvedPlate.widthMm)}×${Math.round(resolvedPlate.heightMm)} mm`}
                         </span>
-                        <span>
+                        <span className="truncate max-w-[60%] text-end">
                           {`${lithoExportSettings.jobNamePrefix || activeJob.fileName} · ${activePlatePreviewLabel} · P${lithoSelectedPageNumber}`}
                         </span>
                       </div>
 
-                      {/* Color Control Bar in Top Margin */}
                       {lithoExportSettings.includeColorBar && (
                         <div
                           data-litho-color-bar
-                          className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-0.5 rounded-[2px] border border-slate-400/70 bg-white px-1 py-0.5 shadow-2xs"
+                          className="absolute top-3.5 left-1/2 -translate-x-1/2 flex items-center gap-0.5 rounded-[2px] border border-slate-400/70 bg-white px-1 py-0.5 shadow-2xs"
                         >
                           {(
                             monochromeSinglePlate
@@ -1087,7 +1693,7 @@ export const LithographyWorkspace: React.FC = () => {
                           ).map((hex, i) => (
                             <span
                               key={i}
-                              className="h-2 w-2.5 border border-black/15"
+                              className="h-1.5 w-2 border border-black/15"
                               style={{ backgroundColor: hex }}
                             />
                           ))}
@@ -1095,26 +1701,25 @@ export const LithographyWorkspace: React.FC = () => {
                             <span
                               key={sp.name}
                               title={sp.name}
-                              className="h-2 w-2.5 border border-black/25"
+                              className="h-1.5 w-2 border border-black/25"
                               style={{ backgroundColor: sp.previewHex }}
                             />
                           ))}
                         </div>
                       )}
 
-                      {/* Registration Bullseyes (Top, Bottom, Left, Right) */}
                       {lithoExportSettings.includeRegistrationMarks && (
                         <>
                           {[
-                            { cls: 'left-1/2 -translate-x-1/2 top-1.5' },
-                            { cls: 'left-1/2 -translate-x-1/2 bottom-1.5' },
-                            { cls: 'left-1.5 top-1/2 -translate-y-1/2' },
-                            { cls: 'right-1.5 top-1/2 -translate-y-1/2' },
+                            { cls: 'left-1/2 -translate-x-1/2 top-1' },
+                            { cls: 'left-1/2 -translate-x-1/2 bottom-1' },
+                            { cls: 'left-1 top-1/2 -translate-y-1/2' },
+                            { cls: 'right-1 top-1/2 -translate-y-1/2' },
                           ].map((pos, idx) => (
                             <svg
                               key={idx}
                               viewBox="0 0 16 16"
-                              className={`absolute h-3.5 w-3.5 text-slate-900 ${pos.cls}`}
+                              className={`absolute h-3 w-3 text-slate-900 ${pos.cls}`}
                             >
                               <circle cx="8" cy="8" r="4.5" fill="none" stroke="currentColor" strokeWidth="1" />
                               <line x1="0" y1="8" x2="16" y2="8" stroke="currentColor" strokeWidth="0.9" />
@@ -1124,14 +1729,13 @@ export const LithographyWorkspace: React.FC = () => {
                         </>
                       )}
 
-                      {/* Slug Line & Gripper indicator at Bottom Margin */}
                       {lithoExportSettings.includeSlug && (
-                        <div className="absolute bottom-1 left-2 right-2 flex items-center justify-between text-[8px] font-mono text-slate-700">
-                          <span>
+                        <div className="absolute bottom-1 left-2 right-2 flex items-center justify-between text-[7.5px] font-mono text-slate-700">
+                          <span className="truncate">
                             {`${lithoColorSettings.iccProfile} · TAC≤${lithoTacThreshold}% · ${shamsiToday}`}
                           </span>
                           {!resolvedPlate.isFitDocument && (
-                            <span className="font-bold text-slate-800">
+                            <span className="font-bold text-slate-800 shrink-0">
                               {isFa ? '▲ لبه پنجه ماشین (Gripper)' : '▲ GRIPPER EDGE'}
                             </span>
                           )}
@@ -1140,39 +1744,77 @@ export const LithographyWorkspace: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Artwork + TrimBox/Crop Marks Wrapper */}
-                  <div className="relative bg-white shadow-sm ring-1 ring-slate-300">
+                  {/* Movable, Resizable & Rotatable Artwork Box Inside Form */}
+                  <div
+                    data-litho-artwork-box
+                    data-art-offset-x={formPlacement.offsetXMm}
+                    data-art-offset-y={formPlacement.offsetYMm}
+                    data-art-width-mm={Math.round(artworkOnForm.artWidthMm * 100) / 100}
+                    data-art-height-mm={Math.round(artworkOnForm.artHeightMm * 100) / 100}
+                    data-art-rotation={formPlacement.rotationDeg}
+                    style={{
+                      left: `${artLeftPx}px`,
+                      top: `${artTopPx}px`,
+                      width: `${artWpx}px`,
+                      height: `${artHpx}px`,
+                      transform: `rotate(${formPlacement.rotationDeg}deg)`,
+                      transformOrigin: 'center center',
+                    }}
+                    onPointerDown={(e) => {
+                      if (e.button !== 0 || formTool !== 'transform') return;
+                      e.stopPropagation();
+                      transformDragRef.current = {
+                        kind: 'move',
+                        startClientX: e.clientX,
+                        startClientY: e.clientY,
+                        pxPerMm: getEffectivePxPerMm(),
+                        docW: docWidthMm,
+                        docH: docHeightMm,
+                        startOffsetX: formPlacement.offsetXMm,
+                        startOffsetY: formPlacement.offsetYMm,
+                        startScaleX: formPlacement.scaleXPercent,
+                        startScaleY: formPlacement.scaleYPercent,
+                        rotationDeg: formPlacement.rotationDeg,
+                        lockAspect: formPlacement.lockAspect,
+                      };
+                      setIsFormTransforming(true);
+                    }}
+                    className={`absolute bg-white shadow-sm ${
+                      formTool === 'transform'
+                        ? 'ring-2 ring-amber-500 cursor-move'
+                        : 'ring-1 ring-slate-300'
+                    }`}
+                  >
                     <canvas
                       ref={previewCanvasRef}
                       data-litho-preview-canvas
-                      onPointerDown={(e) => {
-                        if (e.button === 0) {
-                          panDragRef.current = {
-                            startX: e.clientX,
-                            startY: e.clientY,
-                            origX: pan.x,
-                            origY: pan.y,
-                          };
-                        }
-                      }}
-                      onPointerUp={() => {
-                        panDragRef.current = null;
-                      }}
                       onPointerLeave={() => {
-                        panDragRef.current = null;
                         setHoverCoverage(null);
                       }}
-                      onPointerMove={handleCanvasPointerMove}
-                      className="block max-h-[calc(100vh-270px)] max-w-full cursor-crosshair object-contain"
+                      onPointerMove={(e) => {
+                        handleCanvasPointerMove(e);
+                        setFormCursorMm(clientToFormMm(e.clientX, e.clientY));
+                      }}
+                      className={`block h-full w-full ${
+                        formTool === 'transform'
+                          ? 'cursor-move'
+                          : formTool === 'measure'
+                            ? 'cursor-crosshair'
+                            : 'cursor-grab'
+                      }`}
                     />
+
+                    {/* Live Transform Badge */}
+                    {isFormTransforming && (
+                      <div className="pointer-events-none absolute -top-6 left-1/2 z-30 -translate-x-1/2 whitespace-nowrap rounded bg-slate-900/90 px-1.5 py-0.5 font-mono text-[9px] font-bold text-white shadow">
+                        {`${Math.round(artworkOnForm.artWidthMm * 10) / 10}×${Math.round(artworkOnForm.artHeightMm * 10) / 10} mm · (${Math.round(formPlacement.offsetXMm)}, ${Math.round(formPlacement.offsetYMm)})`}
+                      </div>
+                    )}
 
                     {/* TrimBox, BleedBox & Corner Crop Marks over exact artwork bounds */}
                     {showPressMarks && (
                       <div className="pointer-events-none absolute inset-0">
-                        {/* Outer BleedBox border */}
                         <div className="absolute inset-0 border border-dashed border-pink-500/60" />
-
-                        {/* Inner TrimBox guide */}
                         <div
                           style={{
                             left: `${trimLeftPct}%`,
@@ -1182,36 +1824,141 @@ export const LithographyWorkspace: React.FC = () => {
                           }}
                           className="absolute border border-dashed border-sky-500/80"
                         >
-                          {/* 4-corner L-shaped Crop Marks */}
                           {lithoExportSettings.includeCropMarks && (
                             <>
-                              <span className="absolute -top-3.5 left-0 h-3 w-px bg-slate-900" />
-                              <span className="absolute top-0 -left-3.5 h-px w-3 bg-slate-900" />
-                              <span className="absolute -top-3.5 right-0 h-3 w-px bg-slate-900" />
-                              <span className="absolute top-0 -right-3.5 h-px w-3 bg-slate-900" />
-                              <span className="absolute -bottom-3.5 left-0 h-3 w-px bg-slate-900" />
-                              <span className="absolute bottom-0 -left-3.5 h-px w-3 bg-slate-900" />
-                              <span className="absolute -bottom-3.5 right-0 h-3 w-px bg-slate-900" />
-                              <span className="absolute bottom-0 -right-3.5 h-px w-3 bg-slate-900" />
+                              <span className="absolute -top-3 left-0 h-2.5 w-px bg-slate-900" />
+                              <span className="absolute top-0 -left-3 h-px w-2.5 bg-slate-900" />
+                              <span className="absolute -top-3 right-0 h-2.5 w-px bg-slate-900" />
+                              <span className="absolute top-0 -right-3 h-px w-2.5 bg-slate-900" />
+                              <span className="absolute -bottom-3 left-0 h-2.5 w-px bg-slate-900" />
+                              <span className="absolute bottom-0 -left-3 h-px w-2.5 bg-slate-900" />
+                              <span className="absolute -bottom-3 right-0 h-2.5 w-px bg-slate-900" />
+                              <span className="absolute bottom-0 -right-3 h-px w-2.5 bg-slate-900" />
                             </>
                           )}
                         </div>
                       </div>
                     )}
+
+                    {/* 8 Interactive Resize Handles in Transform Mode */}
+                    {formTool === 'transform' &&
+                      handles.map((h) => (
+                        <button
+                          key={h.id}
+                          type="button"
+                          data-litho-handle={h.id}
+                          aria-label={`Resize ${h.id}`}
+                          onPointerDown={(e) => startResizeHandle(h.id, e)}
+                          style={{ cursor: h.cursor }}
+                          className={`absolute z-30 h-2.5 w-2.5 rounded-[2px] border border-slate-900 bg-amber-400 shadow ${h.cls}`}
+                        />
+                      ))}
+                  </div>
+
+                  {/* Interactive Form Measurement SVG & Pointer Overlay */}
+                  <div
+                    data-litho-measure-overlay
+                    onPointerDown={(e) => {
+                      if (formTool !== 'measure' || e.button !== 0) return;
+                      e.stopPropagation();
+                      const pt = clientToFormMm(e.clientX, e.clientY);
+                      measureDragRef.current = { x1Mm: pt.xMm, y1Mm: pt.yMm };
+                      setActiveMeasure({ x1Mm: pt.xMm, y1Mm: pt.yMm, x2Mm: pt.xMm, y2Mm: pt.yMm });
+                    }}
+                    onPointerMove={(e) => {
+                      setFormCursorMm(clientToFormMm(e.clientX, e.clientY));
+                    }}
+                    onPointerLeave={() => {
+                      setFormCursorMm(null);
+                    }}
+                    className={`absolute inset-0 z-20 ${
+                      formTool === 'measure' ? 'pointer-events-auto cursor-crosshair' : 'pointer-events-none'
+                    }`}
+                  >
+                    <svg
+                      viewBox={`0 0 ${resolvedPlate.widthMm} ${resolvedPlate.heightMm}`}
+                      className="h-full w-full overflow-visible"
+                      preserveAspectRatio="none"
+                    >
+                      {[
+                        ...pinnedMeasurements.map((m) => ({ ...m, isDraft: false })),
+                        ...(activeMeasure ? [{ id: 'draft', ...activeMeasure, isDraft: true }] : []),
+                      ].map((line) => {
+                        const res = computeFormMeasurement(
+                          line.x1Mm,
+                          line.y1Mm,
+                          line.x2Mm,
+                          line.y2Mm
+                        );
+                        const midX = (line.x1Mm + line.x2Mm) / 2;
+                        const midY = (line.y1Mm + line.y2Mm) / 2;
+                        const strokeW = Math.max(0.5, resolvedPlate.widthMm * 0.003);
+                        const fontSize = Math.max(4, resolvedPlate.widthMm * 0.025);
+                        return (
+                          <g key={line.id} data-litho-measurement-item={line.id}>
+                            {Math.abs(res.dxMm) > 1 && Math.abs(res.dyMm) > 1 && (
+                              <polyline
+                                points={`${line.x1Mm},${line.y1Mm} ${line.x2Mm},${line.y1Mm} ${line.x2Mm},${line.y2Mm}`}
+                                fill="none"
+                                stroke={line.isDraft ? '#0284c7' : '#0f766e'}
+                                strokeWidth={strokeW * 0.65}
+                                strokeDasharray={`${strokeW * 2} ${strokeW * 2}`}
+                                opacity={0.75}
+                              />
+                            )}
+                            <line
+                              x1={line.x1Mm}
+                              y1={line.y1Mm}
+                              x2={line.x2Mm}
+                              y2={line.y2Mm}
+                              stroke={line.isDraft ? '#0284c7' : '#e11d48'}
+                              strokeWidth={strokeW}
+                            />
+                            <circle
+                              cx={line.x1Mm}
+                              cy={line.y1Mm}
+                              r={strokeW * 1.6}
+                              fill={line.isDraft ? '#0284c7' : '#e11d48'}
+                            />
+                            <circle
+                              cx={line.x2Mm}
+                              cy={line.y2Mm}
+                              r={strokeW * 1.6}
+                              fill={line.isDraft ? '#0284c7' : '#e11d48'}
+                            />
+                            {res.distanceMm >= 0.3 && (
+                              <text
+                                x={midX}
+                                y={midY - strokeW * 2}
+                                textAnchor="middle"
+                                fontSize={fontSize}
+                                fontWeight="700"
+                                fill={line.isDraft ? '#0369a1' : '#be123c'}
+                                stroke="#ffffff"
+                                strokeWidth={fontSize * 0.16}
+                                paintOrder="stroke"
+                              >
+                                {formatFormLength(res.distanceMm, settings.unit)}
+                              </text>
+                            )}
+                          </g>
+                        );
+                      })}
+                    </svg>
                   </div>
                 </div>
               );
             })()}
           </div>
 
-          {/* Bottom Ink Coverage Inspector Bar */}
+          {/* Bottom Ink Coverage & Form Measurement Inspector Bar */}
           <div
             data-litho-ink-inspector
             className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-white px-3 py-1.5 text-[11px] dark:border-slate-800 dark:bg-slate-900"
           >
             <div className="flex flex-wrap items-center gap-3 tabular-nums">
               <span className="font-bold text-slate-700 dark:text-slate-200">
-                {isFa ? 'سنجشگر درصد مرکب (Ink Coverage):' : 'Ink Coverage Inspector:'}
+                {isFa ? 'سنجشگر مرکب:' : 'Ink Coverage:'}
               </span>
               {hoverCoverage ? (
                 <>
@@ -1248,8 +1995,20 @@ export const LithographyWorkspace: React.FC = () => {
               ) : (
                 <span className="text-slate-500 dark:text-slate-400">
                   {isFa
-                    ? 'ماوس را روی صفحه حرکت دهید تا درصد دقیق هر مرکب و TAC همان نقطه نمایش داده شود.'
-                    : 'Move cursor over the page to inspect exact ink % and TAC.'}
+                    ? 'ماوس را روی صفحه ببرید تا درصد مرکب و TAC نمایش داده شود.'
+                    : 'Hover page to inspect ink % and TAC.'}
+                </span>
+              )}
+
+              {latestMeasurementSummary && (
+                <span
+                  data-litho-measure-readout
+                  className="flex items-center gap-1.5 rounded bg-rose-50 px-2 py-0.5 font-mono text-[10.5px] font-bold text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
+                >
+                  <Ruler className="h-3 w-3" />
+                  <span>
+                    {`${formatFormLength(latestMeasurementSummary.distanceMm, settings.unit)} (ΔX ${latestMeasurementSummary.dxMm} · ΔY ${latestMeasurementSummary.dyMm} mm · ${latestMeasurementSummary.angleDeg}°)`}
+                  </span>
                 </span>
               )}
             </div>
@@ -1257,8 +2016,8 @@ export const LithographyWorkspace: React.FC = () => {
             {separationBuffers && (
               <div className="text-[10.5px] text-slate-500 dark:text-slate-400 tabular-nums">
                 {isFa
-                  ? `میانگین پوشش صفحه: C ${separationBuffers.averages.c}% · M ${separationBuffers.averages.m}% · Y ${separationBuffers.averages.y}% · K ${separationBuffers.averages.k}% · اوج TAC ${separationBuffers.averages.maxTacPercent}%`
-                  : `Avg coverage: C ${separationBuffers.averages.c}% · M ${separationBuffers.averages.m}% · Y ${separationBuffers.averages.y}% · K ${separationBuffers.averages.k}% · Peak TAC ${separationBuffers.averages.maxTacPercent}%`}
+                  ? `فرم: ${Math.round(resolvedPlate.widthMm)}×${Math.round(resolvedPlate.heightMm)} mm · کار: ${Math.round(artworkOnForm.artWidthMm)}×${Math.round(artworkOnForm.artHeightMm)} mm · اوج TAC ${separationBuffers.averages.maxTacPercent}%`
+                  : `Form: ${Math.round(resolvedPlate.widthMm)}×${Math.round(resolvedPlate.heightMm)} mm · Art: ${Math.round(artworkOnForm.artWidthMm)}×${Math.round(artworkOnForm.artHeightMm)} mm · Peak TAC ${separationBuffers.averages.maxTacPercent}%`}
               </div>
             )}
           </div>
@@ -1269,12 +2028,12 @@ export const LithographyWorkspace: React.FC = () => {
            ================================================================== */}
         <aside className="flex w-full lg:w-[390px] shrink-0 flex-col border-t lg:border-t-0 lg:border-s border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 overflow-hidden">
           {/* Inspector Tabs */}
-          <div className="grid grid-cols-3 border-b border-slate-200 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-950">
+          <div className="grid grid-cols-4 border-b border-slate-200 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-950">
             <button
               type="button"
               data-litho-tab="preflight"
               onClick={() => setRightTab('preflight')}
-              className={`flex items-center justify-center gap-1 rounded-md py-1.5 text-[11px] font-bold transition-colors cursor-pointer ${
+              className={`flex items-center justify-center gap-1 rounded-md py-1.5 text-[10.5px] font-bold transition-colors cursor-pointer ${
                 rightTab === 'preflight'
                   ? 'bg-white text-slate-900 shadow-2xs dark:bg-slate-800 dark:text-white'
                   : 'text-slate-600 hover:text-slate-900 dark:text-slate-400'
@@ -1285,9 +2044,22 @@ export const LithographyWorkspace: React.FC = () => {
             </button>
             <button
               type="button"
+              data-litho-tab="form"
+              onClick={() => setRightTab('form')}
+              className={`flex items-center justify-center gap-1 rounded-md py-1.5 text-[10.5px] font-bold transition-colors cursor-pointer ${
+                rightTab === 'form'
+                  ? 'bg-white text-slate-900 shadow-2xs dark:bg-slate-800 dark:text-white'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-400'
+              }`}
+            >
+              <Ruler className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span>{isFa ? 'فرم و اندازه' : 'Form'}</span>
+            </button>
+            <button
+              type="button"
               data-litho-tab="color"
               onClick={() => setRightTab('color')}
-              className={`flex items-center justify-center gap-1 rounded-md py-1.5 text-[11px] font-bold transition-colors cursor-pointer ${
+              className={`flex items-center justify-center gap-1 rounded-md py-1.5 text-[10.5px] font-bold transition-colors cursor-pointer ${
                 rightTab === 'color'
                   ? 'bg-white text-slate-900 shadow-2xs dark:bg-slate-800 dark:text-white'
                   : 'text-slate-600 hover:text-slate-900 dark:text-slate-400'
@@ -1300,7 +2072,7 @@ export const LithographyWorkspace: React.FC = () => {
               type="button"
               data-litho-tab="export"
               onClick={() => setRightTab('export')}
-              className={`flex items-center justify-center gap-1 rounded-md py-1.5 text-[11px] font-bold transition-colors cursor-pointer ${
+              className={`flex items-center justify-center gap-1 rounded-md py-1.5 text-[10.5px] font-bold transition-colors cursor-pointer ${
                 rightTab === 'export'
                   ? 'bg-white text-slate-900 shadow-2xs dark:bg-slate-800 dark:text-white'
                   : 'text-slate-600 hover:text-slate-900 dark:text-slate-400'
@@ -1533,7 +2305,499 @@ export const LithographyWorkspace: React.FC = () => {
             )}
 
             {/* ==============================================================
-                TAB 2: COLOR MANAGEMENT (ICC, Intent, GCR/TAC, Black Rule, Spot)
+                TAB 2: FORM LAYOUT, TRANSFORM & MEASUREMENT
+               ============================================================ */}
+            {rightTab === 'form' && (
+              <div className="space-y-3" data-litho-form-panel>
+                {/* Paper / Plate Form Size */}
+                <div className="rounded-lg border border-slate-200 p-2.5 space-y-2 dark:border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11.5px] font-bold text-slate-800 dark:text-slate-100">
+                      {isFa ? 'قطع کاغذ یا پلیت فرم' : 'Output Form / Paper Size'}
+                    </span>
+                    <span className="font-mono text-[10px] font-semibold text-slate-500 tabular-nums">
+                      {Math.round(resolvedPlate.widthMm)}×{Math.round(resolvedPlate.heightMm)} mm
+                    </span>
+                  </div>
+
+                  <select
+                    data-litho-form-plate-size
+                    value={lithoExportSettings.plateSizeId || 'fit-document'}
+                    onChange={(e) => selectPlatePresetById(e.target.value)}
+                    className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-[11px] font-semibold dark:border-slate-700 dark:bg-slate-800"
+                  >
+                    <option value="fit-document">
+                      {isFa ? 'هم‌اندازه سند + علائم برش (خودکار)' : 'Auto Fit Document + Marks'}
+                    </option>
+                    <optgroup label={isFa ? 'کاغذهای استاندارد (A3 / A4 / B3 / B4 / SRA3)' : 'Standard Paper Sizes'}>
+                      {paperPresets.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {isFa ? p.nameFa : p.nameEn}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label={isFa ? 'پلیت‌های ماشین چاپ افست' : 'Offset Press Plates'}>
+                      {pressPlatePresets.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {isFa ? p.nameFa : p.nameEn}
+                        </option>
+                      ))}
+                    </optgroup>
+                    {lithoSavedPlateSizes.length > 0 && (
+                      <optgroup label={isFa ? 'پلیت‌های ذخیره‌شده شما' : 'Saved Custom Plates'}>
+                        {lithoSavedPlateSizes.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {isFa ? p.nameFa : p.nameEn}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    <option value="custom">
+                      {isFa ? 'اندازه سفارشی (Custom mm)...' : 'Custom Size (mm)...'}
+                    </option>
+                  </select>
+
+                  {(lithoExportSettings.plateSizeId || 'fit-document') !== 'fit-document' && (
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <label className="flex flex-col text-[10px] text-slate-600 dark:text-slate-400">
+                        <span className="mb-0.5">{isFa ? 'عرض فرم (mm)' : 'Width'}</span>
+                        <input
+                          type="number"
+                          min={20}
+                          max={2500}
+                          value={Math.round(lithoExportSettings.plateWidthMm || resolvedPlate.widthMm)}
+                          onChange={(e) =>
+                            updateLithoExportSettings({
+                              plateSizeId: 'custom',
+                              plateWidthMm: Math.max(20, Number(e.target.value) || 20),
+                            })
+                          }
+                          className="rounded border border-slate-300 bg-white px-1.5 py-1 text-[11px] font-bold tabular-nums dark:border-slate-700 dark:bg-slate-800"
+                        />
+                      </label>
+                      <label className="flex flex-col text-[10px] text-slate-600 dark:text-slate-400">
+                        <span className="mb-0.5">{isFa ? 'ارتفاع فرم (mm)' : 'Height'}</span>
+                        <input
+                          type="number"
+                          min={20}
+                          max={2500}
+                          value={Math.round(lithoExportSettings.plateHeightMm || resolvedPlate.heightMm)}
+                          onChange={(e) =>
+                            updateLithoExportSettings({
+                              plateSizeId: 'custom',
+                              plateHeightMm: Math.max(20, Number(e.target.value) || 20),
+                            })
+                          }
+                          className="rounded border border-slate-300 bg-white px-1.5 py-1 text-[11px] font-bold tabular-nums dark:border-slate-700 dark:bg-slate-800"
+                        />
+                      </label>
+                      <label className="flex flex-col text-[10px] text-slate-600 dark:text-slate-400">
+                        <span className="mb-0.5">{isFa ? 'جهت' : 'Orientation'}</span>
+                        <select
+                          value={lithoExportSettings.plateOrientation || 'auto'}
+                          onChange={(e) =>
+                            updateLithoExportSettings({
+                              plateOrientation: e.target.value as LithoPlateOrientation,
+                            })
+                          }
+                          className="rounded border border-slate-300 bg-white px-1 py-1 text-[10.5px] font-semibold dark:border-slate-700 dark:bg-slate-800"
+                        >
+                          <option value="auto">{isFa ? 'خودکار' : 'Auto'}</option>
+                          <option value="portrait">{isFa ? 'عمودی' : 'Portrait'}</option>
+                          <option value="landscape">{isFa ? 'افقی' : 'Landscape'}</option>
+                        </select>
+                      </label>
+                    </div>
+                  )}
+                </div>
+
+                {/* Move, Resize & Rotate Artwork Inside Form */}
+                <div className="rounded-lg border border-slate-200 p-2.5 space-y-2.5 dark:border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11.5px] font-bold text-slate-800 dark:text-slate-100">
+                      {isFa ? 'موقعیت و اندازه کار در فرم' : 'Artwork Transform on Form'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => resetLithoFormPlacement()}
+                      className="text-[10.5px] font-semibold text-amber-700 hover:underline dark:text-amber-400 cursor-pointer"
+                    >
+                      {isFa ? 'بازنشانی' : 'Reset'}
+                    </button>
+                  </div>
+
+                  {/* Position offsets (mm from form center) */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="flex flex-col text-[10px] text-slate-600 dark:text-slate-400">
+                      <span className="mb-0.5">{isFa ? 'جابجایی افقی X (mm)' : 'Offset X (mm)'}</span>
+                      <input
+                        type="number"
+                        step={0.5}
+                        data-litho-offset-x
+                        value={formPlacement.offsetXMm}
+                        onChange={(e) =>
+                          updateLithoFormPlacement({ offsetXMm: Number(e.target.value) || 0 })
+                        }
+                        className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-bold tabular-nums dark:border-slate-700 dark:bg-slate-800"
+                      />
+                    </label>
+                    <label className="flex flex-col text-[10px] text-slate-600 dark:text-slate-400">
+                      <span className="mb-0.5">{isFa ? 'جابجایی عمودی Y (mm)' : 'Offset Y (mm)'}</span>
+                      <input
+                        type="number"
+                        step={0.5}
+                        data-litho-offset-y
+                        value={formPlacement.offsetYMm}
+                        onChange={(e) =>
+                          updateLithoFormPlacement({ offsetYMm: Number(e.target.value) || 0 })
+                        }
+                        className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-bold tabular-nums dark:border-slate-700 dark:bg-slate-800"
+                      />
+                    </label>
+                  </div>
+
+                  {/* Quick Alignment Grid */}
+                  <div>
+                    <div className="mb-1 text-[10px] text-slate-500 dark:text-slate-400">
+                      {isFa ? 'چیدمان سریع نسبت به فرم:' : 'Quick Form Alignment:'}
+                    </div>
+                    <div className="grid grid-cols-5 gap-1 text-[10px]">
+                      {(
+                        [
+                          ['top-left', isFa ? 'بالا-چپ' : 'TL'],
+                          ['top', isFa ? 'بالا' : 'Top'],
+                          ['top-right', isFa ? 'بالا-راست' : 'TR'],
+                          ['left', isFa ? 'چپ' : 'Left'],
+                          ['center', isFa ? 'مرکز' : 'Center'],
+                          ['right', isFa ? 'راست' : 'Right'],
+                          ['bottom-left', isFa ? 'پایین-چپ' : 'BL'],
+                          ['bottom', isFa ? 'پایین' : 'Bottom'],
+                          ['bottom-right', isFa ? 'پایین-راست' : 'BR'],
+                        ] as const
+                      ).map(([pos, lbl]) => (
+                        <button
+                          key={pos}
+                          type="button"
+                          onClick={() => alignArtworkOnForm(pos)}
+                          className="rounded border border-slate-200 bg-slate-50 py-1 font-semibold text-slate-700 hover:bg-amber-50 hover:border-amber-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+                        >
+                          {lbl}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Artwork Physical Width/Height & Scale % */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="flex flex-col text-[10px] text-slate-600 dark:text-slate-400">
+                      <span className="mb-0.5">{isFa ? 'عرض کار (mm)' : 'Art Width (mm)'}</span>
+                      <input
+                        type="number"
+                        min={5}
+                        max={2500}
+                        step={0.5}
+                        data-litho-art-width
+                        value={Math.round(artworkOnForm.artWidthMm * 10) / 10}
+                        onChange={(e) => {
+                          const targetW = Math.max(5, Number(e.target.value) || 5);
+                          const nextScaleX = (targetW / docWidthMm) * 100;
+                          const ratio = formPlacement.scaleYPercent / Math.max(1, formPlacement.scaleXPercent);
+                          updateLithoFormPlacement({
+                            scaleXPercent: nextScaleX,
+                            ...(formPlacement.lockAspect ? { scaleYPercent: nextScaleX * ratio } : {}),
+                          });
+                        }}
+                        className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-bold tabular-nums dark:border-slate-700 dark:bg-slate-800"
+                      />
+                    </label>
+                    <label className="flex flex-col text-[10px] text-slate-600 dark:text-slate-400">
+                      <span className="mb-0.5">{isFa ? 'ارتفاع کار (mm)' : 'Art Height (mm)'}</span>
+                      <input
+                        type="number"
+                        min={5}
+                        max={2500}
+                        step={0.5}
+                        data-litho-art-height
+                        value={Math.round(artworkOnForm.artHeightMm * 10) / 10}
+                        onChange={(e) => {
+                          const targetH = Math.max(5, Number(e.target.value) || 5);
+                          const nextScaleY = (targetH / docHeightMm) * 100;
+                          const ratio = formPlacement.scaleXPercent / Math.max(1, formPlacement.scaleYPercent);
+                          updateLithoFormPlacement({
+                            scaleYPercent: nextScaleY,
+                            ...(formPlacement.lockAspect ? { scaleXPercent: nextScaleY * ratio } : {}),
+                          });
+                        }}
+                        className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-bold tabular-nums dark:border-slate-700 dark:bg-slate-800"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="flex flex-col text-[10px] text-slate-600 dark:text-slate-400">
+                      <span className="mb-0.5">{isFa ? 'مقیاس عرض (%)' : 'Scale X (%)'}</span>
+                      <input
+                        type="number"
+                        min={5}
+                        max={500}
+                        step={1}
+                        data-litho-scale-x
+                        value={Math.round(formPlacement.scaleXPercent * 10) / 10}
+                        onChange={(e) => {
+                          const val = Math.max(5, Math.min(500, Number(e.target.value) || 100));
+                          updateLithoFormPlacement({
+                            scaleXPercent: val,
+                            ...(formPlacement.lockAspect ? { scaleYPercent: val } : {}),
+                          });
+                        }}
+                        className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-bold tabular-nums dark:border-slate-700 dark:bg-slate-800"
+                      />
+                    </label>
+                    <label className="flex flex-col text-[10px] text-slate-600 dark:text-slate-400">
+                      <span className="mb-0.5">{isFa ? 'مقیاس ارتفاع (%)' : 'Scale Y (%)'}</span>
+                      <input
+                        type="number"
+                        min={5}
+                        max={500}
+                        step={1}
+                        data-litho-scale-y
+                        value={Math.round(formPlacement.scaleYPercent * 10) / 10}
+                        onChange={(e) => {
+                          const val = Math.max(5, Math.min(500, Number(e.target.value) || 100));
+                          updateLithoFormPlacement({
+                            scaleYPercent: val,
+                            ...(formPlacement.lockAspect ? { scaleXPercent: val } : {}),
+                          });
+                        }}
+                        className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-bold tabular-nums dark:border-slate-700 dark:bg-slate-800"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-1.5">
+                    <button
+                      type="button"
+                      data-litho-lock-aspect
+                      onClick={() =>
+                        updateLithoFormPlacement({ lockAspect: !formPlacement.lockAspect })
+                      }
+                      className={`flex items-center gap-1 rounded border px-2 py-1 text-[10.5px] font-semibold cursor-pointer ${
+                        formPlacement.lockAspect
+                          ? 'border-sky-400 bg-sky-50 text-sky-800 dark:border-sky-500/40 dark:bg-sky-950/30 dark:text-sky-200'
+                          : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                      }`}
+                    >
+                      {formPlacement.lockAspect ? (
+                        <Lock className="h-3 w-3" />
+                      ) : (
+                        <Unlock className="h-3 w-3" />
+                      )}
+                      <span>{isFa ? 'قفل تناسب طول/عرض' : 'Lock Aspect'}</span>
+                    </button>
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateLithoFormPlacement(
+                            computeFitPlacementOnForm(
+                              resolvedPlate.widthMm,
+                              resolvedPlate.heightMm,
+                              docWidthMm,
+                              docHeightMm,
+                              'fit',
+                              formPlacement,
+                              showPressMarks ? 8 : 2
+                            )
+                          )
+                        }
+                        className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-bold hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 cursor-pointer"
+                      >
+                        {isFa ? 'فیت فرم' : 'Fit'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateLithoFormPlacement(
+                            computeFitPlacementOnForm(
+                              resolvedPlate.widthMm,
+                              resolvedPlate.heightMm,
+                              docWidthMm,
+                              docHeightMm,
+                              'fill',
+                              formPlacement,
+                              0
+                            )
+                          )
+                        }
+                        className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-bold hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 cursor-pointer"
+                      >
+                        {isFa ? 'پُرکردن' : 'Fill'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateLithoFormPlacement(
+                            computeFitPlacementOnForm(
+                              resolvedPlate.widthMm,
+                              resolvedPlate.heightMm,
+                              docWidthMm,
+                              docHeightMm,
+                              'actual',
+                              formPlacement
+                            )
+                          )
+                        }
+                        className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-bold hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 cursor-pointer"
+                      >
+                        100%
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Rotation Controls */}
+                  <div className="pt-1 border-t border-slate-100 dark:border-slate-800">
+                    <div className="mb-1 flex items-center justify-between text-[10.5px]">
+                      <span className="font-semibold text-slate-700 dark:text-slate-300">
+                        {isFa ? 'چرخش در فرم (درجه):' : 'Rotation (deg):'}
+                      </span>
+                      <input
+                        type="number"
+                        min={-180}
+                        max={180}
+                        step={1}
+                        data-litho-rotation
+                        value={formPlacement.rotationDeg}
+                        onChange={(e) =>
+                          updateLithoFormPlacement({ rotationDeg: Number(e.target.value) || 0 })
+                        }
+                        className="w-16 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-center text-[11px] font-bold tabular-nums dark:border-slate-700 dark:bg-slate-800"
+                      />
+                    </div>
+                    <div className="grid grid-cols-4 gap-1 text-[10px]">
+                      {[0, 90, 180, -90].map((deg) => (
+                        <button
+                          key={deg}
+                          type="button"
+                          onClick={() => updateLithoFormPlacement({ rotationDeg: deg })}
+                          className={`rounded border py-1 font-bold cursor-pointer ${
+                            Math.abs(formPlacement.rotationDeg - deg) < 0.1
+                              ? 'border-amber-500 bg-amber-50 text-amber-800 dark:border-amber-400 dark:bg-amber-950/30 dark:text-amber-200'
+                              : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                          }`}
+                        >
+                          {deg}°
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Margins readout inside form */}
+                  <div className="rounded bg-slate-50 px-2 py-1.5 text-[10px] text-slate-600 tabular-nums dark:bg-slate-950/50 dark:text-slate-400">
+                    {isFa
+                      ? `فاصله از لبه‌های فرم — چپ: ${Math.round(artworkOnForm.bboxLeftMm * 10) / 10} · راست: ${Math.round((resolvedPlate.widthMm - (artworkOnForm.bboxLeftMm + artworkOnForm.bboxWidthMm)) * 10) / 10} · بالا: ${Math.round(artworkOnForm.bboxTopMm * 10) / 10} · پایین: ${Math.round((resolvedPlate.heightMm - (artworkOnForm.bboxTopMm + artworkOnForm.bboxHeightMm)) * 10) / 10} mm`
+                      : `Margins — L: ${Math.round(artworkOnForm.bboxLeftMm * 10) / 10} · R: ${Math.round((resolvedPlate.widthMm - (artworkOnForm.bboxLeftMm + artworkOnForm.bboxWidthMm)) * 10) / 10} · T: ${Math.round(artworkOnForm.bboxTopMm * 10) / 10} · B: ${Math.round((resolvedPlate.heightMm - (artworkOnForm.bboxTopMm + artworkOnForm.bboxHeightMm)) * 10) / 10} mm`}
+                  </div>
+                </div>
+
+                {/* Form Measurement Tool Panel */}
+                <div className="rounded-lg border border-slate-200 p-2.5 space-y-2 dark:border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-[11.5px] font-bold text-slate-800 dark:text-slate-100">
+                      <Ruler className="h-3.5 w-3.5 text-rose-600 dark:text-rose-400" />
+                      <span>{isFa ? 'ابزار اندازه‌گیری روی فرم' : 'Form Measurement Tool'}</span>
+                    </div>
+                    <button
+                      type="button"
+                      data-litho-activate-measure
+                      onClick={() =>
+                        setFormTool((prev) => (prev === 'measure' ? 'transform' : 'measure'))
+                      }
+                      className={`rounded px-2 py-0.5 text-[10.5px] font-bold cursor-pointer ${
+                        formTool === 'measure'
+                          ? 'bg-rose-600 text-white'
+                          : 'bg-slate-800 text-white hover:bg-slate-700 dark:bg-slate-700'
+                      }`}
+                    >
+                      {formTool === 'measure'
+                        ? isFa
+                          ? 'خط‌کش فعال'
+                          : 'Active'
+                        : isFa
+                          ? 'فعال‌سازی خط‌کش'
+                          : 'Activate'}
+                    </button>
+                  </div>
+
+                  <div className="text-[10.5px] text-slate-500 dark:text-slate-400">
+                    {isFa
+                      ? 'ابزار اندازه‌گیری را فعال کنید و روی فرم بکشید (با Shift زاویه ۴۵°/۹۰° قفل می‌شود).'
+                      : 'Activate Measure and drag across the form (hold Shift to snap 45°/90°).'}
+                  </div>
+
+                  {pinnedMeasurements.length === 0 ? (
+                    <div className="rounded bg-slate-50 px-2 py-1.5 text-[10.5px] text-slate-500 dark:bg-slate-950/50 dark:text-slate-400">
+                      {isFa
+                        ? 'هنوز اندازه‌ای روی فرم ثبت نشده است.'
+                        : 'No pinned measurements on the form yet.'}
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="font-semibold text-slate-600 dark:text-slate-300">
+                          {isFa
+                            ? `اندازه‌های ثبت‌شده (${toPersianDigits(pinnedMeasurements.length)}):`
+                            : `Pinned (${pinnedMeasurements.length}):`}
+                        </span>
+                        <button
+                          type="button"
+                          data-litho-clear-measurements
+                          onClick={() => {
+                            setPinnedMeasurements([]);
+                            setActiveMeasure(null);
+                          }}
+                          className="text-rose-600 hover:underline dark:text-rose-400 cursor-pointer"
+                        >
+                          {isFa ? 'پاک‌کردن همه' : 'Clear All'}
+                        </button>
+                      </div>
+                      <div className="max-h-36 space-y-1 overflow-y-auto">
+                        {pinnedMeasurements.map((pm, idx) => {
+                          const res = computeFormMeasurement(pm.x1Mm, pm.y1Mm, pm.x2Mm, pm.y2Mm);
+                          return (
+                            <div
+                              key={pm.id}
+                              className="flex items-center justify-between gap-2 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[10.5px] tabular-nums dark:border-slate-800 dark:bg-slate-950/60"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="font-bold text-slate-800 dark:text-slate-100">
+                                  #{idx + 1}: {formatFormLength(res.distanceMm, settings.unit)}
+                                </div>
+                                <div className="text-[9.5px] text-slate-500 dark:text-slate-400">
+                                  ΔX {res.dxMm} mm · ΔY {res.dyMm} mm · {res.angleDeg}°
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPinnedMeasurements((prev) => prev.filter((x) => x.id !== pm.id))
+                                }
+                                className="rounded p-0.5 text-slate-400 hover:text-rose-600 cursor-pointer"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ==============================================================
+                TAB 3: COLOR MANAGEMENT (ICC, Intent, GCR/TAC, Black Rule, Spot)
                ============================================================ */}
             {rightTab === 'color' && (
               <div className="space-y-3">
@@ -1941,25 +3205,26 @@ export const LithographyWorkspace: React.FC = () => {
                         data-litho-plate-size
                         aria-label={isFa ? 'انتخاب اندازه پلیت' : 'Plate Size Preset'}
                         value={lithoExportSettings.plateSizeId || 'fit-document'}
-                        onChange={(e) => {
-                          const id = e.target.value;
-                          const matched = [...BUILT_IN_LITHO_PLATE_SIZES, ...lithoSavedPlateSizes].find(
-                            (p) => p.id === id
-                          );
-                          updateLithoExportSettings({
-                            plateSizeId: id,
-                            ...(matched && matched.widthMm > 0
-                              ? { plateWidthMm: matched.widthMm, plateHeightMm: matched.heightMm }
-                              : {}),
-                          });
-                        }}
+                        onChange={(e) => selectPlatePresetById(e.target.value)}
                         className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold dark:border-slate-700 dark:bg-slate-800"
                       >
-                        {BUILT_IN_LITHO_PLATE_SIZES.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {isFa ? p.nameFa : p.nameEn}
-                          </option>
-                        ))}
+                        <option value="fit-document">
+                          {isFa ? 'هم‌اندازه سند + علائم برش (خودکار)' : 'Auto Fit Document + Marks'}
+                        </option>
+                        <optgroup label={isFa ? 'کاغذهای استاندارد (A3 / A4 / B3 / B4 / SRA3)' : 'Standard Paper Sizes'}>
+                          {paperPresets.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {isFa ? p.nameFa : p.nameEn}
+                            </option>
+                          ))}
+                        </optgroup>
+                        <optgroup label={isFa ? 'پلیت‌های ماشین چاپ افست' : 'Offset Press Plates'}>
+                          {pressPlatePresets.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {isFa ? p.nameFa : p.nameEn}
+                            </option>
+                          ))}
+                        </optgroup>
                         {lithoSavedPlateSizes.length > 0 && (
                           <optgroup label={isFa ? 'پلیت‌های ذخیره‌شده شما' : 'Saved Custom Plates'}>
                             {lithoSavedPlateSizes.map((p) => (

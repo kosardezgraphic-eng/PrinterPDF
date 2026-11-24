@@ -1265,6 +1265,7 @@ export interface LithoColorSettings {
 }
 
 export type LithoPlateOrientation = 'auto' | 'portrait' | 'landscape';
+export type LithoPlateCategory = 'auto' | 'paper' | 'plate' | 'custom';
 
 export interface LithoPlateSizePreset {
   id: string;
@@ -1273,6 +1274,22 @@ export interface LithoPlateSizePreset {
   widthMm: number;
   heightMm: number;
   isBuiltIn?: boolean;
+  category?: LithoPlateCategory;
+}
+
+export interface LithoFormPlacement {
+  /** Horizontal center offset from form center in mm (+ = right) */
+  offsetXMm: number;
+  /** Vertical center offset from form center in mm (+ = down) */
+  offsetYMm: number;
+  /** Width scale percentage (5..500, default 100) */
+  scaleXPercent: number;
+  /** Height scale percentage (5..500, default 100) */
+  scaleYPercent: number;
+  /** Lock aspect ratio during resize */
+  lockAspect: boolean;
+  /** Clockwise rotation angle around artwork center in degrees (-180..180) */
+  rotationDeg: number;
 }
 
 export interface LithoExportSettings {
@@ -1288,6 +1305,7 @@ export interface LithoExportSettings {
   plateWidthMm?: number;
   plateHeightMm?: number;
   plateOrientation?: LithoPlateOrientation;
+  formPlacement?: LithoFormPlacement;
 }
 
 export type LithoPreflightSeverity = 'error' | 'warning' | 'pass';

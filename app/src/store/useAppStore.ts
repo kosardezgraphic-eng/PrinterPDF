@@ -39,6 +39,7 @@ import type {
   WatermarkSettings,
   LithoColorSettings,
   LithoExportSettings,
+  LithoFormPlacement,
   LithoHotFolderIncomingFile,
   LithoHotFolderStatus,
   LithoJobPreset,
@@ -123,7 +124,9 @@ import {
 import {
   OFFSET_ICC_PROFILES,
   createDefaultLithoColorSettings,
+  createDefaultLithoFormPlacement,
   createDefaultLithoPresets,
+  normalizeLithoFormPlacement,
   parseIccProfileBytes,
 } from '../engine/lithographyColor';
 import {
@@ -818,6 +821,10 @@ interface AppState {
   ) => void;
   setLithoSpotHandling: (spotName: string, handling: LithoSpotHandling) => void;
   updateLithoExportSettings: (patch: Partial<LithoExportSettings>) => void;
+  updateLithoFormPlacement: (
+    patch: Partial<LithoFormPlacement> | ((prev: LithoFormPlacement) => LithoFormPlacement)
+  ) => void;
+  resetLithoFormPlacement: () => void;
   setLithoTacThreshold: (tacPercent: number) => void;
   uploadCustomIccProfile: (file: File) => Promise<boolean>;
   runPreflightForJob: (jobId: string) => Promise<void>;
@@ -1109,6 +1116,7 @@ export const useAppStore = create<AppState>((set, get) => {
       plateWidthMm: 400,
       plateHeightMm: 510,
       plateOrientation: 'auto',
+      formPlacement: createDefaultLithoFormPlacement(),
     },
     lithoTacThreshold: 300,
     lithoPresets: createDefaultLithoPresets(),
@@ -4731,7 +4739,36 @@ export const useAppStore = create<AppState>((set, get) => {
 
     updateLithoExportSettings: (patch) =>
       set((s) => ({
-        lithoExportSettings: { ...s.lithoExportSettings, ...patch },
+        lithoExportSettings: {
+          ...s.lithoExportSettings,
+          ...patch,
+          formPlacement: patch.formPlacement
+            ? normalizeLithoFormPlacement({
+                ...(s.lithoExportSettings.formPlacement ?? createDefaultLithoFormPlacement()),
+                ...patch.formPlacement,
+              })
+            : s.lithoExportSettings.formPlacement ?? createDefaultLithoFormPlacement(),
+        },
+      })),
+
+    updateLithoFormPlacement: (patch) =>
+      set((s) => {
+        const current = normalizeLithoFormPlacement(s.lithoExportSettings.formPlacement);
+        const nextRaw = typeof patch === 'function' ? patch(current) : { ...current, ...patch };
+        return {
+          lithoExportSettings: {
+            ...s.lithoExportSettings,
+            formPlacement: normalizeLithoFormPlacement(nextRaw),
+          },
+        };
+      }),
+
+    resetLithoFormPlacement: () =>
+      set((s) => ({
+        lithoExportSettings: {
+          ...s.lithoExportSettings,
+          formPlacement: createDefaultLithoFormPlacement(),
+        },
       })),
 
     setLithoTacThreshold: (tacPercent) => {
@@ -5018,6 +5055,9 @@ export const useAppStore = create<AppState>((set, get) => {
         lithoExportSettings: {
           ...s.lithoExportSettings,
           ...structuredClone(preset.exportSettings),
+          formPlacement: normalizeLithoFormPlacement(
+            preset.exportSettings.formPlacement ?? s.lithoExportSettings.formPlacement
+          ),
           jobNamePrefix:
             preset.exportSettings.jobNamePrefix || s.lithoExportSettings.jobNamePrefix,
         },

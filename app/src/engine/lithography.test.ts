@@ -7,8 +7,12 @@ import {
   OFFSET_ICC_PROFILES,
   applyTacLimitAndGcr,
   buildSeparationBuffersFromRgba,
+  computeFitPlacementOnForm,
+  computeFormMeasurement,
+  computeLithoArtworkOnFormMm,
   convertRgbToCmyk,
   createDefaultLithoColorSettings,
+  normalizeLithoFormPlacement,
   parseIccProfileBytes,
   renderSeparationPreviewRgba,
   resolveLithoPlateSizeMm,
@@ -594,4 +598,135 @@ describe('Lithography Preflight, Auto-Fix, Reports & Acceptance Workflow', () =>
     expect(st.lithoJobs[0].status).toBe('done');
     expect(st.lithoJobs[0].fileName).toContain('Studio-Composed');
   }, 20000);
+
+  it('resolves standard paper sizes (A4/A3/B4/B3/SRA3), computes form geometry & measurements, and exports transformed forms across Plate PDF, 1-Bit TIFF, and PDF/X-4', async () => {
+    await enableNodeCanvasForPdfJs();
+
+    const a3Resolved = resolveLithoPlateSizeMm(
+      {
+        plateSizeId: 'a3',
+        plateOrientation: 'portrait',
+        includeCropMarks: true,
+        includeRegistrationMarks: true,
+        includeColorBar: true,
+        includeSlug: true,
+      },
+      100,
+      150
+    );
+    expect(a3Resolved.isFitDocument).toBe(false);
+    expect(a3Resolved.widthMm).toBe(297);
+    expect(a3Resolved.heightMm).toBe(420);
+
+    const b4Landscape = resolveLithoPlateSizeMm(
+      {
+        plateSizeId: 'b4',
+        plateOrientation: 'landscape',
+        includeCropMarks: true,
+        includeRegistrationMarks: true,
+        includeColorBar: true,
+        includeSlug: true,
+      },
+      100,
+      150
+    );
+    expect(b4Landscape.widthMm).toBe(353);
+    expect(b4Landscape.heightMm).toBe(250);
+
+    // Geometry, fit, and ruler measurement math
+    const norm = normalizeLithoFormPlacement({
+      offsetXMm: 20,
+      offsetYMm: -10,
+      scaleXPercent: 120,
+      scaleYPercent: 120,
+      lockAspect: true,
+      rotationDeg: 90,
+    });
+    const geom = computeLithoArtworkOnFormMm(297, 420, 100, 150, norm);
+    expect(geom.artWidthMm).toBeCloseTo(120, 2);
+    expect(geom.artHeightMm).toBeCloseTo(180, 2);
+    // Rotated 90deg swaps bbox dimensions
+    expect(geom.bboxWidthMm).toBeCloseTo(180, 2);
+    expect(geom.bboxHeightMm).toBeCloseTo(120, 2);
+    expect(geom.centerXMm).toBeCloseTo(297 / 2 + 20, 2);
+    expect(geom.centerYMm).toBeCloseTo(420 / 2 - 10, 2);
+
+    const fitA3 = computeFitPlacementOnForm(297, 420, 100, 150, 'fit', { rotationDeg: 0 }, 10);
+    expect(fitA3.scaleXPercent).toBeCloseTo(266.7, 1);
+
+    const meas = computeFormMeasurement(10, 20, 40, 60);
+    expect(meas.dxMm).toBe(30);
+    expect(meas.dyMm).toBe(40);
+    expect(meas.distanceMm).toBe(50);
+
+    // Export Plate PDF + PDF/X-4 + 1-bit TIFF on A3 with offset, scaling & 90° rotation
+    const sampleBytes = await createSampleLithoPdfBytes();
+    const settings = createDefaultLithoColorSettings();
+    const meta = await inspectPdfForLithography(sampleBytes, 'a3-form-test.pdf', {
+      colorSettings: settings,
+      tacThresholdPercent: 300,
+    });
+
+    const exportCfg = {
+      format: 'plate-pdf' as const,
+      dpi: 300 as const,
+      includeCropMarks: true,
+      includeRegistrationMarks: true,
+      includeColorBar: true,
+      includeSlug: true,
+      jobNamePrefix: 'a3form',
+      plateSizeId: 'a3',
+      plateWidthMm: 297,
+      plateHeightMm: 420,
+      plateOrientation: 'portrait' as const,
+      formPlacement: norm,
+    };
+
+    const plateOut = await generateLithographyExports({
+      pdfBytes: sampleBytes,
+      metadata: meta,
+      colorSettings: settings,
+      exportSettings: exportCfg,
+      tacThresholdPercent: 300,
+    });
+    expect(plateOut.files).toHaveLength(8);
+    const loadedA3Plate = await PDFDocument.load(plateOut.files[0].bytes);
+    const ptToMm = 25.4 / 72;
+    const p0 = loadedA3Plate.getPages()[0];
+    const mb = p0.getMediaBox();
+    const tb = p0.getTrimBox();
+    expect(Math.round(mb.width * ptToMm)).toBe(297);
+    expect(Math.round(mb.height * ptToMm)).toBe(420);
+    // Shifted center +20mm X moves TrimBox center right of sheet center
+    expect(tb.x + tb.width / 2).toBeGreaterThan(mb.width / 2);
+
+    const x4Out = await generateLithographyExports({
+      pdfBytes: sampleBytes,
+      metadata: meta,
+      colorSettings: settings,
+      exportSettings: { ...exportCfg, format: 'pdf-x4', plateSizeId: 'b4', plateWidthMm: 250, plateHeightMm: 353 },
+      tacThresholdPercent: 300,
+    });
+    const loadedX4B4 = await PDFDocument.load(x4Out.files[0].bytes);
+    expect(Math.round(loadedX4B4.getPages()[0].getMediaBox().width * ptToMm)).toBe(250);
+    expect(Math.round(loadedX4B4.getPages()[0].getMediaBox().height * ptToMm)).toBe(353);
+
+    const tiffOut = await generateLithographyExports({
+      pdfBytes: sampleBytes,
+      metadata: meta,
+      colorSettings: settings,
+      exportSettings: { ...exportCfg, format: 'tiff-1bit' },
+      tacThresholdPercent: 300,
+    });
+    expect(tiffOut.files).toHaveLength(8);
+    expect(tiffOut.files[0].bytes[0]).toBe(0x49);
+
+    // Store placement actions
+    useAppStore.getState().updateLithoFormPlacement({ offsetXMm: 15, rotationDeg: 90 });
+    expect(useAppStore.getState().lithoExportSettings.formPlacement?.offsetXMm).toBe(15);
+    expect(useAppStore.getState().lithoExportSettings.formPlacement?.rotationDeg).toBe(90);
+    useAppStore.getState().resetLithoFormPlacement();
+    expect(useAppStore.getState().lithoExportSettings.formPlacement?.offsetXMm).toBe(0);
+    expect(useAppStore.getState().lithoExportSettings.formPlacement?.rotationDeg).toBe(0);
+  }, 25000);
 });

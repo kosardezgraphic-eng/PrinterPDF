@@ -11,6 +11,7 @@ import {
   PDFString,
   StandardFonts,
   cmyk,
+  degrees,
   grayscale,
 } from 'pdf-lib';
 import type {
@@ -18,6 +19,7 @@ import type {
   LithoDocumentMetadata,
   LithoExportDpi,
   LithoExportSettings,
+  LithoFormPlacement,
   LithoPlateSizePreset,
   LithoSpotChannel,
   LithoWriteFileEntry,
@@ -25,6 +27,7 @@ import type {
 import { formatShamsiDate } from '../i18n/shamsi';
 import {
   buildSeparationBuffersFromRgba,
+  normalizeLithoFormPlacement,
   resolveActiveProfileSpec,
   resolveLithoPlateSizeMm,
 } from './lithographyColor';
@@ -458,13 +461,16 @@ async function drawPressMarksOnPdfPage(
   plateLabel: string,
   pageNumber: number,
   shamsiDate: string,
-  monochromePlate: boolean
+  monochromePlate: boolean,
+  isFixedForm = false
 ): Promise<void> {
   const inkStroke = monochromePlate ? grayscale(0) : cmyk(1, 1, 1, 1); // Registration black
+  const sheetW = page.getWidth();
+  const sheetH = page.getHeight();
   const markOffset = 8;
   const markLen = 14;
 
-  // 1) Crop Marks (4 corners)
+  // 1) Crop Marks (4 corners around artwork TrimBox)
   if (exportSettings.includeCropMarks) {
     const corners: Array<[number, number, number, number]> = [
       // Bottom-left
@@ -490,14 +496,21 @@ async function drawPressMarksOnPdfPage(
     }
   }
 
-  // 2) Registration Marks (4 edge centers)
+  // 2) Registration Marks (anchored cleanly on sheet edges for fixed forms, or around trim box)
   if (exportSettings.includeRegistrationMarks) {
-    const targets: Array<[number, number]> = [
-      [trimX + trimW / 2, trimY - 14],
-      [trimX + trimW / 2, trimY + trimH + 14],
-      [trimX - 14, trimY + trimH / 2],
-      [trimX + trimW + 14, trimY + trimH / 2],
-    ];
+    const targets: Array<[number, number]> = isFixedForm
+      ? [
+          [sheetW / 2, 12],
+          [sheetW / 2, sheetH - 12],
+          [12, sheetH / 2],
+          [sheetW - 12, sheetH / 2],
+        ]
+      : [
+          [trimX + trimW / 2, trimY - 14],
+          [trimX + trimW / 2, trimY + trimH + 14],
+          [trimX - 14, trimY + trimH / 2],
+          [trimX + trimW + 14, trimY + trimH / 2],
+        ];
     for (const [cx, cy] of targets) {
       page.drawCircle({
         x: cx,
@@ -523,9 +536,11 @@ async function drawPressMarksOnPdfPage(
 
   // 3) Simple Color Control Bar (step wedges at top)
   if (exportSettings.includeColorBar) {
-    const barY = trimY + trimH + 9;
+    const barY = isFixedForm
+      ? Math.max(10, sheetH - 22)
+      : Math.min(sheetH - 10, trimY + trimH + 9);
     const stepSize = 10;
-    const startX = trimX + 14;
+    const startX = isFixedForm ? Math.max(18, sheetW / 2 - 48) : trimX + 14;
     if (monochromePlate) {
       const steps = [0.1, 0.25, 0.5, 0.75, 1.0];
       steps.forEach((pct, idx) => {
@@ -568,14 +583,16 @@ async function drawPressMarksOnPdfPage(
   if (exportSettings.includeSlug) {
     const jobTitle = exportSettings.jobNamePrefix || 'PrintStudio-Job';
     const slugText = `${jobTitle}  |  Plate: ${plateLabel}  |  Page ${pageNumber}  |  ${shamsiDate}`;
+    const slugX = isFixedForm ? 18 : Math.max(4, trimX);
+    const slugY = isFixedForm ? 4 : Math.max(2, trimY - 22);
     const pngBytes = await renderSlugTextPng(slugText);
     if (pngBytes) {
       const img = await pdfDoc.embedPng(pngBytes);
-      const maxSlugW = Math.min(trimW, 240);
+      const maxSlugW = Math.min(sheetW - slugX - 10, 240);
       page.drawImage(img, {
-        x: trimX,
-        y: Math.max(2, trimY - 22),
-        width: maxSlugW,
+        x: slugX,
+        y: slugY,
+        width: Math.max(40, maxSlugW),
         height: 11,
       });
     } else {
@@ -583,14 +600,152 @@ async function drawPressMarksOnPdfPage(
       const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
       const asciiSlug = slugText.replace(/[^\x20-\x7E]/g, '?');
       page.drawText(asciiSlug, {
-        x: trimX,
-        y: Math.max(4, trimY - 20),
+        x: slugX,
+        y: slugY + 2,
         size: 7,
         font,
         color: inkStroke,
       });
     }
   }
+}
+
+interface ComputedFormPlacementPdf {
+  outWpt: number;
+  outHpt: number;
+  artWpt: number;
+  artHpt: number;
+  cxPt: number;
+  cyPt: number;
+  originXpt: number;
+  originYpt: number;
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  bboxLeftPt: number;
+  bboxBottomPt: number;
+  bboxWpt: number;
+  bboxHpt: number;
+  trimOffX: number;
+  trimOffY: number;
+  trimW: number;
+  trimH: number;
+  rotationDeg: number;
+  isFitDocument: boolean;
+  plateWidthMm: number;
+  plateHeightMm: number;
+  isTransformed: boolean;
+}
+
+function computeFormPlacementPdf(
+  srcWpt: number,
+  srcHpt: number,
+  exportSettings: LithoExportSettings,
+  savedPlateSizes: LithoPlateSizePreset[],
+  markPadPt: number,
+  pageMeta: LithoDocumentMetadata['pages'][number] | undefined,
+  placement: LithoFormPlacement
+): ComputedFormPlacementPdf {
+  const plateSpec = resolveLithoPlateSizeMm(
+    exportSettings,
+    srcWpt / MM_TO_PT,
+    srcHpt / MM_TO_PT,
+    savedPlateSizes
+  );
+
+  const scaleX = placement.scaleXPercent / 100;
+  const scaleY = placement.scaleYPercent / 100;
+  const artWpt = Math.max(4, srcWpt * scaleX);
+  const artHpt = Math.max(4, srcHpt * scaleY);
+
+  const thetaRad = (placement.rotationDeg * Math.PI) / 180;
+  const alpha = -thetaRad; // PDF Y+ is upward, clockwise visual rotation = -thetaRad
+  const cosA = Math.cos(alpha);
+  const sinA = Math.sin(alpha);
+
+  const bboxWpt = Math.abs(artWpt * cosA) + Math.abs(artHpt * sinA);
+  const bboxHpt = Math.abs(artWpt * sinA) + Math.abs(artHpt * cosA);
+
+  const outWpt = plateSpec.isFitDocument
+    ? bboxWpt + markPadPt * 2
+    : plateSpec.widthMm * MM_TO_PT;
+  const outHpt = plateSpec.isFitDocument
+    ? bboxHpt + markPadPt * 2
+    : plateSpec.heightMm * MM_TO_PT;
+
+  const cxPt = plateSpec.isFitDocument
+    ? outWpt / 2
+    : outWpt / 2 + placement.offsetXMm * MM_TO_PT;
+  const cyPt = plateSpec.isFitDocument
+    ? outHpt / 2
+    : outHpt / 2 - placement.offsetYMm * MM_TO_PT;
+
+  const a = artWpt * cosA;
+  const b = artWpt * sinA;
+  const c = -artHpt * sinA;
+  const d = artHpt * cosA;
+  const originXpt = cxPt - 0.5 * (a + c);
+  const originYpt = cyPt - 0.5 * (b + d);
+
+  const bboxLeftPt = cxPt - bboxWpt / 2;
+  const bboxBottomPt = cyPt - bboxHpt / 2;
+
+  const isAxisAligned = Math.abs(placement.rotationDeg) < 0.05;
+  const avgScale = (scaleX + scaleY) / 2;
+  const bleedPt = 3 * MM_TO_PT * avgScale;
+  const trimW =
+    isAxisAligned && pageMeta?.trimBoxMm
+      ? Math.max(6, pageMeta.trimBoxMm.width * MM_TO_PT * scaleX)
+      : Math.max(10, bboxWpt - bleedPt * 2);
+  const trimH =
+    isAxisAligned && pageMeta?.trimBoxMm
+      ? Math.max(6, pageMeta.trimBoxMm.height * MM_TO_PT * scaleY)
+      : Math.max(10, bboxHpt - bleedPt * 2);
+  const trimOffX =
+    isAxisAligned && pageMeta?.trimBoxMm
+      ? bboxLeftPt + (pageMeta.trimBoxMm.x - pageMeta.mediaBoxMm.x) * MM_TO_PT * scaleX
+      : bboxLeftPt + bleedPt;
+  const trimOffY =
+    isAxisAligned && pageMeta?.trimBoxMm
+      ? bboxBottomPt + (pageMeta.trimBoxMm.y - pageMeta.mediaBoxMm.y) * MM_TO_PT * scaleY
+      : bboxBottomPt + bleedPt;
+
+  const isTransformed =
+    !plateSpec.isFitDocument ||
+    placement.offsetXMm !== 0 ||
+    placement.offsetYMm !== 0 ||
+    placement.scaleXPercent !== 100 ||
+    placement.scaleYPercent !== 100 ||
+    Math.abs(placement.rotationDeg) > 0.01;
+
+  return {
+    outWpt,
+    outHpt,
+    artWpt,
+    artHpt,
+    cxPt,
+    cyPt,
+    originXpt,
+    originYpt,
+    a,
+    b,
+    c,
+    d,
+    bboxLeftPt,
+    bboxBottomPt,
+    bboxWpt,
+    bboxHpt,
+    trimOffX,
+    trimOffY,
+    trimW,
+    trimH,
+    rotationDeg: placement.rotationDeg,
+    isFitDocument: plateSpec.isFitDocument,
+    plateWidthMm: plateSpec.widthMm,
+    plateHeightMm: plateSpec.heightMm,
+    isTransformed,
+  };
 }
 
 /* ============================================================================
@@ -648,6 +803,8 @@ export async function generateLithographyExports(params: {
     exportSettings.includeSlug;
   const markPadPt = hasMarks ? 24 : 0;
 
+  const formPlacement = normalizeLithoFormPlacement(exportSettings.formPlacement);
+
   onProgress?.(5);
 
   if (exportSettings.format === 'pdf-x1a' || exportSettings.format === 'pdf-x4') {
@@ -665,21 +822,25 @@ export async function generateLithographyExports(params: {
       const pageMeta = metadata.pages[pIdx];
       const srcPage = srcDoc.getPage(pIdx);
       const { width: srcWpt, height: srcHpt } = srcPage.getSize();
-      const plateSpec = resolveLithoPlateSizeMm(
+      const placed = computeFormPlacementPdf(
+        srcWpt,
+        srcHpt,
         exportSettings,
-        srcWpt / MM_TO_PT,
-        srcHpt / MM_TO_PT,
-        savedPlateSizes
+        savedPlateSizes,
+        markPadPt,
+        pageMeta,
+        formPlacement
       );
-      const outWpt = plateSpec.isFitDocument
-        ? srcWpt + markPadPt * 2
-        : plateSpec.widthMm * MM_TO_PT;
-      const outHpt = plateSpec.isFitDocument
-        ? srcHpt + markPadPt * 2
-        : plateSpec.heightMm * MM_TO_PT;
-      const docOffX = plateSpec.isFitDocument ? markPadPt : (outWpt - srcWpt) / 2;
-      const docOffY = plateSpec.isFitDocument ? markPadPt : (outHpt - srcHpt) / 2;
-      const outPage = outDoc.addPage([outWpt, outHpt]);
+      const outPage = outDoc.addPage([placed.outWpt, placed.outHpt]);
+      const drawOpts = {
+        x: placed.originXpt,
+        y: placed.originYpt,
+        width: placed.artWpt,
+        height: placed.artHpt,
+        ...(Math.abs(placed.rotationDeg) > 0.01
+          ? { rotate: degrees(-placed.rotationDeg) }
+          : {}),
+      };
 
       if (isX1a) {
         // PDF/X-1a flattens transparency/RGB into CMYK calibrated surface
@@ -714,51 +875,42 @@ export async function generateLithographyExports(params: {
           const png = await encodeRgbaToPngBytes(flatRgba, rendered.width, rendered.height);
           if (png) {
             const emb = await outDoc.embedPng(png);
-            outPage.drawImage(emb, { x: docOffX, y: docOffY, width: srcWpt, height: srcHpt });
+            outPage.drawImage(emb, drawOpts);
           } else {
             const embPage = await outDoc.embedPage(srcPage);
-            outPage.drawPage(embPage, { x: docOffX, y: docOffY, width: srcWpt, height: srcHpt });
+            outPage.drawPage(embPage, drawOpts);
           }
         } else {
           const embPage = await outDoc.embedPage(srcPage);
-          outPage.drawPage(embPage, { x: docOffX, y: docOffY, width: srcWpt, height: srcHpt });
+          outPage.drawPage(embPage, drawOpts);
         }
       } else {
         // PDF/X-4 preserves vectors & live layers
         const embPage = await outDoc.embedPage(srcPage);
-        outPage.drawPage(embPage, { x: docOffX, y: docOffY, width: srcWpt, height: srcHpt });
+        outPage.drawPage(embPage, drawOpts);
       }
 
-      const bleedPt = 3 * MM_TO_PT;
-      const trimW = pageMeta?.trimBoxMm ? pageMeta.trimBoxMm.width * MM_TO_PT : Math.max(10, srcWpt - bleedPt * 2);
-      const trimH = pageMeta?.trimBoxMm ? pageMeta.trimBoxMm.height * MM_TO_PT : Math.max(10, srcHpt - bleedPt * 2);
-      const trimOffX = pageMeta?.trimBoxMm
-        ? docOffX + (pageMeta.trimBoxMm.x - pageMeta.mediaBoxMm.x) * MM_TO_PT
-        : docOffX + bleedPt;
-      const trimOffY = pageMeta?.trimBoxMm
-        ? docOffY + (pageMeta.trimBoxMm.y - pageMeta.mediaBoxMm.y) * MM_TO_PT
-        : docOffY + bleedPt;
-
-      outPage.setMediaBox(0, 0, outWpt, outHpt);
-      outPage.setBleedBox(docOffX, docOffY, srcWpt, srcHpt);
-      outPage.setTrimBox(trimOffX, trimOffY, trimW, trimH);
+      outPage.setMediaBox(0, 0, placed.outWpt, placed.outHpt);
+      outPage.setBleedBox(placed.bboxLeftPt, placed.bboxBottomPt, placed.bboxWpt, placed.bboxHpt);
+      outPage.setTrimBox(placed.trimOffX, placed.trimOffY, placed.trimW, placed.trimH);
 
       if (hasMarks) {
-        const plateSlug = plateSpec.isFitDocument
+        const plateSlug = placed.isFitDocument
           ? 'CMYK Composite'
-          : `CMYK (${Math.round(plateSpec.widthMm)}x${Math.round(plateSpec.heightMm)}mm)`;
+          : `CMYK (${Math.round(placed.plateWidthMm)}x${Math.round(placed.plateHeightMm)}mm)`;
         await drawPressMarksOnPdfPage(
           outDoc,
           outPage,
-          trimOffX,
-          trimOffY,
-          trimW,
-          trimH,
+          placed.trimOffX,
+          placed.trimOffY,
+          placed.trimW,
+          placed.trimH,
           exportSettings,
           plateSlug,
           pIdx + 1,
           shamsiDate,
-          false
+          false,
+          !placed.isFitDocument
         );
       }
     }
@@ -853,30 +1005,15 @@ export async function generateLithographyExports(params: {
       sep.k = trapped.plateK;
     }
 
-    const plateSpec = resolveLithoPlateSizeMm(
+    const placed = computeFormPlacementPdf(
+      srcWpt,
+      srcHpt,
       exportSettings,
-      srcWpt / MM_TO_PT,
-      srcHpt / MM_TO_PT,
-      savedPlateSizes
+      savedPlateSizes,
+      markPadPt,
+      pageMeta,
+      formPlacement
     );
-    const outWpt = plateSpec.isFitDocument
-      ? srcWpt + markPadPt * 2
-      : plateSpec.widthMm * MM_TO_PT;
-    const outHpt = plateSpec.isFitDocument
-      ? srcHpt + markPadPt * 2
-      : plateSpec.heightMm * MM_TO_PT;
-    const docOffX = plateSpec.isFitDocument ? markPadPt : (outWpt - srcWpt) / 2;
-    const docOffY = plateSpec.isFitDocument ? markPadPt : (outHpt - srcHpt) / 2;
-
-    const bleedPt = 3 * MM_TO_PT;
-    const trimW = pageMeta?.trimBoxMm ? pageMeta.trimBoxMm.width * MM_TO_PT : Math.max(10, srcWpt - bleedPt * 2);
-    const trimH = pageMeta?.trimBoxMm ? pageMeta.trimBoxMm.height * MM_TO_PT : Math.max(10, srcHpt - bleedPt * 2);
-    const trimOffX = pageMeta?.trimBoxMm
-      ? docOffX + (pageMeta.trimBoxMm.x - pageMeta.mediaBoxMm.x) * MM_TO_PT
-      : docOffX + bleedPt;
-    const trimOffY = pageMeta?.trimBoxMm
-      ? docOffY + (pageMeta.trimBoxMm.y - pageMeta.mediaBoxMm.y) * MM_TO_PT
-      : docOffY + bleedPt;
 
     for (let plateIdx = 0; plateIdx < plateNames.length; plateIdx++) {
       const plateName = plateNames[plateIdx];
@@ -896,23 +1033,50 @@ export async function generateLithographyExports(params: {
         let tiffW = sep.width;
         let tiffH = sep.height;
 
-        if (!plateSpec.isFitDocument && outWpt > srcWpt && outHpt > srcHpt) {
-          const scaleX = sep.width / Math.max(1, srcWpt);
-          const scaleY = sep.height / Math.max(1, srcHpt);
-          const desiredPlateW = Math.round(outWpt * scaleX);
-          const desiredPlateH = Math.round(outHpt * scaleY);
-          if (desiredPlateW <= maxDimPx * 1.4 && desiredPlateH <= maxDimPx * 1.4) {
-            const padded = new Uint8Array(desiredPlateW * desiredPlateH);
-            const offX = Math.max(0, Math.floor((desiredPlateW - sep.width) / 2));
-            const offY = Math.max(0, Math.floor((desiredPlateH - sep.height) / 2));
-            for (let y = 0; y < sep.height; y++) {
-              const dstStart = (offY + y) * desiredPlateW + offX;
-              padded.set(covBuf.subarray(y * sep.width, (y + 1) * sep.width), dstStart);
+        if (placed.isTransformed) {
+          const basePxPerPt = sep.width / Math.max(1, srcWpt);
+          const maxOutPx = maxDimPx * 1.4;
+          const capFactor = Math.min(
+            1,
+            maxOutPx / Math.max(1, placed.outWpt * basePxPerPt),
+            maxOutPx / Math.max(1, placed.outHpt * basePxPerPt)
+          );
+          const effPxPerPt = basePxPerPt * capFactor;
+          const outPxW = Math.max(8, Math.round(placed.outWpt * effPxPerPt));
+          const outPxH = Math.max(8, Math.round(placed.outHpt * effPxPerPt));
+
+          const artWpx = Math.max(1, placed.artWpt * effPxPerPt);
+          const artHpx = Math.max(1, placed.artHpt * effPxPerPt);
+          const artCxPx =
+            outPxW / 2 +
+            (placed.isFitDocument ? 0 : formPlacement.offsetXMm * MM_TO_PT * effPxPerPt);
+          const artCyPx =
+            outPxH / 2 +
+            (placed.isFitDocument ? 0 : formPlacement.offsetYMm * MM_TO_PT * effPxPerPt);
+          const thetaRad = (formPlacement.rotationDeg * Math.PI) / 180;
+          const cosT = Math.cos(thetaRad);
+          const sinT = Math.sin(thetaRad);
+
+          const transformed = new Uint8Array(outPxW * outPxH);
+          for (let oy = 0; oy < outPxH; oy++) {
+            const dy = oy + 0.5 - artCyPx;
+            const rowOff = oy * outPxW;
+            for (let ox = 0; ox < outPxW; ox++) {
+              const dx = ox + 0.5 - artCxPx;
+              const lx = dx * cosT + dy * sinT;
+              const ly = -dx * sinT + dy * cosT;
+              const u = lx / artWpx + 0.5;
+              const v = ly / artHpx + 0.5;
+              if (u >= 0 && u < 1 && v >= 0 && v < 1) {
+                const sx = Math.min(sep.width - 1, Math.floor(u * sep.width));
+                const sy = Math.min(sep.height - 1, Math.floor(v * sep.height));
+                transformed[rowOff + ox] = covBuf[sy * sep.width + sx];
+              }
             }
-            tiffCovBuf = padded;
-            tiffW = desiredPlateW;
-            tiffH = desiredPlateH;
           }
+          tiffCovBuf = transformed;
+          tiffW = outPxW;
+          tiffH = outPxH;
         }
 
         const tiffBytes = hooks?.halftoneRip
@@ -942,10 +1106,15 @@ export async function generateLithographyExports(params: {
         plateDoc.setTitle(`${jobPrefix} — Plate ${plateName} (Page ${pIdx + 1})`);
         plateDoc.setCreator('PrintStudio Pro Lithography Engine');
 
-        const platePage = plateDoc.addPage([outWpt, outHpt]);
-        platePage.setMediaBox(0, 0, outWpt, outHpt);
-        platePage.setBleedBox(docOffX, docOffY, srcWpt, srcHpt);
-        platePage.setTrimBox(trimOffX, trimOffY, trimW, trimH);
+        const platePage = plateDoc.addPage([placed.outWpt, placed.outHpt]);
+        platePage.setMediaBox(0, 0, placed.outWpt, placed.outHpt);
+        platePage.setBleedBox(
+          placed.bboxLeftPt,
+          placed.bboxBottomPt,
+          placed.bboxWpt,
+          placed.bboxHpt
+        );
+        platePage.setTrimBox(placed.trimOffX, placed.trimOffY, placed.trimW, placed.trimH);
 
         // Convert 0..100 ink coverage -> DeviceGray (0% ink = 255 white film, 100% ink = 0 solid black)
         const grayBytes = new Uint8Array(sep.width * sep.height);
@@ -966,27 +1135,28 @@ export async function generateLithographyExports(params: {
         const imgRef = plateDoc.context.register(grayImgDict);
         const xObjName = platePage.node.newXObject('PlateImg', imgRef);
 
-        const drawOp = `q ${srcWpt.toFixed(3)} 0 0 ${srcHpt.toFixed(3)} ${docOffX.toFixed(3)} ${docOffY.toFixed(3)} cm /${xObjName.decodeText()} Do Q\n`;
+        const drawOp = `q ${placed.a.toFixed(4)} ${placed.b.toFixed(4)} ${placed.c.toFixed(4)} ${placed.d.toFixed(4)} ${placed.originXpt.toFixed(4)} ${placed.originYpt.toFixed(4)} cm /${xObjName.decodeText()} Do Q\n`;
         const contentStream = plateDoc.context.stream(new TextEncoder().encode(drawOp));
         const contentRef = plateDoc.context.register(contentStream);
         platePage.node.addContentStream(contentRef);
 
         if (hasMarks) {
-          const plateSlug = plateSpec.isFitDocument
+          const plateSlug = placed.isFitDocument
             ? plateName
-            : `${plateName} (${Math.round(plateSpec.widthMm)}x${Math.round(plateSpec.heightMm)}mm)`;
+            : `${plateName} (${Math.round(placed.plateWidthMm)}x${Math.round(placed.plateHeightMm)}mm)`;
           await drawPressMarksOnPdfPage(
             plateDoc,
             platePage,
-            trimOffX,
-            trimOffY,
-            trimW,
-            trimH,
+            placed.trimOffX,
+            placed.trimOffY,
+            placed.trimW,
+            placed.trimH,
             exportSettings,
             plateSlug,
             pIdx + 1,
             shamsiDate,
-            true
+            true,
+            !placed.isFitDocument
           );
         }
 
