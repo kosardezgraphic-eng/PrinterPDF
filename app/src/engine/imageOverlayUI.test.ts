@@ -540,7 +540,7 @@ describe('picture panel',()=>{
  it('adds a picture from the Insert ribbon at the centre of the current page',async()=>{
   act(()=>root.render(React.createElement(Ribbon)));
   const button=field('Add picture on the page');expect(button).toBeTruthy();
-  const picker=host.querySelector<HTMLInputElement>('input[type="file"][accept="image/*"]')!;
+  const picker=host.querySelector<HTMLInputElement>('input[type="file"][accept^="image/*"]')!;
   Object.defineProperty(picker,'files',{value:[new File([PNG],'stamp.png',{type:'image/png'})]});
   await act(async()=>{picker.dispatchEvent(new Event('change',{bubbles:true}));});await flush();
   expect(useAppStore.getState().overlays).toHaveLength(1);

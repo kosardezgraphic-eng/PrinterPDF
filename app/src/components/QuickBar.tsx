@@ -26,6 +26,7 @@ import {
   LayoutGrid,
   Boxes,
   Hash,
+  ScanSearch,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { PrinterRetryButton } from './PrinterStatus';
@@ -48,6 +49,7 @@ export const QuickBar: React.FC = () => {
     selectedPrinterName,
     quickPrintCopies,
     batchQueue,
+    lithoJobs,
     canUndo,
     canRedo,
     undoLabel,
@@ -292,6 +294,36 @@ export const QuickBar: React.FC = () => {
             <Hash className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             <span>{isFa ? 'شماره قبض' : 'Tickets'}</span>
           </button>
+          <button
+            type="button"
+            data-app-mode-lithography
+            aria-pressed={appMode === 'lithography'}
+            onClick={() => setAppMode('lithography')}
+            title={
+              isFa
+                ? 'محیط مستقل لیتوگرافی و پیش‌چاپ افست — Preflight، مدیریت رنگ ICC، تفکیک پلیت CMYK/اسپات و خروجی زینک'
+                : 'Standalone Offset Lithography & Prepress — Preflight, ICC Color Management & Plate Separation'
+            }
+            className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] font-bold transition-colors whitespace-nowrap cursor-pointer ${
+              appMode === 'lithography'
+                ? 'bg-amber-600 text-white shadow-xs dark:bg-amber-500 dark:text-slate-950'
+                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'
+            }`}
+          >
+            <ScanSearch className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>{isFa ? 'لیتوگرافی' : 'Lithography'}</span>
+            {lithoJobs.length > 0 && (
+              <span
+                className={`rounded-full px-1.5 py-0 text-[10px] font-extrabold tabular-nums ${
+                  appMode === 'lithography'
+                    ? 'bg-white/25 text-current'
+                    : 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'
+                }`}
+              >
+                {lithoJobs.length}
+              </span>
+            )}
+          </button>
         </div>
 
         {appMode === 'batch' ? (
@@ -310,6 +342,15 @@ export const QuickBar: React.FC = () => {
               {isFa
                 ? 'محیط مجزای شماره‌گذاری قبض و فرم — تقسیم‌بندی صفحه، جابجایی با موس، برش و پرفراژ و تولید خودکار در استودیو'
                 : 'Standalone Ticket Numbering — Page Division, Mouse-Draggable Slots & Cut/Perforation Guides'}
+            </span>
+          </div>
+        ) : appMode === 'lithography' ? (
+          <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-900 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-200">
+            <ScanSearch className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>
+              {isFa
+                ? 'محیط مجزای لیتوگرافی و پیش‌چاپ افست — کنترل فایل (Preflight)، تبدیل رنگ ICC، تفکیک پلیت C/M/Y/K + اسپات و خروجی زینک'
+                : 'Standalone Lithography & Prepress — Preflight, ICC Color, Separation Preview & Plate Output'}
             </span>
           </div>
         ) : (

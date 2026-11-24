@@ -5,6 +5,10 @@ import {
 } from '../shared/ipc-channels';
 import type {
   AppSettings,
+  LithoHotFolderIncomingFile,
+  LithoJobPreset,
+  LithoPlateSizePreset,
+  LithoWriteFileEntry,
   PrinterProfileSettings,
   PrinterMarginRequest,
   PrintJobRequest,
@@ -111,6 +115,36 @@ const api: PrintStudioElectronAPI = {
     ipcRenderer.on(IPC_CHANNELS.CLI_OPEN_FILES, listener);
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.CLI_OPEN_FILES, listener);
+    };
+  },
+
+  selectLithoFolder: () => ipcRenderer.invoke(IPC_CHANNELS.LITHO_SELECT_FOLDER),
+
+  writeLithoFiles: (folderPath: string, files: LithoWriteFileEntry[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LITHO_WRITE_FILES, { folderPath, files }),
+
+  saveLithoPresets: (presets: LithoJobPreset[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LITHO_PRESETS_SAVE, presets),
+
+  loadLithoPresets: () => ipcRenderer.invoke(IPC_CHANNELS.LITHO_PRESETS_LOAD),
+
+  saveLithoPlateSizes: (sizes: LithoPlateSizePreset[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LITHO_PLATE_SIZES_SAVE, sizes),
+
+  loadLithoPlateSizes: () => ipcRenderer.invoke(IPC_CHANNELS.LITHO_PLATE_SIZES_LOAD),
+
+  startLithoHotFolder: (folderPath: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LITHO_HOT_FOLDER_START, folderPath),
+
+  stopLithoHotFolder: () => ipcRenderer.invoke(IPC_CHANNELS.LITHO_HOT_FOLDER_STOP),
+
+  onLithoHotFolderFile: (callback: (payload: LithoHotFolderIncomingFile) => void) => {
+    const listener = (_event: unknown, payload: LithoHotFolderIncomingFile) => {
+      if (payload) callback(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.LITHO_HOT_FOLDER_FILE, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.LITHO_HOT_FOLDER_FILE, listener);
     };
   },
 };

@@ -6,6 +6,11 @@
 import type {
   AppSettings,
   BatchJobItem,
+  LithoHotFolderIncomingFile,
+  LithoJobPreset,
+  LithoPlateSizePreset,
+  LithoWriteFileEntry,
+  LithoWriteFilesResult,
   PrinterInfo,
   PrinterMarginRequest,
   PrinterMarginResult,
@@ -70,6 +75,17 @@ export const IPC_CHANNELS = {
   SETTINGS_PRESETS_SAVE: 'settings:presets-save',
   SYSTEM_LIST_FONTS: 'system:list-fonts',
   CACHE_CLEAR: 'cache:clear',
+
+  // Lithography & Offset Prepress
+  LITHO_SELECT_FOLDER: 'litho:select-folder',
+  LITHO_WRITE_FILES: 'litho:write-files',
+  LITHO_PRESETS_LOAD: 'litho:presets-load',
+  LITHO_PRESETS_SAVE: 'litho:presets-save',
+  LITHO_PLATE_SIZES_LOAD: 'litho:plate-sizes-load',
+  LITHO_PLATE_SIZES_SAVE: 'litho:plate-sizes-save',
+  LITHO_HOT_FOLDER_START: 'litho:hot-folder-start',
+  LITHO_HOT_FOLDER_STOP: 'litho:hot-folder-stop',
+  LITHO_HOT_FOLDER_FILE: 'litho:hot-folder-file',
 } as const;
 
 export interface JsonRpcRequest<TParams = unknown> {
@@ -149,6 +165,15 @@ export interface PrintStudioElectronAPI {
   loadSettingsPresets(): Promise<SettingsPreset[] | null>;
   listSystemFonts(forceRefresh?: boolean): Promise<string[]>;
   clearCache(): Promise<boolean>;
+  selectLithoFolder?: () => Promise<string | null>;
+  writeLithoFiles?: (folderPath: string, files: LithoWriteFileEntry[]) => Promise<LithoWriteFilesResult>;
+  saveLithoPresets?: (presets: LithoJobPreset[]) => Promise<boolean>;
+  loadLithoPresets?: () => Promise<LithoJobPreset[] | null>;
+  saveLithoPlateSizes?: (sizes: LithoPlateSizePreset[]) => Promise<boolean>;
+  loadLithoPlateSizes?: () => Promise<LithoPlateSizePreset[] | null>;
+  startLithoHotFolder?: (folderPath: string) => Promise<{ ok: boolean; error?: string }>;
+  stopLithoHotFolder?: () => Promise<boolean>;
+  onLithoHotFolderFile?: (callback: (payload: LithoHotFolderIncomingFile) => void) => () => void;
 }
 
 declare global {

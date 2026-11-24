@@ -106,7 +106,7 @@ export function ImageControlPanel(){
    {item.target==='sheet' && item.sheetFill!=='each-cell' && <p className="text-[10px] leading-4 text-slate-500 dark:text-slate-400">{fa
      ? 'روی شیت چیده شده و به همان یک شکل چاپ می‌شود؛ در ماتریس تکرار نمی‌شود.'
      : 'Placed once on the sheet and printed once — it is not repeated by the matrix.'}</p>}
-   <label className="block">{fa?'جایگزینی تصویر':'Replace picture'}<input data-image-source type="file" accept="image/*" className={input} onChange={e=>void replace(e.target.files?.[0])}/></label>
+   <label className="block">{fa?'جایگزینی تصویر':'Replace picture'}<input data-image-source type="file" accept="image/*,.tif,.tiff,.psd,.webp,.heic,.heif,.bmp,.svg" className={input} onChange={e=>void replace(e.target.files?.[0])}/></label>
    <div className="flex gap-1">
      <label className="flex-1">{fa?'عرض (میلی‌متر)':'Width (mm)'}<input aria-label={fa?'عرض تصویر':'Image width'} type="number" min="1" max="2000" step="0.1" className={input} value={Number(widthMm.toFixed(2))} onChange={e=>setMm('width',Number(e.target.value))}/></label>
      <label className="flex-1">{fa?'ارتفاع (میلی‌متر)':'Height (mm)'}<input aria-label={fa?'ارتفاع تصویر':'Image height'} type="number" min="1" max="2000" step="0.1" className={input} value={Number(heightMm.toFixed(2))} onChange={e=>setMm('height',Number(e.target.value))}/></label>

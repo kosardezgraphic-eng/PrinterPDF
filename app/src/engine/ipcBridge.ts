@@ -7,6 +7,11 @@
 
 import type {
   AppSettings,
+  LithoHotFolderIncomingFile,
+  LithoJobPreset,
+  LithoPlateSizePreset,
+  LithoWriteFileEntry,
+  LithoWriteFilesResult,
   PaperSizeId,
   PrinterInfo,
   PrinterMarginRequest,
@@ -101,7 +106,7 @@ export function selectOptimalPrinter(
 
 /** Never substitute a simulated printer for an unavailable Electron bridge. */
 function electronApi() {
-  if (window.printStudioAPI?.isElectron) return window.printStudioAPI;
+  if (typeof window !== 'undefined' && window.printStudioAPI?.isElectron) return window.printStudioAPI;
   if (typeof navigator !== 'undefined' && /Electron\//i.test(navigator.userAgent)) {
     throw new Error('Electron preload bridge is unavailable');
   }
@@ -509,6 +514,110 @@ export const ipcBridge = {
     const api = window.printStudioAPI;
     if (api?.isElectron && typeof api.onVirtualPrinterJob === 'function') {
       return api.onVirtualPrinterJob(callback);
+    }
+    return () => undefined;
+  },
+
+  async selectLithoFolder(): Promise<string | null> {
+    const api = electronApi();
+    if (api && typeof api.selectLithoFolder === 'function') {
+      return api.selectLithoFolder();
+    }
+    return null;
+  },
+
+  async writeLithoFiles(
+    folderPath: string,
+    files: LithoWriteFileEntry[]
+  ): Promise<LithoWriteFilesResult | null> {
+    const api = electronApi();
+    if (api && typeof api.writeLithoFiles === 'function') {
+      return api.writeLithoFiles(folderPath, files);
+    }
+    return null;
+  },
+
+  async saveLithoPresets(presets: LithoJobPreset[]): Promise<boolean> {
+    const api = electronApi();
+    if (api && typeof api.saveLithoPresets === 'function') {
+      return api.saveLithoPresets(presets);
+    }
+    try {
+      localStorage.setItem('printstudio:litho-presets', JSON.stringify(presets));
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  async loadLithoPresets(): Promise<LithoJobPreset[] | null> {
+    const api = electronApi();
+    if (api && typeof api.loadLithoPresets === 'function') {
+      return api.loadLithoPresets();
+    }
+    try {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('printstudio:litho-presets') : null;
+      const parsed = raw ? JSON.parse(raw) : null;
+      return Array.isArray(parsed) ? (parsed as LithoJobPreset[]) : null;
+    } catch {
+      return null;
+    }
+  },
+
+  async saveLithoPlateSizes(sizes: LithoPlateSizePreset[]): Promise<boolean> {
+    const api = electronApi();
+    if (api && typeof api.saveLithoPlateSizes === 'function') {
+      return api.saveLithoPlateSizes(sizes);
+    }
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('printstudio:litho-plate-sizes', JSON.stringify(sizes));
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  async loadLithoPlateSizes(): Promise<LithoPlateSizePreset[] | null> {
+    const api = electronApi();
+    if (api && typeof api.loadLithoPlateSizes === 'function') {
+      return api.loadLithoPlateSizes();
+    }
+    try {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('printstudio:litho-plate-sizes') : null;
+      const parsed = raw ? JSON.parse(raw) : null;
+      return Array.isArray(parsed) ? (parsed as LithoPlateSizePreset[]) : null;
+    } catch {
+      return null;
+    }
+  },
+
+  async startLithoHotFolder(folderPath: string): Promise<{ ok: boolean; error?: string }> {
+    const api = electronApi();
+    if (api && typeof api.startLithoHotFolder === 'function') {
+      return api.startLithoHotFolder(folderPath);
+    }
+    return {
+      ok: false,
+      error: 'پایش خودکار پوشه در محیط وب از طریق رهاسازی یا انتخاب گروهی فایل انجام می‌شود.',
+    };
+  },
+
+  async stopLithoHotFolder(): Promise<boolean> {
+    const api = electronApi();
+    if (api && typeof api.stopLithoHotFolder === 'function') {
+      return api.stopLithoHotFolder();
+    }
+    return true;
+  },
+
+  listenForLithoHotFolderFiles(
+    callback: (payload: LithoHotFolderIncomingFile) => void
+  ): () => void {
+    const api = typeof window !== 'undefined' ? window.printStudioAPI : undefined;
+    if (api?.isElectron && typeof api.onLithoHotFolderFile === 'function') {
+      return api.onLithoHotFolderFile(callback);
     }
     return () => undefined;
   },

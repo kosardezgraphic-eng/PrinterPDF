@@ -29,6 +29,7 @@ import { RulerGuideProvider, SheetRuler, GuidePaperRef, UserGuideLines } from '.
 import { SmartGuideProvider } from './SmartGuidesOverlay';
 import { TextOverlayLayer } from './TextOverlayLayer';
 import { hasImageTransfer, routeDroppedFiles } from '../engine/imageImport';
+import { ACCEPTED_DOCUMENT_INPUT_ACCEPT } from '../engine/universalImageDecoder';
 import { AspectCropControls } from './AspectCropControls';
 import { t } from '../i18n/translations';
 import {
@@ -122,6 +123,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     openPageSetup,
     updateSettings,
     setAppMode,
+    sendStudioSheetsToLithography,
   } = useAppStore();
 
   const activeWorkspaceDrawer = workspaceDrawer === 'closed'
@@ -1288,7 +1290,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
         ref={fileInputRef}
         type="file"
         multiple
-        accept=".pdf,image/*"
+        accept={ACCEPTED_DOCUMENT_INPUT_ACCEPT}
         className="hidden"
         onChange={(e) => {
           const list = e.target.files ? Array.from(e.target.files) : [];
@@ -1412,6 +1414,18 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
             >
               <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
               <span className="hidden sm:inline">{lang === 'fa' ? 'بازنشانی برش' : 'Reset'}</span>
+            </button>
+
+            <button
+              type="button"
+              data-studio-send-litho
+              disabled={!!previewOnlyPage || pages.every((p) => !p.selectedForPrint)}
+              title={lang === 'fa' ? 'ارسال شیت فعلی به بخش لیتوگرافی برای پیش‌کنترل و پلیت‌گیری' : 'Send active sheet to Lithography workspace'}
+              onClick={() => void sendStudioSheetsToLithography('active-sheet')}
+              className="flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-2 py-0.5 font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-45 dark:border-amber-500/40 dark:bg-amber-950/30 dark:text-amber-200 dark:hover:bg-amber-950/50 cursor-pointer"
+            >
+              <Layers className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+              <span>{lang === 'fa' ? 'ارسال شیت به لیتوگرافی' : 'Send Sheet to Litho'}</span>
             </button>
           </div>
           {canvasTool === 'move' && <span className="sr-only">{lang === 'fa' ? 'روی تصویر کلیک کنید؛ برای ترتیب لایه راست‌کلیک کنید یا انگشت را نگه دارید.' : 'Click an image to edit it. Right-click or touch and hold for layer order.'}</span>}

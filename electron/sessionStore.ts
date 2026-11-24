@@ -5,6 +5,8 @@ import { promisify } from 'node:util';
 import { sanitizeSettingsPresetList } from '../shared/models.js';
 import type {
   AppSettings,
+  LithoJobPreset,
+  LithoPlateSizePreset,
   PspProjectFile,
   SettingsPreset,
   VirtualPrinterConfig,
@@ -106,6 +108,54 @@ export class SessionStore {
     } catch {
       // A missing file is the normal case on a first run; a broken one is treated the same way.
       return [];
+    }
+  }
+
+  private get lithoPresetsPath(): string {
+    return path.join(this.userDataDir, 'litho-presets.json');
+  }
+
+  public async saveLithoPresets(presets: LithoJobPreset[]): Promise<boolean> {
+    try {
+      await fs.mkdir(this.userDataDir, { recursive: true });
+      await fs.writeFile(this.lithoPresetsPath, JSON.stringify(presets, null, 2), 'utf8');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  public async loadLithoPresets(): Promise<LithoJobPreset[] | null> {
+    try {
+      const content = await fs.readFile(this.lithoPresetsPath, 'utf8');
+      const parsed = JSON.parse(content);
+      return Array.isArray(parsed) ? (parsed as LithoJobPreset[]) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private get lithoPlateSizesPath(): string {
+    return path.join(this.userDataDir, 'litho-plate-sizes.json');
+  }
+
+  public async saveLithoPlateSizes(sizes: LithoPlateSizePreset[]): Promise<boolean> {
+    try {
+      await fs.mkdir(this.userDataDir, { recursive: true });
+      await fs.writeFile(this.lithoPlateSizesPath, JSON.stringify(sizes, null, 2), 'utf8');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  public async loadLithoPlateSizes(): Promise<LithoPlateSizePreset[] | null> {
+    try {
+      const content = await fs.readFile(this.lithoPlateSizesPath, 'utf8');
+      const parsed = JSON.parse(content);
+      return Array.isArray(parsed) ? (parsed as LithoPlateSizePreset[]) : null;
+    } catch {
+      return null;
     }
   }
 

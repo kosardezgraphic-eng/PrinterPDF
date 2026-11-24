@@ -187,7 +187,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
         ref={fileInputRef}
         type="file"
         multiple
-        accept=".pdf,image/*,.tiff,.tif,.heic"
+        accept=".pdf,image/*,.tif,.tiff,.psd,.webp,.heic,.heif,.bmp,.svg"
         className="hidden"
         onChange={(e) => {
           const fileList = e.target.files ? Array.from(e.target.files) : [];
@@ -849,7 +849,7 @@ export const Ribbon: React.FC<RibbonProps> = ({
                   <ClipboardPaste className="h-4 w-4" aria-hidden="true" />
                   <span>{lang === 'fa' ? 'چسباندن تصویر از کلیپ‌بورد' : 'Paste picture'}</span>
                 </button>
-                <input ref={imageInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e=>{const files=e.target.files?Array.from(e.target.files):[];if(files.length)void addImageOverlayFiles(files);e.target.value='';}}/>
+                <input ref={imageInputRef} type="file" accept="image/*,.tif,.tiff,.psd,.webp,.heic,.heif,.bmp,.svg" multiple className="hidden" onChange={e=>{const files=e.target.files?Array.from(e.target.files):[];if(files.length)void addImageOverlayFiles(files);e.target.value='';}}/>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">{lang==='fa'?'یا فایل تصویر را مستقیم روی برگه در پیش‌نمایش رها کنید.' : 'Or drop an image file straight onto a sheet in the preview.'}</span>
               </div>
               <button type="button" disabled={!pages.length} onClick={()=>addNumberingOverlay()} aria-label={lang==='fa'?'افزودن شماره صفحه قابل ویرایش':'Add editable page number'} className="rounded-lg border border-emerald-500 bg-emerald-600 px-3 py-2 font-semibold text-white hover:bg-emerald-500 disabled:opacity-40 cursor-pointer">{lang==='fa'?'افزودن شماره صفحه':'Add page number'}</button>

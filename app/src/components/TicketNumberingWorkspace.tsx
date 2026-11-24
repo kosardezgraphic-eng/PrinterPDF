@@ -1323,7 +1323,7 @@ export const TicketNumberingWorkspace: React.FC = () => {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pdf,image/*"
+              accept=".pdf,image/*,.tif,.tiff,.psd,.webp,.heic,.heif,.bmp,.svg"
               className="hidden"
               onChange={(e) => {
                 const files = e.target.files ? Array.from(e.target.files) : [];

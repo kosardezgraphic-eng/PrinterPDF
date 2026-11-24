@@ -42,6 +42,10 @@ import type { PdfCompressionMode, PdfImageHandling } from '@shared/models';
 import { useAppStore, type InspectorToolId } from '../store/useAppStore';
 import { computeImpositionSheets } from '../engine/layoutEngine';
 import { checkPreflight } from '../engine/preflight';
+import {
+  ACCEPTED_DOCUMENT_INPUT_ACCEPT,
+  ACCEPTED_IMAGE_INPUT_ACCEPT,
+} from '../engine/universalImageDecoder';
 import { SettingsPresetMenu } from './SettingsPresets';
 import { Tooltip } from './Tooltip';
 import { t } from '../i18n/translations';
@@ -97,6 +101,7 @@ export const TopToolRibbon: React.FC = () => {
     openPdfPreviewModal,
     setPdfExportOptions,
     savePspProject,
+    sendStudioSheetsToLithography,
   } = useAppStore();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -235,7 +240,7 @@ export const TopToolRibbon: React.FC = () => {
         ref={fileInputRef}
         type="file"
         multiple
-        accept=".pdf,image/*"
+        accept={ACCEPTED_DOCUMENT_INPUT_ACCEPT}
         className="hidden"
         onChange={(e) => {
           const list = e.target.files ? Array.from(e.target.files) : [];
@@ -247,7 +252,7 @@ export const TopToolRibbon: React.FC = () => {
         ref={pictureInputRef}
         type="file"
         multiple
-        accept="image/*"
+        accept={ACCEPTED_IMAGE_INPUT_ACCEPT}
         className="hidden"
         onChange={(e) => {
           const list = e.target.files ? Array.from(e.target.files) : [];
@@ -926,6 +931,21 @@ export const TopToolRibbon: React.FC = () => {
             <FileSearch className="h-6 w-6 text-red-600 dark:text-red-400" aria-hidden="true" />
             <span className="text-[10px] font-semibold leading-tight text-center tabular-nums">
               {isGeneratingPdfPreview && exportProgress > 0 ? `${exportProgress}%` : labels.viewPdf}
+            </span>
+          </button>
+        </Tooltip>
+
+        <Tooltip label={isFa ? 'ارسال شیت‌های استادیو به بخش لیتوگرافی' : 'Send Studio Sheets to Lithography'} side="bottom">
+          <button
+            type="button"
+            data-ribbon-action="send-to-lithography"
+            disabled={pages.every((p) => !p.selectedForPrint) || isExportingPdf}
+            onClick={() => void sendStudioSheetsToLithography('all')}
+            className="flex h-[68px] w-[62px] flex-col items-center justify-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-1 text-amber-900 hover:bg-amber-100 disabled:opacity-45 dark:border-amber-500/40 dark:bg-amber-950/30 dark:text-amber-200 dark:hover:bg-amber-950/50 cursor-pointer"
+          >
+            <Layers className="h-5 w-5 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+            <span className="text-[10px] font-semibold leading-tight text-center">
+              {isFa ? 'ارسال به لیتوگرافی' : 'To Litho'}
             </span>
           </button>
         </Tooltip>

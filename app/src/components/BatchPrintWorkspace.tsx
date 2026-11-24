@@ -244,7 +244,7 @@ export const BatchPrintWorkspace: React.FC = () => {
             ref={fileInputRef}
             type="file"
             multiple
-            accept=".pdf,image/*"
+            accept=".pdf,image/*,.tif,.tiff,.psd,.webp,.heic,.heif,.bmp,.svg"
             className="hidden"
             onChange={(e) => {
               const list = Array.from(e.target.files ?? []);

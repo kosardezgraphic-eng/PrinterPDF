@@ -12,6 +12,7 @@ import { StatusBar } from './components/StatusBar';
 import { ModalsAndToasts } from './components/Modals';
 import { BatchPrintWorkspace } from './components/BatchPrintWorkspace';
 import { TicketNumberingWorkspace } from './components/TicketNumberingWorkspace';
+import { LithographyWorkspace } from './components/LithographyWorkspace';
 import { routeDroppedFiles } from './engine/imageImport';
 import { extractFilesFromClipboardData } from './engine/clipboardImport';
 import { buildSheetPresetRows, findPresetIdByShortcut } from './engine/sheetPresets';
@@ -46,6 +47,7 @@ export const App: React.FC = () => {
     setSidebarWidthPx,
     refreshVirtualPrinterStatus,
     handleIncomingVirtualPrinterJob,
+    handleLithoHotFolderFile,
   } = useAppStore();
 
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
@@ -83,10 +85,19 @@ export const App: React.FC = () => {
     const stopVirtual = ipcBridge.listenForVirtualPrinterJobs((payload) => {
       void handleIncomingVirtualPrinterJob(payload);
     });
+    const stopHotFolder = ipcBridge.listenForLithoHotFolderFiles((payload) => {
+      void handleLithoHotFolderFile(payload);
+    });
     return () => {
       stopVirtual();
+      stopHotFolder();
     };
-  }, [initializeWorkspace, refreshVirtualPrinterStatus, handleIncomingVirtualPrinterJob]);
+  }, [
+    initializeWorkspace,
+    refreshVirtualPrinterStatus,
+    handleIncomingVirtualPrinterJob,
+    handleLithoHotFolderFile,
+  ]);
 
   // Settings and saved profiles are written to disk as they change, so they have to be read back once,
   // before the operator touches anything — otherwise a restart quietly throws away the whole setup.
@@ -207,7 +218,7 @@ export const App: React.FC = () => {
       }
 
       const state = useAppStore.getState();
-      if (state.appMode === 'batch' || state.appMode === 'ticket') {
+      if (state.appMode === 'batch' || state.appMode === 'ticket' || state.appMode === 'lithography') {
         if (e.ctrlKey || e.metaKey) {
           if (e.key === '/' || e.key === '?' || e.code === 'Slash') {
             e.preventDefault();
@@ -359,6 +370,8 @@ export const App: React.FC = () => {
         void useAppStore.getState().addBatchFiles(documents);
       } else if (mode === 'ticket') {
         void useAppStore.getState().importTicketSourceFiles(documents);
+      } else if (mode === 'lithography') {
+        void useAppStore.getState().importLithoFiles(documents);
       } else {
         void importFiles(documents);
       }
@@ -388,6 +401,8 @@ export const App: React.FC = () => {
         void useAppStore.getState().addBatchFiles(extracted);
       } else if (mode === 'ticket') {
         void useAppStore.getState().importTicketSourceFiles(extracted);
+      } else if (mode === 'lithography') {
+        void useAppStore.getState().importLithoFiles(extracted);
       } else {
         void importFiles(extracted);
       }
@@ -417,6 +432,8 @@ export const App: React.FC = () => {
             <BatchPrintWorkspace />
           ) : appMode === 'ticket' ? (
             <TicketNumberingWorkspace />
+          ) : appMode === 'lithography' ? (
+            <LithographyWorkspace />
           ) : (
             <div dir="ltr" className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
               <SidebarPages />

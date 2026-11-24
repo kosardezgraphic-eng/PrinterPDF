@@ -1204,3 +1204,232 @@ export function shortcutMatchesEvent(shortcut: string, event: KeyEventLike): boo
   const fired = formatShortcut(event);
   return !!fired && fired === shortcut;
 }
+
+/**
+ * L) Offset Prepress & Lithography Environment Models
+ */
+export type LithoIccProfileId = 'FOGRA39' | 'FOGRA51' | 'GRACoL' | 'SWOP' | 'custom';
+export type LithoRenderingIntent =
+  | 'perceptual'
+  | 'relative-colorimetric'
+  | 'saturation'
+  | 'absolute-colorimetric';
+export type LithoGcrLevel = 'none' | 'light' | 'medium' | 'heavy' | 'max-k';
+export type LithoOutputFormat = 'plate-pdf' | 'tiff-1bit' | 'pdf-x1a' | 'pdf-x4';
+export type LithoExportDpi = 300 | 600 | 1200 | 2400;
+export type LithoSpotHandling = 'keep-spot' | 'convert-cmyk';
+
+export interface LithoSpotChannel {
+  name: string;
+  alternateCmyk: [number, number, number, number];
+  previewHex: string;
+  handling: LithoSpotHandling;
+  maxCoveragePercent: number;
+}
+
+export interface LithoCustomIccProfile {
+  id: string;
+  name: string;
+  fileName: string;
+  colorSpace: 'CMYK' | 'RGB' | 'UNKNOWN';
+  pcs: string;
+  version: string;
+  description: string;
+  whitePoint?: [number, number, number];
+  tacDefault: number;
+  rawBytes: Uint8Array;
+}
+
+export interface LithoBlackRuleSettings {
+  blackTextMaxPtToKOnly: boolean;
+  blackTextPtThreshold: number;
+  preservePureBlack: boolean;
+  richBlackC: number;
+  richBlackM: number;
+  richBlackY: number;
+  richBlackK: number;
+}
+
+export interface LithoColorSettings {
+  iccProfile: LithoIccProfileId;
+  customProfileName?: string;
+  customIcc?: LithoCustomIccProfile | null;
+  renderingIntent: LithoRenderingIntent;
+  blackPointCompensation: boolean;
+  maxTacPercent: number;
+  gcrLevel: LithoGcrLevel;
+  ucrStrengthPercent: number;
+  blackRule: LithoBlackRuleSettings;
+  simulateOverprint: boolean;
+  spotChannels: Record<string, LithoSpotHandling>;
+}
+
+export type LithoPlateOrientation = 'auto' | 'portrait' | 'landscape';
+
+export interface LithoPlateSizePreset {
+  id: string;
+  nameFa: string;
+  nameEn: string;
+  widthMm: number;
+  heightMm: number;
+  isBuiltIn?: boolean;
+}
+
+export interface LithoExportSettings {
+  format: LithoOutputFormat;
+  dpi: LithoExportDpi;
+  includeCropMarks: boolean;
+  includeRegistrationMarks: boolean;
+  includeColorBar: boolean;
+  includeSlug: boolean;
+  jobNamePrefix: string;
+  outputFolder?: string;
+  plateSizeId?: string;
+  plateWidthMm?: number;
+  plateHeightMm?: number;
+  plateOrientation?: LithoPlateOrientation;
+}
+
+export type LithoPreflightSeverity = 'error' | 'warning' | 'pass';
+export type LithoPreflightCheckId =
+  | 'fonts-embedded'
+  | 'image-dpi'
+  | 'bleed'
+  | 'rgb-lab'
+  | 'tac-limit'
+  | 'hairline'
+  | 'transparency-overprint';
+
+export interface LithoPreflightItem {
+  id: LithoPreflightCheckId;
+  titleFa: string;
+  titleEn: string;
+  severity: LithoPreflightSeverity;
+  summaryFa: string;
+  summaryEn: string;
+  explanationFa: string;
+  explanationEn: string;
+  affectedPages: number[];
+  autoFixable: boolean;
+  detailMetrics?: string;
+}
+
+export interface LithoBoxMm {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface LithoPageInfo {
+  pageNumber: number;
+  widthMm: number;
+  heightMm: number;
+  mediaBoxMm: LithoBoxMm;
+  trimBoxMm: LithoBoxMm | null;
+  bleedBoxMm: LithoBoxMm | null;
+  hasExplicitTrimBox: boolean;
+  hasExplicitBleedBox: boolean;
+  hasMinBleed3Mm: boolean;
+  minBleedMm: number;
+  colorSpaces: string[];
+  imageCount: number;
+  minEffectiveDpi: number | null;
+  lowResImages: Array<{ name: string; dpi: number }>;
+  hairlineCount: number;
+  hasRgbOrLab: boolean;
+  hasTransparency: boolean;
+  hasSuspiciousOverprint: boolean;
+  estimatedMaxTacPercent: number;
+  tacExceedAreaPercent: number;
+  textColorSummary: string;
+}
+
+export interface LithoDocumentMetadata {
+  fileName: string;
+  fileSizeBytes: number;
+  pageCount: number;
+  pdfVersion: string;
+  colorSpaces: string[];
+  unembeddedFonts: string[];
+  embeddedFontsCount: number;
+  pages: LithoPageInfo[];
+  detectedSpots: LithoSpotChannel[];
+  hasAnyTransparency: boolean;
+  hasAnyOverprint: boolean;
+  overallColorMode: 'CMYK' | 'CMYK+Spot' | 'RGB/Mixed' | 'Grayscale';
+  sourceFormat?: string;
+}
+
+export interface LithoPreflightReport {
+  checkedAtIso: string;
+  shamsiDate: string;
+  tacThresholdPercent: number;
+  items: LithoPreflightItem[];
+  errorCount: number;
+  warningCount: number;
+  passCount: number;
+  isReadyForPress: boolean;
+  wasAutoFixed: boolean;
+}
+
+export interface LithoJobPreset {
+  id: string;
+  name: string;
+  createdAt: string;
+  color: Omit<LithoColorSettings, 'customIcc' | 'spotChannels'>;
+  exportSettings: LithoExportSettings;
+  tacThresholdPercent: number;
+  autoFixOnProcess: boolean;
+}
+
+export type LithoJobStatus = 'queued' | 'processing' | 'done' | 'error';
+
+export interface LithoQueueJob {
+  id: string;
+  fileName: string;
+  filePath?: string;
+  fileSizeBytes: number;
+  status: LithoJobStatus;
+  addedAt: string;
+  processedAt?: string;
+  sourceBytes?: Uint8Array;
+  fixedBytes?: Uint8Array;
+  metadata?: LithoDocumentMetadata;
+  preflight?: LithoPreflightReport;
+  presetId?: string;
+  outputFilesCount?: number;
+  outputFolder?: string;
+  errorMessage?: string;
+  fromHotFolder?: boolean;
+  sourceFormat?: string;
+}
+
+export interface LithoHotFolderStatus {
+  enabled: boolean;
+  folderPath: string;
+  presetId: string;
+  autoExportOnDrop: boolean;
+  watcherActive: boolean;
+  processedCount: number;
+  lastFileAt?: string;
+  lastError?: string | null;
+}
+
+export interface LithoHotFolderIncomingFile {
+  name: string;
+  path: string;
+  size: number;
+  bytes: Uint8Array;
+}
+
+export interface LithoWriteFileEntry {
+  fileName: string;
+  bytes: Uint8Array;
+}
+
+export interface LithoWriteFilesResult {
+  folderPath: string;
+  writtenFiles: string[];
+}
+

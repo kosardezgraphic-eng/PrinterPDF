@@ -44,6 +44,11 @@ import { applyEffectsToRgbaBuffer, resolvePageEffects, type ResolvedPageEffects 
 import { formatPageNumberLabel, resolveTextMacros } from './watermarkEngine';
 import { globalThumbnailCache } from './pageCache';
 import {
+  decodeUniversalImageToPages,
+  decodedPageToDataUrl,
+  isSupportedImageFileNameOrType,
+} from './universalImageDecoder';
+import {
   type RealPdfPageAnalysis,
 } from './pdfRealRenderer';
 import type {
@@ -523,19 +528,17 @@ export async function importFilesBatch(
 
       const isPdf =
         lower.endsWith('.pdf') || file.type === 'application/pdf';
-      const isImage =
-        /\.(jpe?g|png|webp|bmp|gif|tiff?|heic|svg)$/i.test(lower) ||
-        file.type.startsWith('image/');
+      const isImage = !isPdf && isSupportedImageFileNameOrType(file.name, file.type);
 
       if (!isPdf && !isImage) {
         errors.push({
           fileName: file.name,
           reasonFa: `فرمت فایل «${file.name}» پشتیبانی نمی‌شود.`,
           solutionFa:
-            'لطفاً فایل‌های PDF یا تصاویر استاندارد (JPG، PNG، TIFF، WEBP، BMP) را وارد کنید.',
+            'لطفاً فایل‌های PDF یا تصاویر استاندارد (JPG، PNG، TIFF، PSD، WEBP، HEIC، BMP) را وارد کنید.',
           reasonEn: `Unsupported file format for "${file.name}".`,
           solutionEn:
-            'Please import PDF or standard image files (JPG, PNG, TIFF, WEBP, BMP).',
+            'Please import PDF or supported image files (JPG, PNG, TIFF, PSD, WEBP, HEIC, BMP).',
         });
         continue;
       }
@@ -599,58 +602,82 @@ export async function importFilesBatch(
           }
         }
       } else {
-        // Image import (A1 / C5)
+        // Universal Image import (PNG, JPEG, TIFF, PSD, WebP, HEIC/HEIF, BMP, GIF, SVG)
+        const decodedPages = await decodeUniversalImageToPages(bytes, file.name, file.type);
         const imageDoc = await PDFDocument.create();
-        const isPng = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
-        const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
-        if (!isPng && !isJpeg) throw new Error('Image format not supported for PDF export: use PNG or JPEG');
-        const image = isPng ? await imageDoc.embedPng(bytes) : await imageDoc.embedJpg(bytes);
-        // Fit the source aspect ratio into an A4-sized page without distorting pixels.
-        const imageScale = Math.min(210 / image.width, 297 / image.height);
-        const docId = `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        const blobUrl = URL.createObjectURL(file);
-        const pageId = `page-${docId}-1`;
+        for (let pIdx = 0; pIdx < decodedPages.length; pIdx++) {
+          const dPage = decodedPages[pIdx];
+          // Verify PDF-embeddability via pdf-lib
+          const embeddedCheck =
+            dPage.mimeType === 'image/png'
+              ? await imageDoc.embedPng(dPage.bytes)
+              : await imageDoc.embedJpg(dPage.bytes);
 
-        documents.push({
-          id: docId,
-          name: file.name,
-          filePath: file.name,
-          fileSize: file.size,
-          fileType: 'image',
-          mimeType: isPng ? 'image/png' : 'image/jpeg',
-          pageCount: 1,
-          createdAt: new Date().toISOString(),
-          rawBytes: bytes,
-        });
+          const imgW = embeddedCheck.width || dPage.width;
+          const imgH = embeddedCheck.height || dPage.height;
+          // Fit source aspect ratio into an A4-sized page without distorting pixels (or honor physical DPI if valid)
+          const imageScale = Math.min(210 / imgW, 297 / imgH);
+          const physW = dPage.dpiX ? (imgW / dPage.dpiX) * 25.4 : imgW * imageScale;
+          const physH = dPage.dpiY ? (imgH / dPage.dpiY) * 25.4 : imgH * imageScale;
+          const finalW = physW >= 5 && physW <= 1200 ? physW : imgW * imageScale;
+          const finalH = physH >= 5 && physH <= 1200 ? physH : imgH * imageScale;
 
-        globalThumbnailCache.set(pageId, blobUrl);
+          const docDisplayName =
+            decodedPages.length > 1 ? `${file.name} (ص ${pIdx + 1})` : file.name;
+          const docId = `img-${Date.now()}-${pIdx}-${Math.random().toString(36).slice(2, 7)}`;
+          const safeBuf = new Uint8Array(dPage.bytes);
+          const previewUrl =
+            typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
+              ? URL.createObjectURL(new Blob([safeBuf], { type: dPage.mimeType }))
+              : decodedPageToDataUrl(dPage);
+          const pageId = `page-${docId}-1`;
 
-        pages.push({
-          id: pageId,
-          documentId: docId,
-          documentName: file.name,
-          sourcePageNumber: 1,
-          widthMm: image.width * imageScale,
-          heightMm: image.height * imageScale,
-          rotation: 0,
-          selectedForPrint: true,
-          isHighlighted: i === 0,
-          isBlankPage: false,
-          colorProfile: 'color',
-          inkCoveragePercent: 34.5,
-          thumbnailDataUrl: blobUrl,
-          previewLines: [`تصویر ورودی: ${file.name}`, `حجم: ${(file.size / 1024).toFixed(1)} KB`],
-          previewAccentColor: '#059669',
-        });
+          documents.push({
+            id: docId,
+            name: docDisplayName,
+            filePath: file.name,
+            fileSize: pIdx === 0 ? file.size || bytes.byteLength : dPage.bytes.byteLength,
+            fileType: 'image',
+            mimeType: dPage.mimeType,
+            pageCount: 1,
+            createdAt: new Date().toISOString(),
+            rawBytes: dPage.bytes,
+          });
 
-        bookmarks.push({
-          id: `bm-${docId}`,
-          title: file.name,
-          documentId: docId,
-          targetPageId: pageId,
-          pageIndex: pages.length - 1,
-          level: 0,
-        });
+          globalThumbnailCache.set(pageId, previewUrl);
+
+          pages.push({
+            id: pageId,
+            documentId: docId,
+            documentName: docDisplayName,
+            sourcePageNumber: 1,
+            widthMm: finalW,
+            heightMm: finalH,
+            rotation: 0,
+            selectedForPrint: true,
+            isHighlighted: i === 0 && pIdx === 0,
+            isBlankPage: false,
+            colorProfile: dPage.colorSpace === 'Grayscale' ? 'grayscale' : 'color',
+            inkCoveragePercent: 34.5,
+            thumbnailDataUrl: previewUrl,
+            previewLines: [
+              `تصویر ورودی (${dPage.formatLabel}): ${docDisplayName}`,
+              `${imgW}×${imgH} px · ${dPage.colorSpace}${dPage.dpiX ? ` · ${dPage.dpiX} DPI` : ''}`,
+            ],
+            previewAccentColor: '#059669',
+          });
+
+          if (pIdx === 0) {
+            bookmarks.push({
+              id: `bm-${docId}`,
+              title: file.name,
+              documentId: docId,
+              targetPageId: pageId,
+              pageIndex: pages.length - 1,
+              level: 0,
+            });
+          }
+        }
       }
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
@@ -1867,6 +1894,13 @@ export function triggerBlobDownload(
   fileName: string,
   mimeType = 'application/pdf'
 ): void {
+  if (
+    typeof document === 'undefined' ||
+    typeof URL === 'undefined' ||
+    typeof URL.createObjectURL !== 'function'
+  ) {
+    return;
+  }
   const safeBytes =
     typeof bytes === 'string'
       ? bytes

@@ -267,7 +267,7 @@ export const ToolPanel: React.FC = () => {
           <input
             ref={imageInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,.tif,.tiff,.psd,.webp,.heic,.heif,.bmp,.svg"
             multiple
             className="hidden"
             onChange={(e) => {

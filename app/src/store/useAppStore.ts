@@ -37,6 +37,14 @@ import type {
   VirtualPrinterIncomingPayload,
   VirtualPrinterStatus,
   WatermarkSettings,
+  LithoColorSettings,
+  LithoExportSettings,
+  LithoHotFolderIncomingFile,
+  LithoHotFolderStatus,
+  LithoJobPreset,
+  LithoPlateSizePreset,
+  LithoQueueJob,
+  LithoSpotHandling,
 } from '@shared/models';
 import {
   clearCrispPreviewCache,
@@ -105,6 +113,27 @@ import {
   getTicketGridMetrics,
   type TicketConfig,
 } from '../engine/ticketNumbering';
+import {
+  OFFSET_ICC_PROFILES,
+  createDefaultLithoColorSettings,
+  createDefaultLithoPresets,
+  parseIccProfileBytes,
+} from '../engine/lithographyColor';
+import {
+  autoFixPdfForLithography,
+  buildPreflightReportHtml,
+  buildPreflightReportPdf,
+  createSampleLithoPdfBytes,
+  inspectPdfForLithography,
+  prepareLithoInputToPdfBytes,
+  runLithographyPreflight,
+} from '../engine/lithographyPreflight';
+import { isSupportedDocumentFileNameOrType } from '../engine/universalImageDecoder';
+import {
+  createZipArchive,
+  generateLithographyExports,
+  type LithoExportResult,
+} from '../engine/lithographyExport';
 
 export interface AutoPackRequest {
   pageId?: string;
@@ -119,7 +148,7 @@ export interface AutoPackRequest {
   onlySelectedPage: boolean;
 }
 
-export type AppMode = 'studio' | 'batch' | 'ticket';
+export type AppMode = 'studio' | 'batch' | 'ticket' | 'lithography';
 
 export type RibbonTabId =
   | 'file'
@@ -494,6 +523,21 @@ interface AppState {
   ticketSourcePages: PageItem[];
   ticketSelectedSourcePageId: string | null;
 
+  // Offset Prepress & Lithography Environment
+  lithoJobs: LithoQueueJob[];
+  lithoSelectedJobId: string | null;
+  lithoSelectedPageNumber: number;
+  lithoColorSettings: LithoColorSettings;
+  lithoExportSettings: LithoExportSettings;
+  lithoTacThreshold: number;
+  lithoPresets: LithoJobPreset[];
+  lithoSavedPlateSizes: LithoPlateSizePreset[];
+  lithoActivePresetId: string;
+  lithoHotFolder: LithoHotFolderStatus;
+  lithoBusy: boolean;
+  lithoProgress: number;
+  lithoLastExportFiles: string[];
+
   // Windows Virtual Printer
   virtualPrinterStatus: VirtualPrinterStatus | null;
   virtualPrinterBusy: boolean;
@@ -725,6 +769,36 @@ interface AppState {
   clearTicketSource: () => void;
   generateTicketSheetsToStudio: () => number;
   exportTicketPdfDirect: () => Promise<Uint8Array | null>;
+
+  // Offset Prepress & Lithography Environment
+  initializeLithoPresets: () => Promise<void>;
+  importLithoFiles: (files: File[], opts?: { fromHotFolder?: boolean }) => Promise<void>;
+  loadSampleLithoJob: () => Promise<void>;
+  selectLithoJob: (jobId: string | null) => void;
+  setLithoSelectedPage: (pageNumber: number) => void;
+  removeLithoJob: (jobId: string) => void;
+  clearLithoJobs: () => void;
+  updateLithoColorSettings: (
+    patch: Partial<LithoColorSettings> | ((prev: LithoColorSettings) => LithoColorSettings)
+  ) => void;
+  setLithoSpotHandling: (spotName: string, handling: LithoSpotHandling) => void;
+  updateLithoExportSettings: (patch: Partial<LithoExportSettings>) => void;
+  setLithoTacThreshold: (tacPercent: number) => void;
+  uploadCustomIccProfile: (file: File) => Promise<boolean>;
+  runPreflightForJob: (jobId: string) => Promise<void>;
+  autoFixLithoJob: (jobId: string) => Promise<boolean>;
+  exportLithoJobOutputs: (jobId: string) => Promise<LithoExportResult | null>;
+  downloadLithoPreflightReport: (jobId: string, format: 'pdf' | 'html') => Promise<void>;
+  saveLithoPreset: (name: string) => string | null;
+  applyLithoPreset: (presetId: string) => void;
+  deleteLithoPreset: (presetId: string) => void;
+  saveLithoPlateSize: (name: string, widthMm: number, heightMm: number) => string | null;
+  deleteLithoPlateSize: (id: string) => void;
+  selectLithoOutputFolder: () => Promise<string | null>;
+  configureLithoHotFolder: (patch: Partial<LithoHotFolderStatus>) => Promise<void>;
+  handleLithoHotFolderFile: (payload: LithoHotFolderIncomingFile) => Promise<void>;
+  processAllLithoJobs: () => Promise<void>;
+  sendStudioSheetsToLithography: (scope?: 'all' | 'active-sheet') => Promise<boolean>;
 
   // Windows Virtual Printer
   refreshVirtualPrinterStatus: () => Promise<void>;
@@ -982,6 +1056,41 @@ export const useAppStore = create<AppState>((set, get) => {
     ticketSourceDocument: null,
     ticketSourcePages: [],
     ticketSelectedSourcePageId: null,
+
+    lithoJobs: [],
+    lithoSelectedJobId: null,
+    lithoSelectedPageNumber: 1,
+    lithoColorSettings: createDefaultLithoColorSettings(),
+    lithoExportSettings: {
+      format: 'plate-pdf',
+      dpi: 1200,
+      includeCropMarks: true,
+      includeRegistrationMarks: true,
+      includeColorBar: true,
+      includeSlug: true,
+      jobNamePrefix: '',
+      outputFolder: undefined,
+      plateSizeId: 'fit-document',
+      plateWidthMm: 400,
+      plateHeightMm: 510,
+      plateOrientation: 'auto',
+    },
+    lithoTacThreshold: 300,
+    lithoPresets: createDefaultLithoPresets(),
+    lithoSavedPlateSizes: [],
+    lithoActivePresetId: 'preset-fogra39-coated',
+    lithoHotFolder: {
+      enabled: false,
+      folderPath: '',
+      presetId: 'preset-fogra39-coated',
+      autoExportOnDrop: true,
+      watcherActive: false,
+      processedCount: 0,
+      lastError: null,
+    },
+    lithoBusy: false,
+    lithoProgress: 0,
+    lithoLastExportFiles: [],
 
     virtualPrinterStatus: null,
     virtualPrinterBusy: false,
@@ -2434,7 +2543,7 @@ export const useAppStore = create<AppState>((set, get) => {
     addImageOverlayFiles: async (files, sheet, point) => {
       if(get().textEdit)get().finishTextEdit();
       const state0=get();
-      const images=files.filter(file=>isImageFile(file));
+      const images=files.filter(file=>isImageFile(file)||/\.(psd|heic|heif)$/i.test(file.name||''));
       if(!images.length)return 0;
       const side=sheet??computeImpositionSheets(state0.pages,state0.layout)[Math.min(state0.activeSheetIndex,Math.max(0,computeImpositionSheets(state0.pages,state0.layout).length-1))];
       if(!side)return 0;
@@ -4087,6 +4196,751 @@ export const useAppStore = create<AppState>((set, get) => {
         return null;
       } finally {
         set({ isExportingPdf: false, exportProgress: 0 });
+      }
+    },
+
+    initializeLithoPresets: async () => {
+      const [storedPresets, storedPlateSizes] = await Promise.all([
+        ipcBridge.loadLithoPresets().catch(() => null),
+        ipcBridge.loadLithoPlateSizes().catch(() => null),
+      ]);
+      const patch: Partial<ReturnType<typeof get>> = {};
+      if (storedPresets && storedPresets.length > 0) {
+        patch.lithoPresets = storedPresets;
+      }
+      if (storedPlateSizes && Array.isArray(storedPlateSizes)) {
+        patch.lithoSavedPlateSizes = storedPlateSizes;
+      }
+      if (Object.keys(patch).length > 0) {
+        set(patch);
+      }
+    },
+
+    importLithoFiles: async (files, opts) => {
+      const supportedFiles = files.filter((f) =>
+        isSupportedDocumentFileNameOrType(f.name, f.type)
+      );
+      const isFa = get().settings.language === 'fa';
+      if (supportedFiles.length === 0) {
+        get().addToast({
+          type: 'warning',
+          title: isFa
+            ? 'فرمت فایل واردشده در لیتوگرافی پشتیبانی نمی‌شود (پشتیبانی از PDF، PSD، TIFF، HEIC، WebP، PNG، JPG و ...)'
+            : 'Unsupported file format for Lithography (supports PDF, PSD, TIFF, HEIC, WebP, PNG, JPG, etc.)',
+        });
+        return;
+      }
+
+      set({ lithoBusy: true, lithoProgress: 10 });
+      const newJobIds: string[] = [];
+      try {
+        for (let idx = 0; idx < supportedFiles.length; idx++) {
+          const file = supportedFiles[idx];
+          const jobId = `litho-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          const buffer =
+            typeof file.arrayBuffer === 'function'
+              ? await file.arrayBuffer()
+              : await new Response(file).arrayBuffer();
+          const rawBytes = new Uint8Array(buffer);
+
+          const queuedJob: LithoQueueJob = {
+            id: jobId,
+            fileName: file.name,
+            fileSizeBytes: rawBytes.byteLength,
+            status: 'processing',
+            addedAt: new Date().toISOString(),
+            sourceBytes: rawBytes,
+            fromHotFolder: opts?.fromHotFolder,
+          };
+
+          set((s) => ({
+            lithoJobs: [...s.lithoJobs, queuedJob],
+            lithoSelectedJobId: s.lithoSelectedJobId ?? jobId,
+          }));
+
+          try {
+            const state = get();
+            const prepared = await prepareLithoInputToPdfBytes(
+              rawBytes,
+              file.name,
+              file.type || ''
+            );
+            const metadata = await inspectPdfForLithography(prepared.pdfBytes, file.name, {
+              colorSettings: state.lithoColorSettings,
+              tacThresholdPercent: state.lithoTacThreshold,
+              sourceFormat: prepared.sourceFormat,
+            });
+            const preflight = runLithographyPreflight(metadata, state.lithoTacThreshold, false);
+
+            // Auto-register newly discovered spots in color settings cleanly
+            const spotPatch: Record<string, LithoSpotHandling> = {
+              ...state.lithoColorSettings.spotChannels,
+            };
+            for (const sp of metadata.detectedSpots) {
+              if (!spotPatch[sp.name]) spotPatch[sp.name] = sp.handling;
+            }
+
+            const strippedName = file.name.replace(
+              /\.(pdf|tiff?|psd|webp|heic|heif|png|jpe?g|bmp|gif|svg)$/i,
+              ''
+            );
+
+            set((s) => ({
+              lithoColorSettings: {
+                ...s.lithoColorSettings,
+                spotChannels: spotPatch,
+              },
+              lithoJobs: s.lithoJobs.map((j) =>
+                j.id === jobId
+                  ? {
+                      ...j,
+                      status: 'done',
+                      processedAt: new Date().toISOString(),
+                      sourceBytes: prepared.pdfBytes,
+                      sourceFormat: prepared.sourceFormat,
+                      metadata,
+                      preflight,
+                    }
+                  : j
+              ),
+              lithoSelectedJobId: jobId,
+              lithoSelectedPageNumber: 1,
+              lithoExportSettings: {
+                ...s.lithoExportSettings,
+                jobNamePrefix: s.lithoExportSettings.jobNamePrefix || strippedName,
+              },
+            }));
+            newJobIds.push(jobId);
+          } catch (err) {
+            set((s) => ({
+              lithoJobs: s.lithoJobs.map((j) =>
+                j.id === jobId
+                  ? {
+                      ...j,
+                      status: 'error',
+                      errorMessage: err instanceof Error ? err.message : String(err),
+                    }
+                  : j
+              ),
+            }));
+          }
+          set({ lithoProgress: Math.round(((idx + 1) / supportedFiles.length) * 100) });
+        }
+
+        if (newJobIds.length > 0) {
+          get().addToast({
+            type: 'success',
+            title: isFa
+              ? `${newJobIds.length} فایل وارد صف لیتوگرافی و بررسی شد`
+              : `Imported and inspected ${newJobIds.length} file(s)`,
+          });
+        }
+      } finally {
+        set({ lithoBusy: false, lithoProgress: 0 });
+      }
+    },
+
+    loadSampleLithoJob: async () => {
+      const bytes = await createSampleLithoPdfBytes();
+      const safeBytes = new Uint8Array(bytes);
+      const file = new File([safeBytes], 'بروشور-تست-۴رنگ-دوصفحه‌ای.pdf', {
+        type: 'application/pdf',
+      });
+      await get().importLithoFiles([file]);
+    },
+
+    selectLithoJob: (jobId) =>
+      set({
+        lithoSelectedJobId: jobId,
+        lithoSelectedPageNumber: 1,
+      }),
+
+    setLithoSelectedPage: (pageNumber) =>
+      set((s) => {
+        const job = s.lithoJobs.find((j) => j.id === s.lithoSelectedJobId);
+        const maxP = job?.metadata?.pageCount ?? 1;
+        return {
+          lithoSelectedPageNumber: Math.max(1, Math.min(maxP, Math.round(pageNumber))),
+        };
+      }),
+
+    removeLithoJob: (jobId) =>
+      set((s) => {
+        const next = s.lithoJobs.filter((j) => j.id !== jobId);
+        return {
+          lithoJobs: next,
+          lithoSelectedJobId:
+            s.lithoSelectedJobId === jobId ? next[0]?.id ?? null : s.lithoSelectedJobId,
+          lithoSelectedPageNumber: 1,
+        };
+      }),
+
+    clearLithoJobs: () =>
+      set({
+        lithoJobs: [],
+        lithoSelectedJobId: null,
+        lithoSelectedPageNumber: 1,
+        lithoLastExportFiles: [],
+      }),
+
+    updateLithoColorSettings: (patch) =>
+      set((s) => {
+        const nextColor =
+          typeof patch === 'function'
+            ? patch(s.lithoColorSettings)
+            : { ...s.lithoColorSettings, ...patch };
+        // Sync default TAC when switching standard ICC profile unless explicit TAC override was passed in same patch
+        if (
+          typeof patch !== 'function' &&
+          patch.iccProfile &&
+          patch.iccProfile !== 'custom' &&
+          patch.maxTacPercent === undefined
+        ) {
+          const spec = OFFSET_ICC_PROFILES[patch.iccProfile];
+          if (spec) {
+            nextColor.maxTacPercent = spec.defaultTacPercent;
+          }
+        }
+        return {
+          lithoColorSettings: nextColor,
+        };
+      }),
+
+    setLithoSpotHandling: (spotName, handling) =>
+      set((s) => ({
+        lithoColorSettings: {
+          ...s.lithoColorSettings,
+          spotChannels: {
+            ...s.lithoColorSettings.spotChannels,
+            [spotName]: handling,
+          },
+        },
+        lithoJobs: s.lithoJobs.map((job) =>
+          job.metadata
+            ? {
+                ...job,
+                metadata: {
+                  ...job.metadata,
+                  detectedSpots: job.metadata.detectedSpots.map((sp) =>
+                    sp.name === spotName ? { ...sp, handling } : sp
+                  ),
+                },
+              }
+            : job
+        ),
+      })),
+
+    updateLithoExportSettings: (patch) =>
+      set((s) => ({
+        lithoExportSettings: { ...s.lithoExportSettings, ...patch },
+      })),
+
+    setLithoTacThreshold: (tacPercent) => {
+      const clamped = Math.max(200, Math.min(400, Math.round(tacPercent)));
+      set((s) => ({
+        lithoTacThreshold: clamped,
+        lithoJobs: s.lithoJobs.map((j) =>
+          j.metadata
+            ? {
+                ...j,
+                preflight: runLithographyPreflight(
+                  j.metadata,
+                  clamped,
+                  Boolean(j.preflight?.wasAutoFixed)
+                ),
+              }
+            : j
+        ),
+      }));
+    },
+
+    uploadCustomIccProfile: async (file) => {
+      const isFa = get().settings.language === 'fa';
+      try {
+        const buf =
+          typeof file.arrayBuffer === 'function'
+            ? await file.arrayBuffer()
+            : await new Response(file).arrayBuffer();
+        const parsed = parseIccProfileBytes(new Uint8Array(buf), file.name);
+        set((s) => ({
+          lithoColorSettings: {
+            ...s.lithoColorSettings,
+            iccProfile: 'custom',
+            customProfileName: parsed.name,
+            customIcc: parsed,
+          },
+        }));
+        get().addToast({
+          type: 'success',
+          title: isFa
+            ? `پروفایل ICC سفارشی «${parsed.name}» بارگذاری شد`
+            : `Loaded custom ICC profile "${parsed.name}"`,
+          message: `${parsed.colorSpace} · ICC v${parsed.version}`,
+        });
+        return true;
+      } catch (err) {
+        get().addToast({
+          type: 'error',
+          title: isFa ? 'فایل پروفایل ICC معتبر نیست' : 'Invalid ICC profile file',
+          message: err instanceof Error ? err.message : String(err),
+        });
+        return false;
+      }
+    },
+
+    runPreflightForJob: async (jobId) => {
+      const state = get();
+      const job = state.lithoJobs.find((j) => j.id === jobId);
+      const bytes = job?.fixedBytes ?? job?.sourceBytes;
+      if (!job || !bytes) return;
+      set({ lithoBusy: true });
+      try {
+        const metadata = await inspectPdfForLithography(bytes, job.fileName, {
+          colorSettings: state.lithoColorSettings,
+          tacThresholdPercent: state.lithoTacThreshold,
+        });
+        const preflight = runLithographyPreflight(
+          metadata,
+          state.lithoTacThreshold,
+          Boolean(job.fixedBytes)
+        );
+        set((s) => ({
+          lithoJobs: s.lithoJobs.map((j) =>
+            j.id === jobId
+              ? { ...j, status: 'done', metadata, preflight, processedAt: new Date().toISOString() }
+              : j
+          ),
+        }));
+      } finally {
+        set({ lithoBusy: false });
+      }
+    },
+
+    autoFixLithoJob: async (jobId) => {
+      const state = get();
+      const isFa = state.settings.language === 'fa';
+      const job = state.lithoJobs.find((j) => j.id === jobId);
+      const inputBytes = job?.fixedBytes ?? job?.sourceBytes;
+      if (!job || !job.metadata || !inputBytes) return false;
+
+      set({ lithoBusy: true, lithoProgress: 20 });
+      try {
+        const fixedBytes = await autoFixPdfForLithography(
+          inputBytes,
+          job.metadata,
+          state.lithoColorSettings
+        );
+        set({ lithoProgress: 70 });
+        const fixedMeta = await inspectPdfForLithography(fixedBytes, job.fileName, {
+          colorSettings: state.lithoColorSettings,
+          tacThresholdPercent: state.lithoTacThreshold,
+        });
+        const fixedReport = runLithographyPreflight(
+          fixedMeta,
+          state.lithoTacThreshold,
+          true
+        );
+
+        set((s) => ({
+          lithoJobs: s.lithoJobs.map((j) =>
+            j.id === jobId
+              ? {
+                  ...j,
+                  status: 'done',
+                  fixedBytes,
+                  metadata: fixedMeta,
+                  preflight: fixedReport,
+                  processedAt: new Date().toISOString(),
+                }
+              : j
+          ),
+        }));
+
+        get().addToast({
+          type: 'success',
+          title: isFa
+            ? 'رفع خودکار مشکلات پیش‌چاپ انجام شد'
+            : 'Prepress auto-fix completed',
+          message: isFa
+            ? 'بلید ۳ میلی‌متر، تبدیل RGB به CMYK پروفایل فعال، ضخامت خطوط و Overprint اصلاح شدند.'
+            : 'Added 3 mm bleed, converted RGB to CMYK, raised hairlines, and cleaned overprint.',
+        });
+        return true;
+      } catch (err) {
+        get().addToast({
+          type: 'error',
+          title: isFa ? 'خطا در رفع خودکار فایل' : 'Auto-fix failed',
+          message: err instanceof Error ? err.message : String(err),
+        });
+        return false;
+      } finally {
+        set({ lithoBusy: false, lithoProgress: 0 });
+      }
+    },
+
+    exportLithoJobOutputs: async (jobId) => {
+      const state = get();
+      const isFa = state.settings.language === 'fa';
+      const job = state.lithoJobs.find((j) => j.id === jobId);
+      const pdfBytes = job?.fixedBytes ?? job?.sourceBytes;
+      if (!job || !job.metadata || !pdfBytes) return null;
+
+      const cleanBaseName = job.fileName.replace(
+        /\.(pdf|tiff?|psd|webp|heic|heif|png|jpe?g|bmp|gif|svg)$/i,
+        ''
+      );
+
+      set({ lithoBusy: true, lithoProgress: 5 });
+      try {
+        const result = await generateLithographyExports({
+          pdfBytes,
+          metadata: job.metadata,
+          colorSettings: state.lithoColorSettings,
+          exportSettings: {
+            ...state.lithoExportSettings,
+            jobNamePrefix:
+              state.lithoExportSettings.jobNamePrefix || cleanBaseName,
+          },
+          savedPlateSizes: state.lithoSavedPlateSizes,
+          tacThresholdPercent: state.lithoTacThreshold,
+          onProgress: (p) => set({ lithoProgress: p }),
+        });
+
+        let savedFolder: string | undefined;
+        if (state.lithoExportSettings.outputFolder) {
+          const nativeRes = await ipcBridge
+            .writeLithoFiles(state.lithoExportSettings.outputFolder, result.files)
+            .catch(() => null);
+          if (nativeRes) {
+            savedFolder = nativeRes.folderPath;
+          }
+        }
+
+        if (!savedFolder) {
+          if (result.files.length === 1) {
+            const single = result.files[0];
+            triggerBlobDownload(single.bytes, single.fileName, 'application/pdf');
+          } else {
+            const zipBytes = createZipArchive(result.files);
+            const zipName = `${
+              state.lithoExportSettings.jobNamePrefix || cleanBaseName
+            }_plates.zip`;
+            triggerBlobDownload(zipBytes, zipName, 'application/zip');
+          }
+        }
+
+        const fileNames = result.files.map((f) => f.fileName);
+        set((s) => ({
+          lithoLastExportFiles: fileNames,
+          lithoJobs: s.lithoJobs.map((j) =>
+            j.id === jobId
+              ? {
+                  ...j,
+                  outputFilesCount: result.files.length,
+                  outputFolder: savedFolder,
+                }
+              : j
+          ),
+        }));
+
+        get().addToast({
+          type: 'success',
+          title: isFa
+            ? `تعداد ${result.files.length} فایل پلیت/خروجی با موفقیت تولید شد`
+            : `Generated ${result.files.length} plate/output file(s)`,
+          message: savedFolder
+            ? `ذخیره در پوشه: ${savedFolder}`
+            : result.noteFa || fileNames.slice(0, 4).join(' · '),
+        });
+        return result;
+      } catch (err) {
+        get().addToast({
+          type: 'error',
+          title: isFa ? 'تولید خروجی پلیت ناموفق بود' : 'Plate export failed',
+          message: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      } finally {
+        set({ lithoBusy: false, lithoProgress: 0 });
+      }
+    },
+
+    downloadLithoPreflightReport: async (jobId, format) => {
+      const state = get();
+      const job = state.lithoJobs.find((j) => j.id === jobId);
+      if (!job || !job.metadata || !job.preflight) return;
+      const base = job.fileName.replace(/\.pdf$/i, '');
+      if (format === 'html') {
+        const html = buildPreflightReportHtml(job.metadata, job.preflight);
+        triggerBlobDownload(html, `${base}_Preflight_Report.html`, 'text/html;charset=utf-8');
+      } else {
+        const pdfBytes = await buildPreflightReportPdf(job.metadata, job.preflight);
+        triggerBlobDownload(pdfBytes, `${base}_Preflight_Report.pdf`, 'application/pdf');
+      }
+    },
+
+    saveLithoPreset: (name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return null;
+      const state = get();
+      const isFa = state.settings.language === 'fa';
+      const { customIcc: _c, spotChannels: _s, ...colorRest } = state.lithoColorSettings;
+      const presetId = `litho-preset-${Date.now()}`;
+      const preset: LithoJobPreset = {
+        id: presetId,
+        name: trimmed,
+        createdAt: new Date().toISOString(),
+        color: structuredClone(colorRest),
+        exportSettings: structuredClone(state.lithoExportSettings),
+        tacThresholdPercent: state.lithoTacThreshold,
+        autoFixOnProcess: true,
+      };
+      const next = [...state.lithoPresets, preset];
+      set({ lithoPresets: next, lithoActivePresetId: presetId });
+      void ipcBridge.saveLithoPresets(next);
+      get().addToast({
+        type: 'success',
+        title: isFa ? `قالب کار «${trimmed}» ذخیره شد` : `Saved preset "${trimmed}"`,
+      });
+      return presetId;
+    },
+
+    applyLithoPreset: (presetId) => {
+      const state = get();
+      const preset = state.lithoPresets.find((p) => p.id === presetId);
+      if (!preset) return;
+      set((s) => ({
+        lithoActivePresetId: presetId,
+        lithoTacThreshold: preset.tacThresholdPercent,
+        lithoColorSettings: {
+          ...s.lithoColorSettings,
+          ...structuredClone(preset.color),
+        },
+        lithoExportSettings: {
+          ...s.lithoExportSettings,
+          ...structuredClone(preset.exportSettings),
+          jobNamePrefix:
+            preset.exportSettings.jobNamePrefix || s.lithoExportSettings.jobNamePrefix,
+        },
+      }));
+      // Re-score preflight for active jobs with preset threshold
+      set((s) => ({
+        lithoJobs: s.lithoJobs.map((j) =>
+          j.metadata
+            ? {
+                ...j,
+                preflight: runLithographyPreflight(
+                  j.metadata,
+                  preset.tacThresholdPercent,
+                  Boolean(j.preflight?.wasAutoFixed)
+                ),
+              }
+            : j
+        ),
+      }));
+    },
+
+    deleteLithoPreset: (presetId) => {
+      const next = get().lithoPresets.filter((p) => p.id !== presetId);
+      set((s) => ({
+        lithoPresets: next,
+        lithoActivePresetId:
+          s.lithoActivePresetId === presetId ? next[0]?.id ?? '' : s.lithoActivePresetId,
+      }));
+      void ipcBridge.saveLithoPresets(next);
+    },
+
+    selectLithoOutputFolder: async () => {
+      const folder = await ipcBridge.selectLithoFolder();
+      if (folder) {
+        set((s) => ({
+          lithoExportSettings: { ...s.lithoExportSettings, outputFolder: folder },
+        }));
+      }
+      return folder;
+    },
+
+    configureLithoHotFolder: async (patch) => {
+      const prev = get().lithoHotFolder;
+      const next: LithoHotFolderStatus = { ...prev, ...patch };
+      if (next.enabled && next.folderPath) {
+        const res = await ipcBridge.startLithoHotFolder(next.folderPath);
+        next.watcherActive = res.ok;
+        next.lastError = res.ok ? null : res.error ?? null;
+      } else if (!next.enabled && prev.watcherActive) {
+        await ipcBridge.stopLithoHotFolder();
+        next.watcherActive = false;
+      }
+      set({ lithoHotFolder: next });
+    },
+
+    handleLithoHotFolderFile: async (payload) => {
+      if (!payload?.bytes?.byteLength) return;
+      const state = get();
+      const preset = state.lithoPresets.find((p) => p.id === state.lithoHotFolder.presetId);
+      if (preset) {
+        get().applyLithoPreset(preset.id);
+      }
+      const copy = new Uint8Array(payload.bytes.byteLength);
+      copy.set(payload.bytes);
+      const file = new File([copy], payload.name, {
+        type: /\.pdf$/i.test(payload.name) ? 'application/pdf' : '',
+      });
+      await get().importLithoFiles([file], { fromHotFolder: true });
+
+      const added = get().lithoJobs[get().lithoJobs.length - 1];
+      if (added && added.status === 'done') {
+        if (preset?.autoFixOnProcess && added.preflight && !added.preflight.isReadyForPress) {
+          await get().autoFixLithoJob(added.id);
+        }
+        if (get().lithoHotFolder.autoExportOnDrop) {
+          await get().exportLithoJobOutputs(added.id);
+        }
+        set((s) => ({
+          lithoHotFolder: {
+            ...s.lithoHotFolder,
+            processedCount: s.lithoHotFolder.processedCount + 1,
+            lastFileAt: new Date().toISOString(),
+          },
+        }));
+      }
+    },
+
+    saveLithoPlateSize: (name, widthMm, heightMm) => {
+      const trimmed = name.trim();
+      const cleanW = Math.round(Number(widthMm) * 10) / 10;
+      const cleanH = Math.round(Number(heightMm) * 10) / 10;
+      if (!trimmed || !Number.isFinite(cleanW) || !Number.isFinite(cleanH) || cleanW < 20 || cleanH < 20) {
+        return null;
+      }
+      const isFa = get().settings.language === 'fa';
+      const id = `plate-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+      const entry: LithoPlateSizePreset = {
+        id,
+        nameFa: `${trimmed} (${cleanW}×${cleanH} mm)`,
+        nameEn: `${trimmed} (${cleanW}×${cleanH} mm)`,
+        widthMm: cleanW,
+        heightMm: cleanH,
+        isBuiltIn: false,
+      };
+      const next = [...get().lithoSavedPlateSizes, entry];
+      set((s) => ({
+        lithoSavedPlateSizes: next,
+        lithoExportSettings: {
+          ...s.lithoExportSettings,
+          plateSizeId: id,
+          plateWidthMm: cleanW,
+          plateHeightMm: cleanH,
+        },
+      }));
+      void ipcBridge.saveLithoPlateSizes(next);
+      get().addToast({
+        type: 'success',
+        title: isFa ? `اندازه پلیت «${trimmed}» ذخیره شد` : `Saved plate size "${trimmed}"`,
+      });
+      return id;
+    },
+
+    deleteLithoPlateSize: (id) => {
+      const next = get().lithoSavedPlateSizes.filter((p) => p.id !== id);
+      set((s) => ({
+        lithoSavedPlateSizes: next,
+        lithoExportSettings:
+          s.lithoExportSettings.plateSizeId === id
+            ? { ...s.lithoExportSettings, plateSizeId: 'fit-document' }
+            : s.lithoExportSettings,
+      }));
+      void ipcBridge.saveLithoPlateSizes(next);
+    },
+
+    processAllLithoJobs: async () => {
+      const jobs = get().lithoJobs.filter((j) => j.status === 'done');
+      for (const job of jobs) {
+        if (job.preflight && !job.preflight.isReadyForPress) {
+          await get().autoFixLithoJob(job.id);
+        }
+        await get().exportLithoJobOutputs(job.id);
+      }
+    },
+
+    sendStudioSheetsToLithography: async (scope = 'all') => {
+      if (get().textEdit) get().finishTextEdit();
+      const state = get();
+      const isFa = state.settings.language === 'fa';
+      const selectedPages = state.pages.filter((p) => p.selectedForPrint);
+      if (selectedPages.length === 0) {
+        state.addToast({
+          type: 'warning',
+          title: isFa
+            ? 'هیچ صفحه‌ای در استادیو برای ارسال به لیتوگرافی انتخاب نشده است'
+            : 'No Studio pages selected to send to Lithography',
+        });
+        return false;
+      }
+
+      set({ lithoBusy: true, lithoProgress: 10 });
+      try {
+        let outBytes = await exportImposedPdf({
+          documents: state.documents,
+          pages: selectedPages,
+          layout: state.layout,
+          effects: state.effects,
+          watermark: state.watermark,
+          pageNumbering: state.pageNumbering,
+          overlays: state.overlays,
+          allPages: state.pages,
+          userName: state.settings.userName,
+          exportOptions: { imageHandling: 'preserve', compression: 'lossless' },
+          onProgress: (p) => set({ lithoProgress: Math.max(10, Math.round(p * 0.6)) }),
+        });
+
+        let targetIdx = 0;
+        let totalComposedPages = 1;
+        if (scope === 'active-sheet') {
+          const pdfDoc = await PDFDocument.load(outBytes);
+          totalComposedPages = pdfDoc.getPageCount();
+          if (totalComposedPages > 1) {
+            targetIdx = Math.max(0, Math.min(totalComposedPages - 1, state.activeSheetIndex));
+            const singleDoc = await PDFDocument.create();
+            const [copied] = await singleDoc.copyPages(pdfDoc, [targetIdx]);
+            singleDoc.addPage(copied);
+            outBytes = await singleDoc.save({ useObjectStreams: false });
+          }
+        } else {
+          const pdfDoc = await PDFDocument.load(outBytes);
+          totalComposedPages = pdfDoc.getPageCount();
+        }
+
+        const safeBytes = new Uint8Array(outBytes);
+        const fileName =
+          scope === 'active-sheet'
+            ? `Studio-Sheet-${targetIdx + 1}.pdf`
+            : `Studio-Composed-${totalComposedPages}p.pdf`;
+        const file = new File([safeBytes], fileName, { type: 'application/pdf' });
+
+        set({ appMode: 'lithography' });
+        await get().importLithoFiles([file]);
+
+        get().addToast({
+          type: 'success',
+          title: isFa
+            ? scope === 'active-sheet'
+              ? `شیت ${targetIdx + 1} استادیو به بخش لیتوگرافی منتقل شد`
+              : `کل چیدمان استادیو (${totalComposedPages} شیت) به بخش لیتوگرافی منتقل شد`
+            : scope === 'active-sheet'
+              ? `Studio Sheet ${targetIdx + 1} transferred to Lithography`
+              : `Studio composition (${totalComposedPages} sheets) transferred to Lithography`,
+        });
+        return true;
+      } catch (err) {
+        get().addToast({
+          type: 'error',
+          title: isFa ? 'انتقال شیت به لیتوگرافی ناموفق بود' : 'Failed to transfer Studio sheet to Lithography',
+          message: err instanceof Error ? err.message : String(err),
+        });
+        return false;
+      } finally {
+        set({ lithoBusy: false, lithoProgress: 0 });
       }
     },
 

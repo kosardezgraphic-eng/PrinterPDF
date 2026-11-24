@@ -1,5 +1,10 @@
 import { planPictureEmbedding } from './imageFormat';
 import { applyEraseToContext, invertPixelsInContext } from './imageErase';
+import {
+  decodeUniversalImageToPages,
+  decodedPageToDataUrl,
+  detectUniversalImageFormat,
+} from './universalImageDecoder';
 const IMAGE_NAME=/\.(jpe?g|png|webp|gif|bmp|tiff?|svg)$/i;
 /** Files that may become an on-page picture overlay rather than a new document. */
 export function isImageFile(file:File):boolean{
@@ -37,6 +42,17 @@ export function routeDroppedFiles(files:File[],droppedOnSheet:boolean):DroppedFi
 }
 export async function readFileAsDataUrl(file:File):Promise<string>{
   if (typeof file === 'string') return file;
+  if (typeof file.arrayBuffer === 'function') {
+    const ab = await file.arrayBuffer();
+    if (ab.byteLength > 0) {
+      const bytes = new Uint8Array(ab);
+      const fmt = detectUniversalImageFormat(bytes, file.name ?? '', file.type ?? '');
+      if (fmt === 'tiff' || fmt === 'psd' || fmt === 'heic') {
+        const pages = await decodeUniversalImageToPages(bytes, file.name ?? 'image', file.type ?? '');
+        if (pages[0]) return decodedPageToDataUrl(pages[0]);
+      }
+    }
+  }
   if (typeof FileReader === 'undefined') throw new Error('This environment cannot read the dropped file');
   return new Promise<string>((resolve,reject)=>{
     const reader=new FileReader();

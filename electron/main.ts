@@ -1,8 +1,9 @@
-import { app, BrowserWindow, clipboard, ipcMain, Menu, session } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, session } from 'electron';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import { IPC_CHANNELS, type ClipboardImagePayload, type LocalFilePayload } from '../shared/ipc-channels';
 import { PrinterSidecarClient } from './printerSidecarClient';
 import { SessionStore } from './sessionStore';
@@ -22,6 +23,11 @@ import {
 import {
   VIRTUAL_PRINTER_DEFAULT_NAME,
   type AppSettings,
+  type LithoHotFolderIncomingFile,
+  type LithoJobPreset,
+  type LithoPlateSizePreset,
+  type LithoWriteFileEntry,
+  type LithoWriteFilesResult,
   type PrinterInfo,
   type PrinterProfileSettings,
   type PrinterMarginRequest,
@@ -35,11 +41,12 @@ import {
 /** Anything bigger than this is not something a preview app should hold in memory twice. */
 const MAX_NATIVE_FILE_BYTES = 128 * 1024 * 1024;
 /** Extensions the import pipeline can read; used to ignore stray arguments. */
-const NATIVE_FILE_EXTENSIONS = /\.(pdf|png|jpe?g|webp|gif|bmp|tiff?|svg)$/i;
+const NATIVE_FILE_EXTENSIONS = /\.(pdf|png|jpe?g|webp|gif|bmp|tiff?|psd|heic|heif|svg)$/i;
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
   webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff',
+  psd: 'image/vnd.adobe.photoshop', heic: 'image/heic', heif: 'image/heif',
   svg: 'image/svg+xml',
 };
 
@@ -51,6 +58,24 @@ let lastNativeFallbackWorked = false;
 /** User-edited printer profiles preserved across refreshes when using Windows PowerShell fallback. */
 const userProfileOverrides = new Map<string, PrinterProfileSettings>();
 let lastKnownPrinters: PrinterInfo[] = [];
+let lithoHotFolderWatcher: fsSync.FSWatcher | null = null;
+let lithoHotFolderPollTimer: ReturnType<typeof setInterval> | null = null;
+const lithoHotFolderSeenFiles = new Set<string>();
+
+function stopLithoHotFolderWatcher(): void {
+  if (lithoHotFolderWatcher) {
+    try {
+      lithoHotFolderWatcher.close();
+    } catch {
+      // Ignore close error
+    }
+    lithoHotFolderWatcher = null;
+  }
+  if (lithoHotFolderPollTimer) {
+    clearInterval(lithoHotFolderPollTimer);
+    lithoHotFolderPollTimer = null;
+  }
+}
 
 interface QueuedProfileSync {
   latestProfile: PrinterProfileSettings;
@@ -669,6 +694,118 @@ function registerIpcHandlers(): void {
     }
     return true;
   });
+
+  ipcMain.handle(IPC_CHANNELS.LITHO_SELECT_FOLDER, async () => {
+    const opts = {
+      properties: ['openDirectory', 'createDirectory'] as ('openDirectory' | 'createDirectory')[],
+    };
+    const res = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, opts)
+      : await dialog.showOpenDialog(opts);
+    if (res.canceled || res.filePaths.length === 0) return null;
+    return res.filePaths[0];
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.LITHO_WRITE_FILES,
+    async (
+      _e,
+      payload: { folderPath: string; files: LithoWriteFileEntry[] }
+    ): Promise<LithoWriteFilesResult> => {
+      if (!payload || typeof payload.folderPath !== 'string' || !path.isAbsolute(payload.folderPath)) {
+        throw new Error('مسیر پوشه خروجی معتبر نیست');
+      }
+      const baseDir = path.resolve(payload.folderPath);
+      await fs.mkdir(baseDir, { recursive: true });
+      const writtenFiles: string[] = [];
+
+      for (const entry of Array.isArray(payload.files) ? payload.files : []) {
+        const cleanName = path.basename(String(entry.fileName || '')).replace(/[\\/:*?"<>|]/g, '_');
+        if (!cleanName || cleanName === '.' || cleanName === '..') {
+          throw new Error(`Invalid output file name: ${entry.fileName}`);
+        }
+        const resolvedTarget = path.resolve(baseDir, cleanName);
+        if (!resolvedTarget.startsWith(baseDir + path.sep)) {
+          throw new Error(`Path traversal rejected for ${cleanName}`);
+        }
+        await fs.writeFile(resolvedTarget, Buffer.from(entry.bytes));
+        writtenFiles.push(resolvedTarget);
+      }
+
+      return { folderPath: baseDir, writtenFiles };
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.LITHO_PRESETS_SAVE, async (_e, presets: LithoJobPreset[]) => {
+    return sessionStore.saveLithoPresets(Array.isArray(presets) ? presets : []);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LITHO_PRESETS_LOAD, async () => {
+    return sessionStore.loadLithoPresets();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LITHO_PLATE_SIZES_SAVE, async (_e, sizes: LithoPlateSizePreset[]) => {
+    return sessionStore.saveLithoPlateSizes(Array.isArray(sizes) ? sizes : []);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LITHO_PLATE_SIZES_LOAD, async () => {
+    return sessionStore.loadLithoPlateSizes();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LITHO_HOT_FOLDER_START, async (_e, folderPath: string) => {
+    if (typeof folderPath !== 'string' || !path.isAbsolute(folderPath)) {
+      return { ok: false, error: 'مسیر Hot Folder معتبر نیست' };
+    }
+    const baseDir = path.resolve(folderPath);
+    stopLithoHotFolderWatcher();
+    lithoHotFolderSeenFiles.clear();
+
+    const scanFolder = async () => {
+      try {
+        const entries = await fs.readdir(baseDir, { withFileTypes: true });
+        for (const ent of entries) {
+          if (!ent.isFile() || !NATIVE_FILE_EXTENSIONS.test(ent.name)) continue;
+          const filePath = path.resolve(baseDir, ent.name);
+          if (!filePath.startsWith(baseDir + path.sep)) continue;
+          const stats = await fs.stat(filePath).catch(() => null);
+          if (!stats || !stats.isFile() || stats.size === 0 || stats.size > MAX_NATIVE_FILE_BYTES) continue;
+          const signature = `${filePath}:${stats.size}:${Math.floor(stats.mtimeMs)}`;
+          if (lithoHotFolderSeenFiles.has(signature)) continue;
+          lithoHotFolderSeenFiles.add(signature);
+          const bytes = await fs.readFile(filePath).catch(() => null);
+          if (!bytes || !mainWindow || mainWindow.isDestroyed()) continue;
+          const payload: LithoHotFolderIncomingFile = {
+            name: ent.name,
+            path: filePath,
+            size: stats.size,
+            bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+          };
+          mainWindow.webContents.send(IPC_CHANNELS.LITHO_HOT_FOLDER_FILE, payload);
+        }
+      } catch {
+        // Ignore transient read locks while PDF is still copying
+      }
+    };
+
+    try {
+      await fs.mkdir(baseDir, { recursive: true });
+      await scanFolder();
+      lithoHotFolderWatcher = fsSync.watch(baseDir, () => {
+        void scanFolder();
+      });
+      lithoHotFolderPollTimer = setInterval(() => {
+        void scanFolder();
+      }, 2500);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LITHO_HOT_FOLDER_STOP, async () => {
+    stopLithoHotFolderWatcher();
+    return true;
+  });
 }
 
 app.whenReady().then(async () => {
@@ -678,6 +815,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
+  stopLithoHotFolderWatcher();
   virtualPrinterManager?.stopWatching();
   sidecar.stopSidecar();
   if (process.platform !== 'darwin') {
