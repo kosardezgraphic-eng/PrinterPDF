@@ -191,4 +191,62 @@ describe('TicketNumberingWorkspace interactive UI', () => {
     expect(landscapeW / landscapeH).toBeCloseTo(297 / 210, 2);
     expect(host.querySelector<HTMLElement>('[data-ticket-sheet-dimensions]')!.textContent).toContain('297 × 210 mm');
   });
+
+  it('aligns selected ticket number slot relative to Cell, Sheet, and Other Slots via [data-ticket-align-bar]', () => {
+    const slot1Id = useAppStore.getState().ticketConfig.numberSlots[0].id;
+    act(() => {
+      useAppStore.getState().updateTicketConfig((prev) => ({
+        ...prev,
+        numberSlots: prev.numberSlots.map((s) =>
+          s.id === slot1Id ? { ...s, xPercent: 12, yPercent: 14, widthPercent: 24, heightPercent: 10 } : s
+        ),
+      }));
+    });
+
+    const initialCount = useAppStore.getState().ticketConfig.numberSlots.length;
+    // Add a new slot (becomes selected)
+    act(() => {
+      host.querySelector<HTMLButtonElement>('[data-ticket-add-slot]')!.click();
+    });
+    const slotsAfterAdd = useAppStore.getState().ticketConfig.numberSlots;
+    expect(slotsAfterAdd).toHaveLength(initialCount + 1);
+    const slot2Id = slotsAfterAdd[slotsAfterAdd.length - 1].id;
+
+    // Make existing other slots share xPercent=12 so union left edge is 12
+    act(() => {
+      useAppStore.getState().updateTicketConfig((prev) => ({
+        ...prev,
+        numberSlots: prev.numberSlots.map((s) =>
+          s.id === slot2Id ? s : { ...s, xPercent: 12, yPercent: 14, widthPercent: 24, heightPercent: 10 }
+        ),
+      }));
+    });
+
+    const alignBar = host.querySelector('[data-ticket-align-bar]');
+    expect(alignBar).toBeTruthy();
+
+    // Align new slot to Other Slots left edge (12)
+    const refSelect = host.querySelector<HTMLSelectElement>('[data-ticket-align-reference]')!;
+    act(() => {
+      refSelect.value = 'others';
+      refSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    act(() => {
+      host.querySelector<HTMLButtonElement>('[data-ticket-align="left"]')!.click();
+    });
+    expect(
+      useAppStore.getState().ticketConfig.numberSlots.find((s) => s.id === slot2Id)!.xPercent
+    ).toBeCloseTo(12, 1);
+
+    // Align slot to Cell horizontal center
+    act(() => {
+      refSelect.value = 'cell';
+      refSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    act(() => {
+      host.querySelector<HTMLButtonElement>('[data-ticket-align="hcenter"]')!.click();
+    });
+    const slot2Centered = useAppStore.getState().ticketConfig.numberSlots.find((s) => s.id === slot2Id)!;
+    expect(slot2Centered.xPercent).toBeCloseTo((100 - slot2Centered.widthPercent) / 2, 1);
+  });
 });

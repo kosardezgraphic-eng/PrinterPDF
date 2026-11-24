@@ -4,6 +4,12 @@ import {computeImpositionSheets} from '../engine/layoutEngine';
 import {useSystemFonts} from '../engine/systemFonts';
 import {useAppStore} from '../store/useAppStore';
 import {TextCoverageControls} from './TextCoverageControls';
+import {
+  collectStudioSheetPeers,
+  resolveStudioOverlayAlignPercent,
+  type AlignDirection,
+  type AlignReferenceMode,
+} from '../engine/alignEngine';
 const input='w-full rounded border border-slate-300 bg-white p-1 text-xs text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white';
 
 export function TextControlPanel(){
@@ -11,6 +17,8 @@ export function TextControlPanel(){
  const lang=settings.language,fa=lang==='fa';
  const [formula,setFormula]=useState('page+1000');
  const [customFont,setCustomFont]=useState('');
+ const [alignRef,setAlignRef]=useState<AlignReferenceMode>('sheet');
+ const [alignPeerId,setAlignPeerId]=useState<string>('all');
  const texts=overlays.filter((o):o is PageOverlayText=>o.kind==='text');
  const selected=texts.find(t=>t.id===selectedOverlayId);
  const {bundledFonts,systemFonts,isLoading:fontsLoading,refreshSystemFonts}=useSystemFonts(selected?.fontFamily);
@@ -24,6 +32,16 @@ export function TextControlPanel(){
  const editorFocus=()=>requestAnimationFrame(()=>{const el=document.querySelector<HTMLTextAreaElement>('[data-inline-overlay-editor]');const edit=useAppStore.getState().textEdit;if(el&&edit){el.focus();el.setSelectionRange(edit.selectionStart,edit.selectionEnd);}});
  const editing=!!selected && textEdit?.overlayId===selected.id;
  const patch=(value:Partial<PageOverlayText>)=>{if(selected)updateOverlay(selected.id,value);};
+ const pageIndices=useMemo(()=>new Map(pages.map((p,i)=>[p.id,i])),[pages]);
+ const peers=selected&&sheet?collectStudioSheetPeers(sheet,sheets.length,pages,overlays,pageIndices,`overlay:${selected.id}`,lang):[];
+ const effAlignRef:AlignReferenceMode=alignRef==='others'&&peers.length===0?(selected?.target==='page'?'cell':'sheet'):alignRef;
+ const selectedPeer=alignPeerId!=='all'?peers.find(p=>p.id===alignPeerId)??null:null;
+ const otherBoxes=selectedPeer?[selectedPeer.box]:peers.map(p=>p.box);
+ const handleBoxAlign=(dir:AlignDirection)=>{
+   if(!selected||!sheet)return;
+   const moved=resolveStudioOverlayAlignPercent(sheet,selected,dir,effAlignRef,otherBoxes);
+   if(moved)patch({xPercent:moved.xPercent,yPercent:moved.yPercent});
+ };
  const scopes:OverlayScope[]=['current','all','even','odd','first','last','selected','document','selected-documents'];
  const scopeLabels=fa?['صفحه / برگه جاری','همه','زوج','فرد','اول','آخر','صفحات تیک‌خورده','سند فعال','سندهای صفحات انتخاب‌شده']:['Current','All','Even','Odd','First','Last','Checked pages','Active document','Documents of highlighted pages'];
  return <aside data-text-control-panel onBlur={e=>{const target=e.relatedTarget instanceof Element?e.relatedTarget:null;if(!target?.closest('[data-text-control-panel],[data-inline-overlay-editor]'))useAppStore.getState().finishTextEdit();}} className="w-full bg-white p-3 text-xs text-slate-800 dark:bg-slate-900 dark:text-slate-200" aria-label={fa?'تنظیمات متن':'Text controls'}>
@@ -69,6 +87,29 @@ export function TextControlPanel(){
       <label className="block">{fa?'فرمول قابل ویرایش':'Editable formula'}<input aria-label={fa?'فرمول قابل ویرایش':'Editable formula'} dir="ltr" value={formula} maxLength={160} onChange={e=>setFormula(e.target.value)} placeholder="page+1000" className={input}/></label>
       <button type="button" disabled={!editing || !formula.trim() || /[{}]/.test(formula)} onMouseDown={e=>e.preventDefault()} onClick={()=>{const value=formula.trim();insertTextToken(/^page\b/i.test(value)?`{${value}}`:`{=${value.replace(/^=/,'')}}`);editorFocus();}} className="rounded border border-slate-300 bg-slate-100 px-2 py-1 text-slate-700 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 cursor-pointer">{fa?'درج فرمول':'Insert formula'}</button>
       <p className="text-slate-500 dark:text-slate-400">{fa?'فرمول را اینجا یا مستقیماً در متن ویرایش کنید؛ مانند {page+1000} یا {page-1000}. فقط عدد، page، پرانتز و + - * / پشتیبانی می‌شود.':'Edit here or directly in the text, e.g. {page+1000} or {page-1000}. Only numbers, page, parentheses and + - * / are supported.'}</p></div>
+    <div className="space-y-1 border-t border-slate-200 pt-2 dark:border-slate-700">
+      <label className="block">{fa?'تراز باکس متن':'Align text box'}
+        <select data-text-align-reference aria-label={fa?'مبنای تراز باکس متن':'Text box align reference'} className={input} value={effAlignRef} onChange={e=>setAlignRef(e.target.value as AlignReferenceMode)}>
+          <option value="sheet">{fa?'نسبت به کل شیت':'To whole sheet'}</option>
+          <option value="margins">{fa?'نسبت به حاشیه چاپ':'To margins'}</option>
+          <option value="cell">{fa?'نسبت به خانه':'To cell'}</option>
+          <option value="others" disabled={peers.length===0}>{fa?`نسبت به دیگر تصاویر (${peers.length})`:`To other items (${peers.length})`}</option>
+        </select>
+      </label>
+      {effAlignRef==='others' && peers.length>1 && (
+        <select data-text-align-peer aria-label={fa?'تصویر مرجع':'Reference item'} className={input} value={selectedPeer?selectedPeer.id:'all'} onChange={e=>setAlignPeerId(e.target.value)}>
+          <option value="all">{fa?'مجموعه دیگر تصاویر شیت':'All other items on sheet'}</option>
+          {peers.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}
+        </select>
+      )}
+      <div className="grid grid-cols-3 gap-1">
+        {(['left','hcenter','right','top','vcenter','bottom'] as const).map(where=>
+          <button key={where} type="button" data-text-box-align={where} onClick={()=>handleBoxAlign(where)}
+            className="rounded border border-slate-300 bg-slate-100 px-1 py-1 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600 cursor-pointer">
+            {where==='left'?(fa?'چپ':'Left'):where==='hcenter'?(fa?'وسط':'Centre'):where==='right'?(fa?'راست':'Right'):where==='top'?(fa?'بالا':'Top'):where==='vcenter'?(fa?'میانه':'Middle'):(fa?'پایین':'Bottom')}
+          </button>)}
+      </div>
+    </div>
     <label className="block">{fa?'شفافیت':'Opacity'} {Math.round(selected.opacity*100)}%<input aria-label={fa?'شفافیت':'Opacity'} type="range" min="10" max="100" value={selected.opacity*100} onChange={e=>patch({opacity:+e.target.value/100})} className="w-full"/></label>
     <label className="block">{fa?'چرخش':'Rotation'} {selected.rotation}°<input aria-label={fa?'چرخش متن':'Text rotation'} type="range" min="0" max="360" value={selected.rotation} onChange={e=>patch({rotation:+e.target.value})} className="w-full"/></label>
     <label className="block">{fa?'مبنای مختصات':'Attach to'}<select aria-label={fa?'مبنای متن':'Text target'} value={selected.target} onChange={e=>{const target=e.target.value as OverlayTarget;patch(scopePatch(target==='sheet' && (selected.targetScope==='document'||selected.targetScope==='selected-documents')?'current':selected.targetScope,target));}} className={input}><option value="sheet">{fa?'برگه خروجی':'Output sheet'}</option><option value="page">{fa?'صفحه سند':'Document page'}</option></select></label>

@@ -48,6 +48,13 @@ import {
 } from '../engine/layoutEngine';
 import { checkPreflight } from '../engine/preflight';
 import { moveLayoutGuide, resolvePrinterMinMargins } from '../engine/sheetInteraction';
+import {
+  collectStudioSheetPeers,
+  resolveStudioCellAlignTransform,
+  resolveStudioOverlayAlignPercent,
+  type AlignDirection,
+  type AlignReferenceMode,
+} from '../engine/alignEngine';
 import { fitPageZoom, isAtWheelEdge, PREVIEW_PX_PER_MM, wheelSheetStep } from '../engine/viewNavigation';
 import {
   formatPageNumberLabel,
@@ -123,7 +130,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     addImageOverlayFiles,
     applyPageGeometry,
     applyAspectRatioCrop,
+    applyCellTransform,
     resetCellGeometry,
+    updateOverlay,
     commitLayoutGuides,
     selectPrinter,
     setDefaultPrinter,
@@ -170,6 +179,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     | null
   >(null);
   const [editScope, setEditScope] = useState<PageEditScope>('current');
+  const [studioAlignRef, setStudioAlignRef] = useState<AlignReferenceMode>('sheet');
+  const [studioAlignPeerId, setStudioAlignPeerId] = useState<string>('all');
   const [currentEditPageId, setCurrentEditPageId] = useState<string | null>(null);
   const [currentOccurrenceKey, setCurrentOccurrenceKey] = useState<string | null>(null);
   const [activeGuideSheet, setActiveGuideSheet] = useState<number | null>(null);
@@ -252,7 +263,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     if (!selectedOverlayId) return;
     const dismiss = (event: PointerEvent) => {
       const target = event.target instanceof Element ? event.target : null;
-      if (!target?.closest('[data-overlay-id],[data-text-control-panel],[data-shape-control-panel],[data-tool-panel],[data-top-tool-ribbon],[data-page-context-menu]')) selectOverlay(null);
+      if (!target?.closest('[data-overlay-id],[data-text-control-panel],[data-shape-control-panel],[data-tool-panel],[data-top-tool-ribbon],[data-page-context-menu],[data-studio-align-bar]')) selectOverlay(null);
     };
     document.addEventListener('pointerdown', dismiss, true);
     return () => document.removeEventListener('pointerdown', dismiss, true);
@@ -1415,6 +1426,117 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 <option value="all">{lang === 'fa' ? 'همه صفحات' : 'All pages'}</option>
               </select>
             </label>
+
+            {canvasTool === 'move' && !previewOnlyPage && (() => {
+              const activeSheet = sheets[safeSheetIdx];
+              const selectedOverlay = selectedOverlayId ? overlays.find((o) => o.id === selectedOverlayId) : undefined;
+              const selectedCell = !selectedOverlay && activeSheet
+                ? activeSheet.cells.find((c) => c.occurrenceKey === currentOccurrenceKey && c.page) ??
+                  activeSheet.cells.find((c) => c.page?.id === currentEditPageId && c.page.isHighlighted) ??
+                  activeSheet.cells.find((c) => c.page?.isHighlighted)
+                : undefined;
+              if (!activeSheet || (!selectedOverlay && !selectedCell)) return null;
+
+              const excludePeerId = selectedOverlay
+                ? `overlay:${selectedOverlay.id}`
+                : selectedCell?.occurrenceKey
+                  ? `cell:${selectedCell.occurrenceKey}`
+                  : undefined;
+              const peers = collectStudioSheetPeers(
+                activeSheet,
+                outputSheets.length,
+                pages,
+                overlays,
+                pageNumbers,
+                excludePeerId,
+                lang
+              );
+              const selectedPeer = peers.find((p) => p.id === studioAlignPeerId);
+              const otherBoxes = selectedPeer ? [selectedPeer.box] : peers.map((p) => p.box);
+              const effRef: AlignReferenceMode =
+                studioAlignRef === 'others' && otherBoxes.length === 0 ? 'sheet' : studioAlignRef;
+
+              const handleAlign = (dir: AlignDirection) => {
+                if (selectedOverlay) {
+                  const res = resolveStudioOverlayAlignPercent(activeSheet, selectedOverlay, dir, effRef, otherBoxes);
+                  if (res) updateOverlay(selectedOverlay.id, res);
+                } else if (selectedCell?.page && selectedCell.occurrenceKey) {
+                  const nextTransform = resolveStudioCellAlignTransform(activeSheet, selectedCell, dir, effRef, otherBoxes);
+                  if (nextTransform) {
+                    if (editScope === 'current') {
+                      applyCellTransform(selectedCell.page.id, selectedCell.occurrenceKey, nextTransform);
+                    } else {
+                      applyPageGeometry(selectedCell.page.id, editScope, { kind: 'transform', transform: nextTransform });
+                    }
+                  }
+                }
+              };
+
+              return (
+                <div
+                  data-studio-align-bar
+                  className="flex flex-wrap items-center gap-1 rounded border border-sky-200 bg-sky-50/80 px-1.5 py-0.5 dark:border-sky-800/60 dark:bg-sky-950/30"
+                >
+                  <span className="font-semibold text-sky-900 dark:text-sky-200">
+                    {lang === 'fa' ? 'تراز:' : 'Align:'}
+                  </span>
+                  <select
+                    data-studio-align-reference
+                    aria-label={lang === 'fa' ? 'مبنای تراز' : 'Align reference'}
+                    value={effRef}
+                    onChange={(e) => setStudioAlignRef(e.target.value as AlignReferenceMode)}
+                    className="rounded border border-slate-300 bg-white px-1 py-0.5 text-[10.5px] font-semibold text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                  >
+                    <option value="sheet">{lang === 'fa' ? 'نسبت به شیت' : 'To Sheet'}</option>
+                    <option value="margins">{lang === 'fa' ? 'نسبت به حاشیه چاپ' : 'To Margins'}</option>
+                    <option value="cell">{lang === 'fa' ? 'نسبت به خانه' : 'To Cell'}</option>
+                    <option value="others" disabled={peers.length === 0}>
+                      {lang === 'fa'
+                        ? `نسبت به دیگر تصاویر (${formatLocalizedNumber(peers.length, lang)})`
+                        : `To Other Images (${peers.length})`}
+                    </option>
+                  </select>
+                  {effRef === 'others' && peers.length > 1 && (
+                    <select
+                      data-studio-align-peer
+                      aria-label={lang === 'fa' ? 'تصویر یا المان مرجع' : 'Reference image or element'}
+                      value={selectedPeer ? selectedPeer.id : 'all'}
+                      onChange={(e) => setStudioAlignPeerId(e.target.value)}
+                      className="max-w-36 rounded border border-slate-300 bg-white px-1 py-0.5 text-[10.5px] text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                    >
+                      <option value="all">{lang === 'fa' ? 'مجموعه دیگر تصاویر شیت' : 'All other items on sheet'}</option>
+                      {peers.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <div className="flex items-center gap-0.5">
+                    {(
+                      [
+                        ['left', lang === 'fa' ? 'چپ' : 'L'],
+                        ['hcenter', lang === 'fa' ? 'وسط↔' : 'H'],
+                        ['right', lang === 'fa' ? 'راست' : 'R'],
+                        ['top', lang === 'fa' ? 'بالا' : 'T'],
+                        ['vcenter', lang === 'fa' ? 'وسط↕' : 'V'],
+                        ['bottom', lang === 'fa' ? 'پایین' : 'B'],
+                      ] as const
+                    ).map(([dir, lbl]) => (
+                      <button
+                        key={dir}
+                        type="button"
+                        data-studio-align={dir}
+                        onClick={() => handleAlign(dir)}
+                        className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:border-sky-400 hover:bg-sky-50 hover:text-sky-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+                      >
+                        {lbl}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             {canvasTool === 'crop' && (
               <>

@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useId, useRef, useState, type PointerEvent } from 'react';
 import type { ComputedSheetSide, LayoutSettings, MarginsMm, MeasurementUnit } from '@shared/models';
 import { convertMmToUnit, getDuplexFlipAxis, getEffectiveSideMarginsMm } from '../engine/layoutEngine';
 import { clampMarginsToMin, measurement, measureEndpoint, moveLayoutGuide, type Guide, type Point } from '../engine/sheetInteraction';
@@ -222,6 +222,19 @@ export function LayoutGuides({ sheet, layout, pxPerMm, spaceDown, language, unit
 export function MeasurementTool({ sheet, unit, language, spaceDown }: { sheet: ComputedSheetSide; unit: MeasurementUnit; language: string; spaceDown: boolean }) {
   const [line,setLine] = useState<{ start:Point; end:Point } | null>(null);
   const drag = useRef<{ pointer:number; start:Point } | null>(null);
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!line) return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'Escape' || e.key === 'Delete' || e.key === 'Backspace') {
+        drag.current = null;
+        setLine(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [line]);
   const getPoint = (e: PointerEvent<HTMLDivElement>): Point => {
     const rect = e.currentTarget.getBoundingClientRect();
     return { x: Math.max(0,Math.min(sheet.widthMm,(e.clientX-rect.left)/Math.max(1,rect.width)*sheet.widthMm)),
@@ -245,8 +258,19 @@ export function MeasurementTool({ sheet, unit, language, spaceDown }: { sheet: C
         <line x1={line.start.x} y1={line.start.y} x2={line.end.x} y2={line.end.y} stroke="#e11d48" strokeWidth="1" vectorEffect="non-scaling-stroke" />
         <circle cx={line.start.x} cy={line.start.y} r="1.3" fill="#e11d48"/><circle cx={line.end.x} cy={line.end.y} r="1.3" fill="#e11d48"/>
       </svg>
-      <div role="status" className="pointer-events-none absolute left-2 top-2 rounded bg-slate-900/90 px-2 py-1 text-xs text-white" dir="ltr">
-        {convertMmToUnit(m.distance,unit)} {unit} · ΔX {convertMmToUnit(Math.abs(m.dx),unit)} · ΔY {convertMmToUnit(Math.abs(m.dy),unit)}
+      <div role="status" className="pointer-events-auto absolute left-2 top-2 flex items-center gap-2 rounded bg-slate-900/90 px-2 py-1 text-xs text-white shadow" dir="ltr"
+        onPointerDown={(e) => e.stopPropagation()}>
+        <span>{convertMmToUnit(m.distance,unit)} {unit} · ΔX {convertMmToUnit(Math.abs(m.dx),unit)} · ΔY {convertMmToUnit(Math.abs(m.dy),unit)}</span>
+        <button
+          type="button"
+          data-measurement-clear
+          aria-label={language === 'fa' ? 'پاک کردن اندازه' : 'Clear measurement'}
+          title={language === 'fa' ? 'پاک کردن اندازه (Esc / Delete)' : 'Clear measurement (Esc / Delete)'}
+          onClick={(e) => { e.stopPropagation(); drag.current = null; setLine(null); }}
+          className="rounded bg-rose-600/80 px-1.5 py-0.5 text-[10px] font-bold text-white hover:bg-rose-500 cursor-pointer"
+        >
+          ×
+        </button>
       </div>
     </>}
   </div>;

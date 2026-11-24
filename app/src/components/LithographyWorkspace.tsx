@@ -170,8 +170,16 @@ export const LithographyWorkspace: React.FC = () => {
 
   // Form interaction tool, drag/resize/measure states
   const [formTool, setFormTool] = useState<FormToolMode>('transform');
+  const [keepMultipleMeasurements, setKeepMultipleMeasurements] = useState(true);
+  const [lithoAlignRef, setLithoAlignRef] = useState<'sheet' | 'safe-marks'>('sheet');
   const [pinnedMeasurements, setPinnedMeasurements] = useState<PinnedMeasurement[]>([]);
   const [activeMeasure, setActiveMeasure] = useState<{
+    x1Mm: number;
+    y1Mm: number;
+    x2Mm: number;
+    y2Mm: number;
+  } | null>(null);
+  const activeMeasureRef = useRef<{
     x1Mm: number;
     y1Mm: number;
     x2Mm: number;
@@ -180,6 +188,39 @@ export const LithographyWorkspace: React.FC = () => {
   const [formCursorMm, setFormCursorMm] = useState<{ xMm: number; yMm: number } | null>(null);
   const [snapGuide, setSnapGuide] = useState<{ cx: boolean; cy: boolean }>({ cx: false, cy: false });
   const [isFormTransforming, setIsFormTransforming] = useState(false);
+
+  const clearAllMeasurements = useCallback(() => {
+    measureDragRef.current = null;
+    activeMeasureRef.current = null;
+    setPinnedMeasurements([]);
+    setActiveMeasure(null);
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (pinnedMeasurements.length === 0 && !activeMeasure) return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'Escape') {
+        if (activeMeasure) {
+          measureDragRef.current = null;
+          activeMeasureRef.current = null;
+          setActiveMeasure(null);
+        } else {
+          clearAllMeasurements();
+        }
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && formTool === 'measure') {
+        e.preventDefault();
+        if (e.shiftKey || pinnedMeasurements.length <= 1) {
+          clearAllMeasurements();
+        } else {
+          setPinnedMeasurements((prev) => prev.slice(0, -1));
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [pinnedMeasurements.length, activeMeasure, formTool, clearAllMeasurements]);
 
   const transformDragRef = useRef<{
     kind: 'move' | 'resize';
@@ -501,6 +542,8 @@ export const LithographyWorkspace: React.FC = () => {
     (
       target:
         | 'center'
+        | 'hcenter'
+        | 'vcenter'
         | 'left'
         | 'right'
         | 'top'
@@ -510,7 +553,7 @@ export const LithographyWorkspace: React.FC = () => {
         | 'bottom-left'
         | 'bottom-right'
     ) => {
-      const margin = showPressMarks ? 6 : 0;
+      const margin = lithoAlignRef === 'safe-marks' && showPressMarks ? 6 : 0;
       const halfBboxW = artworkOnForm.bboxWidthMm / 2;
       const halfBboxH = artworkOnForm.bboxHeightMm / 2;
       const halfFormW = resolvedPlate.widthMm / 2;
@@ -523,6 +566,8 @@ export const LithographyWorkspace: React.FC = () => {
         nextX = 0;
         nextY = 0;
       }
+      if (target === 'hcenter') nextX = 0;
+      if (target === 'vcenter') nextY = 0;
       if (target.includes('left')) nextX = -(halfFormW - halfBboxW - margin);
       if (target.includes('right')) nextX = halfFormW - halfBboxW - margin;
       if (target.includes('top')) nextY = -(halfFormH - halfBboxH - margin);
@@ -537,6 +582,7 @@ export const LithographyWorkspace: React.FC = () => {
       resolvedPlate.heightMm,
       formPlacement.offsetXMm,
       formPlacement.offsetYMm,
+      lithoAlignRef,
       showPressMarks,
       updateLithoFormPlacement,
     ]
@@ -645,12 +691,14 @@ export const LithographyWorkspace: React.FC = () => {
           x2 = Math.round((measureDragRef.current.x1Mm + dist * Math.cos(snappedAngle)) * 100) / 100;
           y2 = Math.round((measureDragRef.current.y1Mm + dist * Math.sin(snappedAngle)) * 100) / 100;
         }
-        setActiveMeasure({
+        const nextActive = {
           x1Mm: measureDragRef.current.x1Mm,
           y1Mm: measureDragRef.current.y1Mm,
           x2Mm: x2,
           y2Mm: y2,
-        });
+        };
+        activeMeasureRef.current = nextActive;
+        setActiveMeasure(nextActive);
       }
     },
     [clientToFormMm, updateLithoFormPlacement]
@@ -663,27 +711,28 @@ export const LithographyWorkspace: React.FC = () => {
       setSnapGuide({ cx: false, cy: false });
       setIsFormTransforming(false);
     }
-    if (measureDragRef.current && activeMeasure) {
+    const latestMeasure = activeMeasureRef.current ?? activeMeasure;
+    if (measureDragRef.current && latestMeasure) {
       const m = computeFormMeasurement(
-        activeMeasure.x1Mm,
-        activeMeasure.y1Mm,
-        activeMeasure.x2Mm,
-        activeMeasure.y2Mm
+        latestMeasure.x1Mm,
+        latestMeasure.y1Mm,
+        latestMeasure.x2Mm,
+        latestMeasure.y2Mm
       );
       if (m.distanceMm >= 0.3) {
-        setPinnedMeasurements((prev) => [
-          ...prev.slice(-9),
-          {
-            id: `meas-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-            ...activeMeasure,
-          },
-        ]);
+        const nextItem = {
+          id: `meas-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+          ...latestMeasure,
+        };
+        setPinnedMeasurements((prev) =>
+          keepMultipleMeasurements ? [...prev.slice(-9), nextItem] : [nextItem]
+        );
       }
-      measureDragRef.current = null;
-    } else {
-      measureDragRef.current = null;
+      activeMeasureRef.current = null;
+      setActiveMeasure(null);
     }
-  }, [activeMeasure]);
+    measureDragRef.current = null;
+  }, [activeMeasure, keepMultipleMeasurements]);
 
   const activePlatePreviewLabel = useMemo(() => {
     const activeSpots = keptSpots.filter((sp) => enabledSpots[sp.name] ?? true);
@@ -1362,6 +1411,51 @@ export const LithographyWorkspace: React.FC = () => {
                 />
                 <span>{isFa ? 'خط‌کش فرم' : 'Rulers'}</span>
               </label>
+
+              {formTool === 'measure' && (
+                <button
+                  type="button"
+                  data-litho-measure-mode
+                  onClick={() => setKeepMultipleMeasurements((v) => !v)}
+                  title={
+                    isFa
+                      ? 'تغییر بین ثبت چند اندازه هم‌زمان یا جایگزینی خودکار اندازه قبلی'
+                      : 'Toggle keeping multiple lines vs single active measurement'
+                  }
+                  className={`flex h-6.5 items-center gap-1 rounded border px-2 text-[10.5px] font-semibold cursor-pointer ${
+                    keepMultipleMeasurements
+                      ? 'border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-600/40 dark:bg-sky-950/40 dark:text-sky-200'
+                      : 'border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
+                  }`}
+                >
+                  <span>
+                    {keepMultipleMeasurements
+                      ? isFa
+                        ? 'ثبت چندخطی'
+                        : 'Multi-Line'
+                      : isFa
+                        ? 'تک‌خطی'
+                        : 'Single-Line'}
+                  </span>
+                </button>
+              )}
+
+              {(pinnedMeasurements.length > 0 || activeMeasure) && (
+                <button
+                  type="button"
+                  data-litho-toolbar-clear-measures
+                  onClick={clearAllMeasurements}
+                  title={isFa ? 'پاک‌کردن همه اندازه‌های روی صفحه (Esc / Delete)' : 'Clear all measurements'}
+                  className="flex h-6.5 items-center gap-1 rounded border border-rose-300 bg-rose-50 px-2 text-[10.5px] font-bold text-rose-700 hover:bg-rose-100 dark:border-rose-600/40 dark:bg-rose-950/40 dark:text-rose-300 cursor-pointer"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  <span>
+                    {isFa
+                      ? `پاک‌کردن اندازه‌ها (${toPersianDigits(pinnedMeasurements.length || 1)})`
+                      : `Clear (${pinnedMeasurements.length || 1})`}
+                  </span>
+                </button>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5">
@@ -1402,6 +1496,40 @@ export const LithographyWorkspace: React.FC = () => {
                   {isFa ? 'اندازه سفارشی (mm)...' : 'Custom Size (mm)...'}
                 </option>
               </select>
+
+              <select
+                data-litho-align-reference
+                aria-label={isFa ? 'مبنای تراز در فرم' : 'Align Reference'}
+                value={lithoAlignRef}
+                onChange={(e) => setLithoAlignRef(e.target.value as 'sheet' | 'safe-marks')}
+                className="h-6.5 rounded border border-slate-300 bg-white px-1.5 text-[10.5px] font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              >
+                <option value="sheet">{isFa ? 'تراز نسبت به شیت / فرم' : 'Align to Sheet'}</option>
+                <option value="safe-marks">{isFa ? 'تراز داخل کادر علائم' : 'Inside Press Marks'}</option>
+              </select>
+
+              <div className="flex items-center gap-0.5 rounded border border-slate-200 bg-white p-0.5 dark:border-slate-700 dark:bg-slate-800">
+                {(
+                  [
+                    ['left', isFa ? 'چپ' : 'L'],
+                    ['hcenter', isFa ? 'وسط↔' : 'H'],
+                    ['right', isFa ? 'راست' : 'R'],
+                    ['top', isFa ? 'بالا' : 'T'],
+                    ['vcenter', isFa ? 'وسط↕' : 'V'],
+                    ['bottom', isFa ? 'پایین' : 'B'],
+                  ] as const
+                ).map(([dir, lbl]) => (
+                  <button
+                    key={dir}
+                    type="button"
+                    data-litho-align={dir}
+                    onClick={() => alignArtworkOnForm(dir)}
+                    className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-amber-50 hover:text-amber-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+                  >
+                    {lbl}
+                  </button>
+                ))}
+              </div>
 
               <button
                 type="button"
@@ -1863,7 +1991,9 @@ export const LithographyWorkspace: React.FC = () => {
                       e.stopPropagation();
                       const pt = clientToFormMm(e.clientX, e.clientY);
                       measureDragRef.current = { x1Mm: pt.xMm, y1Mm: pt.yMm };
-                      setActiveMeasure({ x1Mm: pt.xMm, y1Mm: pt.yMm, x2Mm: pt.xMm, y2Mm: pt.yMm });
+                      const startMeas = { x1Mm: pt.xMm, y1Mm: pt.yMm, x2Mm: pt.xMm, y2Mm: pt.yMm };
+                      activeMeasureRef.current = startMeas;
+                      setActiveMeasure(startMeas);
                     }}
                     onPointerMove={(e) => {
                       setFormCursorMm(clientToFormMm(e.clientX, e.clientY));
@@ -1945,6 +2075,37 @@ export const LithographyWorkspace: React.FC = () => {
                         );
                       })}
                     </svg>
+
+                    {/* Direct on-canvas Delete (×) badges for each pinned measurement — always clickable */}
+                    {pinnedMeasurements.map((pm) => {
+                      const res = computeFormMeasurement(pm.x1Mm, pm.y1Mm, pm.x2Mm, pm.y2Mm);
+                      if (res.distanceMm < 0.3) return null;
+                      const leftPct = Math.max(4, Math.min(96, ((pm.x1Mm + pm.x2Mm) / 2 / resolvedPlate.widthMm) * 100));
+                      const topPct = Math.max(4, Math.min(96, ((pm.y1Mm + pm.y2Mm) / 2 / resolvedPlate.heightMm) * 100));
+                      return (
+                        <button
+                          key={`del-${pm.id}`}
+                          type="button"
+                          data-litho-delete-measure={pm.id}
+                          title={isFa ? 'حذف این اندازه' : 'Delete measurement'}
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPinnedMeasurements((prev) => prev.filter((item) => item.id !== pm.id));
+                          }}
+                          style={{
+                            left: `${leftPct}%`,
+                            top: `${topPct}%`,
+                            transform: 'translate(22px, -16px)',
+                          }}
+                          className="pointer-events-auto absolute flex h-4 w-4 items-center justify-center rounded-full border border-white bg-rose-600 text-[9px] font-bold text-white shadow hover:bg-rose-700 cursor-pointer"
+                        >
+                          ×
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -2009,6 +2170,15 @@ export const LithographyWorkspace: React.FC = () => {
                   <span>
                     {`${formatFormLength(latestMeasurementSummary.distanceMm, settings.unit)} (ΔX ${latestMeasurementSummary.dxMm} · ΔY ${latestMeasurementSummary.dyMm} mm · ${latestMeasurementSummary.angleDeg}°)`}
                   </span>
+                  <button
+                    type="button"
+                    data-litho-readout-clear-measures
+                    onClick={clearAllMeasurements}
+                    title={isFa ? 'پاک‌کردن همه اندازه‌ها' : 'Clear all measurements'}
+                    className="ms-1 rounded bg-rose-600 px-1 py-0 text-[10px] font-bold text-white hover:bg-rose-700 cursor-pointer"
+                  >
+                    ×
+                  </button>
                 </span>
               )}
             </div>

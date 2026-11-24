@@ -7,6 +7,14 @@ import { alignOverlay, overlayPanelFrame } from '../engine/overlayGeometry';
 import { newOverlayId } from '../engine/imageOverlays';
 import { normalizeShapeStyle, SHAPE_LINE_CAPS, SHAPE_NAMES, SHAPE_STROKE_STYLES, SHAPE_TYPES, shapeCapabilities, shapeHasFill } from '../engine/shapes';
 import { ShapePreview, shapeLabel } from './ShapePreview';
+import {
+  collectStudioSheetPeers,
+  resolveStudioOverlayAlignPercent,
+  type AlignDirection,
+  type AlignReferenceMode,
+} from '../engine/alignEngine';
+
+type PanelAlignRef = 'auto' | AlignReferenceMode;
 
 /**
  * Every control a drawn shape has, in one side panel.
@@ -39,6 +47,8 @@ export function ShapeControlPanel() {
   const sheets = useMemo(() => computeImpositionSheets(pages, layout), [pages, layout]);
   const [range, setRange] = useState('');
   const [rangeError, setRangeError] = useState(false);
+  const [alignRef, setAlignRef] = useState<PanelAlignRef>('auto');
+  const [alignPeerId, setAlignPeerId] = useState<string>('all');
   const isFa = settings.language === 'fa';
 
   useEffect(() => {
@@ -56,6 +66,20 @@ export function ShapeControlPanel() {
   // field and a drag cannot disagree about where the edge of the page is.
   const frame = overlayPanelFrame(sheet, item);
   const box = { width: frame.boxWidthMm, height: frame.boxHeightMm };
+  const pageIndices = new Map(pages.map((p, idx) => [p.id, idx]));
+  const peers = collectStudioSheetPeers(sheet, sheets.length, pages, overlays, pageIndices, `overlay:${item.id}`, settings.language);
+  const effAlignRef: PanelAlignRef = alignRef === 'others' && peers.length === 0 ? 'auto' : alignRef;
+  const selectedPeer = alignPeerId !== 'all' ? peers.find((p) => p.id === alignPeerId) ?? null : null;
+  const otherBoxes = selectedPeer ? [selectedPeer.box] : peers.map((p) => p.box);
+  const handleAlign = (where: AlignDirection) => {
+    if (effAlignRef === 'auto' || !sheet) {
+      const aligned = alignOverlay({ xPercent: item.xPercent, yPercent: item.yPercent, widthPercent: item.widthPercent, heightPercent: item.heightPercent }, where, frame.limits);
+      patch({ xPercent: aligned.xPercent, yPercent: aligned.yPercent });
+      return;
+    }
+    const moved = resolveStudioOverlayAlignPercent(sheet, item, where, effAlignRef, otherBoxes);
+    if (moved) patch({ xPercent: moved.xPercent, yPercent: moved.yPercent });
+  };
   const widthMm = item.widthPercent * box.width / 100, heightMm = item.heightPercent * box.height / 100;
   const ratio = heightMm > 0 ? widthMm / heightMm : 1;
   const setSize = (key: 'width' | 'height', value: number) => {
@@ -239,19 +263,33 @@ export function ShapeControlPanel() {
       <p className="text-[10px] leading-4 text-slate-500">
         {isFa ? 'مقدار منفی یعنی بیرون از کادر محتوا — برای جا دادن شکل در حاشیه یا بلید.' : 'A negative value is outside the content box, which is how a margin or a bleed is placed.'}
       </p>
-      <div className="grid grid-cols-3 gap-1">
-        {(['left', 'hcenter', 'right', 'top', 'vcenter', 'bottom'] as const).map(where => (
-          <button key={where} type="button" data-shape-align={where}
-            title={where}
-            onClick={() => {
-              const aligned = alignOverlay({ xPercent: item.xPercent, yPercent: item.yPercent, widthPercent: item.widthPercent, heightPercent: item.heightPercent }, where, frame.limits);
-              patch({ xPercent: aligned.xPercent, yPercent: aligned.yPercent });
-            }}
-            className={`${chip} border border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600`}>
-            {where === 'left' ? (isFa ? 'چپ' : 'Left') : where === 'hcenter' ? (isFa ? 'وسط' : 'Centre') : where === 'right' ? (isFa ? 'راست' : 'Right')
-              : where === 'top' ? (isFa ? 'بالا' : 'Top') : where === 'vcenter' ? (isFa ? 'میانه' : 'Middle') : (isFa ? 'پایین' : 'Bottom')}
-          </button>
-        ))}
+      <div className="space-y-1">
+        <label className="block">{isFa ? 'مبنای تراز' : 'Align reference'}
+          <select data-shape-align-reference aria-label={isFa ? 'مبنای تراز شکل' : 'Shape align reference'} className={input} value={effAlignRef} onChange={e => setAlignRef(e.target.value as PanelAlignRef)}>
+            <option value="auto">{isFa ? 'کادر جاری (پیش‌فرض)' : 'Current container (default)'}</option>
+            <option value="sheet">{isFa ? 'نسبت به کل شیت' : 'To whole sheet'}</option>
+            <option value="margins">{isFa ? 'نسبت به حاشیه چاپ' : 'To margins'}</option>
+            <option value="cell">{isFa ? 'نسبت به خانه' : 'To cell'}</option>
+            <option value="others" disabled={peers.length === 0}>{isFa ? `نسبت به دیگر تصاویر (${peers.length})` : `To other images (${peers.length})`}</option>
+          </select>
+        </label>
+        {effAlignRef === 'others' && peers.length > 1 && (
+          <select data-shape-align-peer aria-label={isFa ? 'تصویر مرجع' : 'Reference item'} className={input} value={selectedPeer ? selectedPeer.id : 'all'} onChange={e => setAlignPeerId(e.target.value)}>
+            <option value="all">{isFa ? 'مجموعه دیگر تصاویر شیت' : 'All other items on sheet'}</option>
+            {peers.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+          </select>
+        )}
+        <div className="grid grid-cols-3 gap-1">
+          {(['left', 'hcenter', 'right', 'top', 'vcenter', 'bottom'] as const).map(where => (
+            <button key={where} type="button" data-shape-align={where}
+              title={where}
+              onClick={() => handleAlign(where)}
+              className={`${chip} border border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600`}>
+              {where === 'left' ? (isFa ? 'چپ' : 'Left') : where === 'hcenter' ? (isFa ? 'وسط' : 'Centre') : where === 'right' ? (isFa ? 'راست' : 'Right')
+                : where === 'top' ? (isFa ? 'بالا' : 'Top') : where === 'vcenter' ? (isFa ? 'میانه' : 'Middle') : (isFa ? 'پایین' : 'Bottom')}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* 7. where it is printed */}

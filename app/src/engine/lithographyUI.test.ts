@@ -285,6 +285,46 @@ describe('LithographyWorkspace & QuickBar UI', () => {
 
     expect(host.querySelector('[data-litho-measure-readout]')).toBeTruthy();
     expect(host.querySelectorAll('[data-litho-measurement-item]').length).toBeGreaterThanOrEqual(1);
+    expect(host.querySelector('[data-litho-toolbar-clear-measures]')).toBeTruthy();
+    expect(host.querySelector('[data-litho-measure-mode]')).toBeTruthy();
+
+    // Draw a second measurement line and delete one via its × badge, then clear remaining via toolbar button
+    await act(async () => {
+      overlay.dispatchEvent(
+        new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 30, clientY: 50 })
+      );
+      overlay.dispatchEvent(
+        new MouseEvent('pointermove', { bubbles: true, clientX: 140, clientY: 50 })
+      );
+      overlay.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 140, clientY: 50 }));
+    });
+    expect(host.querySelectorAll('[data-litho-measurement-item]').length).toBe(2);
+
+    const deleteBadge = host.querySelector<HTMLButtonElement>('[data-litho-delete-measure]')!;
+    expect(deleteBadge).toBeTruthy();
+    await act(async () => {
+      deleteBadge.click();
+    });
+    expect(host.querySelectorAll('[data-litho-measurement-item]').length).toBe(1);
+
+    const clearAllBtn = host.querySelector<HTMLButtonElement>('[data-litho-toolbar-clear-measures]')!;
+    await act(async () => {
+      clearAllBtn.click();
+    });
+    expect(host.querySelectorAll('[data-litho-measurement-item]').length).toBe(0);
+
+    // Align artwork on form using left + safe-marks reference
+    const lithoAlignRef = host.querySelector<HTMLSelectElement>('[data-litho-align-reference]')!;
+    expect(lithoAlignRef).toBeTruthy();
+    await act(async () => {
+      lithoAlignRef.value = 'safe-marks';
+      lithoAlignRef.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const alignLeftBtn = host.querySelector<HTMLButtonElement>('[data-litho-align="left"]')!;
+    await act(async () => {
+      alignLeftBtn.click();
+    });
+    expect(useAppStore.getState().lithoExportSettings.formPlacement?.offsetXMm).not.toBe(0);
 
     // Reset placement restores 100% / 0 offset / 0°
     const resetBtn = host.querySelector('[data-litho-reset-placement]') as HTMLButtonElement;

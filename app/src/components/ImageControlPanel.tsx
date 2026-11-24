@@ -9,6 +9,14 @@ import {popEraseShape} from '../engine/imageErase';
 import {sanitizeEraseShapes} from '@shared/models';
 import {useAppStore} from '../store/useAppStore';
 import { describePictureFormat, planPictureEmbedding } from '../engine/imageFormat';
+import {
+  collectStudioSheetPeers,
+  resolveStudioOverlayAlignPercent,
+  type AlignDirection,
+  type AlignReferenceMode,
+} from '../engine/alignEngine';
+
+type PanelAlignRef = 'auto' | AlignReferenceMode;
 
 const input='w-full rounded border border-slate-300 bg-white p-1 text-xs text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white';
 const MM_TO_PT=72/25.4;
@@ -26,6 +34,8 @@ export function ImageControlPanel(){
  const numbers=overlays.filter((o):o is PageOverlayImage=>o.kind==='image');
  const sheets=useMemo(()=>computeImpositionSheets(pages,layout),[pages,layout]);
  const [range,setRange]=useState('');const [rangeError,setRangeError]=useState(false);
+ const [alignRef,setAlignRef]=useState<PanelAlignRef>('auto');
+ const [alignPeerId,setAlignPeerId]=useState<string>('all');
  useEffect(()=>{
    if(!item || item.targetScope!=='selected'){setRange('');return;}
    if(item.target==='sheet'&&item.targetSheetIndices){setRange(formatCoverageSelection(item.targetSheetIndices));return;}
@@ -57,9 +67,19 @@ export function ImageControlPanel(){
    if(!Number.isFinite(value))return;
    patch(key==='x'?{xPercent:value/box.width*100}:{yPercent:value/box.height*100});
  };
- const align=(where:'left'|'hcenter'|'right'|'top'|'vcenter'|'bottom')=>{
-   const moved=alignOverlay({xPercent:item.xPercent,yPercent:item.yPercent,widthPercent:item.widthPercent,heightPercent:item.heightPercent},where,frame.limits);
-   patch({xPercent:moved.xPercent,yPercent:moved.yPercent});
+ const pageIndices=new Map(pages.map((p,i)=>[p.id,i]));
+ const peers=collectStudioSheetPeers(sheet,sheets.length,pages,overlays,pageIndices,`overlay:${item.id}`,settings.language);
+ const effAlignRef:PanelAlignRef=alignRef==='others'&&peers.length===0?'auto':alignRef;
+ const selectedPeer=alignPeerId!=='all'?peers.find(p=>p.id===alignPeerId)??null:null;
+ const otherBoxes=selectedPeer?[selectedPeer.box]:peers.map(p=>p.box);
+ const align=(where:AlignDirection)=>{
+   if(effAlignRef==='auto'||!sheet){
+     const moved=alignOverlay({xPercent:item.xPercent,yPercent:item.yPercent,widthPercent:item.widthPercent,heightPercent:item.heightPercent},where,frame.limits);
+     patch({xPercent:moved.xPercent,yPercent:moved.yPercent});
+     return;
+   }
+   const moved=resolveStudioOverlayAlignPercent(sheet,item,where,effAlignRef,otherBoxes);
+   if(moved)patch({xPercent:moved.xPercent,yPercent:moved.yPercent});
  };
  const setScope=(scope:OverlayScope,target:OverlayTarget=item.target)=>{
    const side=Math.min(activeSheetIndex+1,Math.max(1,sheets.length));
@@ -117,11 +137,28 @@ export function ImageControlPanel(){
      <label className="flex-1">{fa?'X (میلی‌متر)':'X (mm)'}<input aria-label={fa?'مختصاف X تصویر':'Image X'} data-image-x type="number" step="0.1" className={input} value={Number((item.xPercent*box.width/100).toFixed(2))} onChange={e=>setPosition('x',Number(e.target.value))}/></label>
      <label className="flex-1">{fa?'Y (میلی‌متر)':'Y (mm)'}<input aria-label={fa?'مختصاف Y تصویر':'Image Y'} data-image-y type="number" step="0.1" className={input} value={Number((item.yPercent*box.height/100).toFixed(2))} onChange={e=>setPosition('y',Number(e.target.value))}/></label>
    </div>
-   <div className="grid grid-cols-3 gap-1">
-     {(['left','hcenter','right','top','vcenter','bottom'] as const).map(where=>
-       <button key={where} type="button" data-image-align={where} title={where} onClick={()=>align(where)}
-         className="rounded border border-slate-300 bg-slate-100 px-1 py-1 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600 cursor-pointer">{where==='left'?(fa?'چپ':'Left'):where==='hcenter'?(fa?'وسط':'Centre'):where==='right'?(fa?'راست':'Right')
-         :where==='top'?(fa?'بالا':'Top'):where==='vcenter'?(fa?'میانه':'Middle'):(fa?'پایین':'Bottom')}</button>)}
+   <div className="space-y-1">
+     <label className="block">{fa?'مبنای تراز':'Align reference'}
+       <select data-image-align-reference aria-label={fa?'مبنای تراز تصویر':'Image align reference'} className={input} value={effAlignRef} onChange={e=>setAlignRef(e.target.value as PanelAlignRef)}>
+         <option value="auto">{fa?'کادر جاری (پیش‌فرض)':'Current container (default)'}</option>
+         <option value="sheet">{fa?'نسبت به کل شیت':'To whole sheet'}</option>
+         <option value="margins">{fa?'نسبت به حاشیه چاپ':'To margins'}</option>
+         <option value="cell">{fa?'نسبت به خانه':'To cell'}</option>
+         <option value="others" disabled={peers.length===0}>{fa?`نسبت به دیگر تصاویر (${peers.length})`:`To other images (${peers.length})`}</option>
+       </select>
+     </label>
+     {effAlignRef==='others' && peers.length>1 && (
+       <select data-image-align-peer aria-label={fa?'تصویر مرجع':'Reference image'} className={input} value={selectedPeer?selectedPeer.id:'all'} onChange={e=>setAlignPeerId(e.target.value)}>
+         <option value="all">{fa?'مجموعه دیگر تصاویر شیت':'All other items on sheet'}</option>
+         {peers.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}
+       </select>
+     )}
+     <div className="grid grid-cols-3 gap-1">
+       {(['left','hcenter','right','top','vcenter','bottom'] as const).map(where=>
+         <button key={where} type="button" data-image-align={where} title={where} onClick={()=>align(where)}
+           className="rounded border border-slate-300 bg-slate-100 px-1 py-1 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600 cursor-pointer">{where==='left'?(fa?'چپ':'Left'):where==='hcenter'?(fa?'وسط':'Centre'):where==='right'?(fa?'راست':'Right')
+           :where==='top'?(fa?'بالا':'Top'):where==='vcenter'?(fa?'میانه':'Middle'):(fa?'پایین':'Bottom')}</button>)}
+     </div>
    </div>
    <p className="text-[10px] leading-4 text-slate-500">
      {fa

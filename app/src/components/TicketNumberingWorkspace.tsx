@@ -37,8 +37,13 @@ import {
 } from '../engine/ticketNumbering';
 import { useSystemFonts } from '../engine/systemFonts';
 import { routeDroppedFiles } from '../engine/imageImport';
+import {
+  resolveTicketSlotAlignPercent,
+  type AlignDirection,
+} from '../engine/alignEngine';
 
 type TicketDrawTool = 'select' | 'perforation' | 'cut';
+type TicketAlignRef = 'cell' | 'sheet' | 'others';
 
 function clamp(v: number, min: number, max: number): number {
   if (!Number.isFinite(v)) return min;
@@ -93,6 +98,9 @@ export const TicketNumberingWorkspace: React.FC = () => {
   const [drawOrientation, setDrawOrientation] = useState<TicketGuideOrientation>('vertical');
   const [previewSheetIndex, setPreviewSheetIndex] = useState(0);
   const [dragOverSource, setDragOverSource] = useState(false);
+  const [ticketAlignRef, setTicketAlignRef] = useState<TicketAlignRef>('cell');
+  const [ticketAlignPeerId, setTicketAlignPeerId] = useState<string>('all');
+  const [activeCellCoord, setActiveCellCoord] = useState<{ row: number; col: number }>({ row: 0, col: 0 });
 
   const metrics = useMemo(() => getTicketGridMetrics(ticketConfig), [ticketConfig]);
   const autoGridLines = useMemo(() => computeAutoGridCutLinesMm(ticketConfig), [ticketConfig]);
@@ -364,6 +372,7 @@ export const TicketNumberingWorkspace: React.FC = () => {
     e.preventDefault();
     e.stopPropagation();
     setSelectedSlotId(slot.id);
+    setActiveCellCoord({ row, col });
 
     const sheetBounds = sheetRef.current?.getBoundingClientRect();
     const cellEl = e.currentTarget.closest<HTMLElement>('[data-ticket-cell]');
@@ -1259,6 +1268,14 @@ export const TicketNumberingWorkspace: React.FC = () => {
                   </label>
 
                   <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      data-ticket-guide-center
+                      onClick={() => updateGuide(selectedGuide.id, { positionPercent: 50 })}
+                      className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+                    >
+                      {isFa ? 'وسط (۵۰٪)' : 'Center (50%)'}
+                    </button>
                     <select
                       value={selectedGuide.strokeStyle}
                       onChange={(e) =>
@@ -1460,6 +1477,105 @@ export const TicketNumberingWorkspace: React.FC = () => {
                       : 'Axis: Horizontal'}
                 </button>
               )}
+
+              {drawTool === 'select' && selectedSlot && (() => {
+                const otherSlots = ticketConfig.numberSlots.filter((s) => s.id !== selectedSlot.id);
+                const effRef: TicketAlignRef =
+                  ticketAlignRef === 'others' && otherSlots.length === 0 ? 'cell' : ticketAlignRef;
+                const selectedPeerSlot =
+                  ticketAlignPeerId !== 'all'
+                    ? otherSlots.find((s) => s.id === ticketAlignPeerId) ?? null
+                    : null;
+                const refSlots = selectedPeerSlot ? [selectedPeerSlot] : otherSlots;
+                const cellRow = clamp(activeCellCoord.row, 0, Math.max(0, metrics.rows - 1));
+                const cellCol = clamp(activeCellCoord.col, 0, Math.max(0, metrics.cols - 1));
+                const cellBounds = getCellPercentBounds(cellRow, cellCol);
+
+                const applySlotAlign = (dir: AlignDirection) => {
+                  const aligned = resolveTicketSlotAlignPercent(
+                    selectedSlot,
+                    refSlots,
+                    {
+                      x: cellBounds.leftPct,
+                      y: cellBounds.topPct,
+                      width: cellBounds.widthPct,
+                      height: cellBounds.heightPct,
+                    },
+                    dir,
+                    effRef
+                  );
+                  if (aligned) {
+                    updateSlot(selectedSlot.id, {
+                      xPercent: aligned.xPercent,
+                      yPercent: aligned.yPercent,
+                    });
+                  }
+                };
+
+                return (
+                  <div
+                    data-ticket-align-bar
+                    className="flex flex-wrap items-center gap-1 rounded border border-sky-200 bg-sky-50/80 px-1.5 py-0.5 dark:border-sky-800/60 dark:bg-sky-950/30"
+                  >
+                    <span className="font-semibold text-sky-900 dark:text-sky-200">
+                      {isFa ? 'تراز:' : 'Align:'}
+                    </span>
+                    <select
+                      data-ticket-align-reference
+                      aria-label={isFa ? 'مبنای تراز در قبض' : 'Ticket align reference'}
+                      value={effRef}
+                      onChange={(e) => setTicketAlignRef(e.target.value as TicketAlignRef)}
+                      className="rounded border border-slate-300 bg-white px-1 py-0.5 text-[10.5px] font-semibold text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                    >
+                      <option value="cell">{isFa ? 'نسبت به خانه قبض' : 'To Cell'}</option>
+                      <option value="sheet">{isFa ? 'نسبت به شیت' : 'To Sheet'}</option>
+                      <option value="others" disabled={otherSlots.length === 0}>
+                        {isFa
+                          ? `نسبت به دیگر باکس‌ها (${otherSlots.length})`
+                          : `To Other Slots (${otherSlots.length})`}
+                      </option>
+                    </select>
+                    {effRef === 'others' && otherSlots.length > 1 && (
+                      <select
+                        data-ticket-align-peer
+                        aria-label={isFa ? 'باکس مرجع' : 'Reference slot'}
+                        value={selectedPeerSlot ? selectedPeerSlot.id : 'all'}
+                        onChange={(e) => setTicketAlignPeerId(e.target.value)}
+                        className="max-w-28 rounded border border-slate-300 bg-white px-1 py-0.5 text-[10.5px] text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                      >
+                        <option value="all">{isFa ? 'همه باکس‌های دیگر' : 'All other slots'}</option>
+                        {otherSlots.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.label || s.id}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    <div className="flex items-center gap-0.5">
+                      {(
+                        [
+                          ['left', isFa ? 'چپ' : 'L'],
+                          ['hcenter', isFa ? 'وسط↔' : 'H'],
+                          ['right', isFa ? 'راست' : 'R'],
+                          ['top', isFa ? 'بالا' : 'T'],
+                          ['vcenter', isFa ? 'وسط↕' : 'V'],
+                          ['bottom', isFa ? 'پایین' : 'B'],
+                        ] as const
+                      ).map(([dir, lbl]) => (
+                        <button
+                          key={dir}
+                          type="button"
+                          data-ticket-align={dir}
+                          onClick={() => applySlotAlign(dir)}
+                          className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:border-sky-400 hover:bg-sky-50 hover:text-sky-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+                        >
+                          {lbl}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Preview Sheet Switcher */}
