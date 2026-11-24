@@ -64,6 +64,47 @@ export function dragCrop(crop: Insets, rotation: PageRotation, handle: Handle, d
   return normalizeInsets(rotateInsets(c, ((360 - rotation) % 360) as PageRotation));
 }
 
+/** Adjust crop handles directly over a full uncropped display box (1:1 pointer motion across full image). */
+export function dragFullCrop(
+  crop: Insets,
+  rotation: PageRotation,
+  handle: Handle,
+  dx: number,
+  dy: number,
+  fullDisplayWidth: number,
+  fullDisplayHeight: number
+): Insets {
+  const c = rotateInsets(crop, rotation);
+  const fx = dx / Math.max(1, fullDisplayWidth);
+  const fy = dy / Math.max(1, fullDisplayHeight);
+  if (handle.includes('w')) c.left = Math.max(0, Math.min(0.98 - c.right, c.left + fx));
+  if (handle.includes('e')) c.right = Math.max(0, Math.min(0.98 - c.left, c.right - fx));
+  if (handle.includes('n')) c.top = Math.max(0, Math.min(0.98 - c.bottom, c.top + fy));
+  if (handle.includes('s')) c.bottom = Math.max(0, Math.min(0.98 - c.top, c.bottom - fy));
+  return normalizeInsets(rotateInsets(c, ((360 - rotation) % 360) as PageRotation));
+}
+
+/** Pan the crop window inside a full uncropped display box while preserving its width and height. */
+export function panFullCrop(
+  crop: Insets,
+  rotation: PageRotation,
+  dx: number,
+  dy: number,
+  fullDisplayWidth: number,
+  fullDisplayHeight: number
+): Insets {
+  const c = rotateInsets(crop, rotation);
+  const fx = dx / Math.max(1, fullDisplayWidth);
+  const fy = dy / Math.max(1, fullDisplayHeight);
+  const shiftX = Math.max(-c.left, Math.min(c.right, fx));
+  const shiftY = Math.max(-c.top, Math.min(c.bottom, fy));
+  c.left += shiftX;
+  c.right -= shiftX;
+  c.top += shiftY;
+  c.bottom -= shiftY;
+  return normalizeInsets(rotateInsets(c, ((360 - rotation) % 360) as PageRotation));
+}
+
 /** Largest centered rectangle of the requested source-width/source-height ratio inside the existing crop.
  * Returns null when it cannot be represented with the engine's 2% minimum remaining size. */
 export function centeredAspectCrop(page: PageItem, ratio: number): Insets | null {

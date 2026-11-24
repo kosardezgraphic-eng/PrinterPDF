@@ -354,28 +354,31 @@ async function decodeBrowserCanvasImage(
     }
   }
 
-  if (typeof Image !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
-    const url = URL.createObjectURL(new Blob([safe], { type: mimeType }));
-    try {
-      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const el = new Image();
-        el.onload = () => resolve(el);
-        el.onerror = () => reject(new Error(`Browser could not decode ${mimeType}`));
-        el.src = url;
-      });
-      const w = Math.max(1, img.naturalWidth || img.width || 800);
-      const h = Math.max(1, img.naturalHeight || img.height || 600);
-      const c = document.createElement('canvas');
-      c.width = w;
-      c.height = h;
-      const ctx = c.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(img, 0, 0, w, h);
-        const blob = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/png'));
-        if (blob) return { width: w, height: h, pngBytes: new Uint8Array(await blob.arrayBuffer()) };
+  if (typeof Image !== 'undefined' && typeof document !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+    const probeCanvas = document.createElement('canvas');
+    if (probeCanvas.getContext?.('2d')) {
+      const url = URL.createObjectURL(new Blob([safe], { type: mimeType }));
+      try {
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const el = new Image();
+          el.onload = () => resolve(el);
+          el.onerror = () => reject(new Error(`Browser could not decode ${mimeType}`));
+          el.src = url;
+        });
+        const w = Math.max(1, img.naturalWidth || img.width || 800);
+        const h = Math.max(1, img.naturalHeight || img.height || 600);
+        const c = document.createElement('canvas');
+        c.width = w;
+        c.height = h;
+        const ctx = c.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, w, h);
+          const blob = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/png'));
+          if (blob) return { width: w, height: h, pngBytes: new Uint8Array(await blob.arrayBuffer()) };
+        }
+      } finally {
+        URL.revokeObjectURL(url);
       }
-    } finally {
-      URL.revokeObjectURL(url);
     }
   }
 

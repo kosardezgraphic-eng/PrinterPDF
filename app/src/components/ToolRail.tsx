@@ -26,6 +26,8 @@ export const ToolRail: React.FC<ToolRailProps> = ({ onNavigate }) => {
     batchQueue,
     effects,
     workspaceDrawer,
+    canvasTool,
+    setCanvasTool,
     setActiveRibbonTab,
     setRibbonCollapsed,
     setWorkspaceDrawer,
@@ -61,6 +63,9 @@ export const ToolRail: React.FC<ToolRailProps> = ({ onNavigate }) => {
               tooltipSide="inline-end"
               onClick={() => {
                 onNavigate?.();
+                if (tab.id !== 'crop' && (canvasTool === 'crop' || canvasTool === 'perspective-crop')) {
+                  setCanvasTool('move');
+                }
                 const drawerAlreadyOpen = workspaceDrawer === tab.id
                   || (workspaceDrawer === null && activeRibbonTab === tab.id);
                 setActiveRibbonTab(tab.id);

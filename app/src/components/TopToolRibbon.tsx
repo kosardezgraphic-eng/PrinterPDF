@@ -161,6 +161,9 @@ export const TopToolRibbon: React.FC = () => {
     if (tool !== 'eraser' && eraseTool !== 'off') {
       setEraseTool('off');
     }
+    if (tool !== 'crop' && (canvasTool === 'crop' || canvasTool === 'perspective-crop')) {
+      setCanvasTool('move');
+    }
     setActiveInspectorTool(tool);
   };
 
@@ -705,15 +708,46 @@ export const TopToolRibbon: React.FC = () => {
                 type="button"
                 data-ribbon-tool="crop"
                 aria-label={labels.crop}
-                aria-pressed={canvasTool === 'crop' || isToolActive('crop')}
+                aria-pressed={canvasTool === 'crop'}
                 onClick={() => {
                   setEraseTool('off');
-                  setCanvasTool('crop');
-                  selectTool('crop');
+                  if (canvasTool === 'crop') {
+                    setCanvasTool('move');
+                  } else {
+                    setCanvasTool('crop');
+                    selectTool('crop');
+                  }
                 }}
-                className={iconTileClass(canvasTool === 'crop' || isToolActive('crop'))}
+                className={iconTileClass(canvasTool === 'crop')}
               >
                 <Crop className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </Tooltip>
+
+            <Tooltip label={labels.perspectiveCrop} side="bottom">
+              <button
+                type="button"
+                data-ribbon-tool="perspective-crop"
+                aria-label={labels.perspectiveCrop}
+                aria-pressed={canvasTool === 'perspective-crop'}
+                onClick={() => {
+                  setEraseTool('off');
+                  if (canvasTool === 'perspective-crop') {
+                    setCanvasTool('move');
+                  } else {
+                    setCanvasTool('perspective-crop');
+                    selectTool('crop');
+                  }
+                }}
+                className={iconTileClass(canvasTool === 'perspective-crop')}
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polygon points="5,4 19,6 21,20 3,18" />
+                  <circle cx="5" cy="4" r="1.5" fill="currentColor" />
+                  <circle cx="19" cy="6" r="1.5" fill="currentColor" />
+                  <circle cx="21" cy="20" r="1.5" fill="currentColor" />
+                  <circle cx="3" cy="18" r="1.5" fill="currentColor" />
+                </svg>
               </button>
             </Tooltip>
 

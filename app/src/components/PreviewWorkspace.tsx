@@ -30,6 +30,13 @@ import { SmartGuideProvider } from './SmartGuidesOverlay';
 import { TextOverlayLayer } from './TextOverlayLayer';
 import { hasImageTransfer, routeDroppedFiles } from '../engine/imageImport';
 import { ACCEPTED_DOCUMENT_INPUT_ACCEPT } from '../engine/universalImageDecoder';
+import {
+  DEFAULT_PERSPECTIVE_QUAD,
+  isConvexQuad,
+  isDefaultPerspectiveQuad,
+  PERSPECTIVE_ASPECT_OPTIONS,
+  type PerspectiveAspectPreset,
+} from '../engine/perspectiveCrop';
 import { AspectCropControls } from './AspectCropControls';
 import { t } from '../i18n/translations';
 import {
@@ -98,6 +105,13 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     batchQueue,
     canvasTool,
     setCanvasTool,
+    perspectiveDrafts,
+    isApplyingPerspectiveCrop,
+    discardCropDrafts,
+    setPerspectiveDraft,
+    resetPerspectiveDraft,
+    discardPerspectiveDrafts,
+    applyPerspectiveCrop,
     showPreflight,
     setShowPreflight,
     fitPageNonce,
@@ -197,8 +211,21 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const lang = settings.language;
   const tr = t(lang);
 
-  const outputSheets = useMemo(() => computeImpositionSheets(pages, layout), [pages, layout]);
-  const previewOnlyPage = pages.find(page => page.id === previewOnlyPageId && !page.selectedForPrint);
+  const isCropOrPersp = canvasTool === 'crop' || canvasTool === 'perspective-crop';
+  const displayPages = useMemo(
+    () =>
+      isCropOrPersp
+        ? pages.map((p) =>
+            p.overrides?.cropBoxMm
+              ? { ...p, overrides: { ...p.overrides, cropBoxMm: undefined } }
+              : p
+          )
+        : pages,
+    [isCropOrPersp, pages]
+  );
+
+  const outputSheets = useMemo(() => computeImpositionSheets(displayPages, layout), [displayPages, layout]);
+  const previewOnlyPage = displayPages.find(page => page.id === previewOnlyPageId && !page.selectedForPrint);
   // The imposition engine keeps an empty back side when duplex output has an odd
   // number of sides. That blank side is required in the print PDF, but it is not
   // an editable/visible page in the workspace preview.
@@ -388,12 +415,23 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
       if (event.code === 'Space' && !editable(event.target) && !event.ctrlKey && !event.metaKey && !event.altKey) {
         event.preventDefault(); setSpaceDown(true);
       }
+      if (!editable(event.target) && (canvasTool === 'crop' || canvasTool === 'perspective-crop')) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          if (canvasTool === 'crop') discardCropDrafts();
+          else discardPerspectiveDrafts();
+          setCanvasTool('move');
+        } else if (event.key === 'Enter') {
+          event.preventDefault();
+          setCanvasTool('move');
+        }
+      }
     };
     const up = (event: KeyboardEvent) => { if (event.code === 'Space') { setSpaceDown(false); drag.current = null; setPanning(false); } };
     const blur = () => { setSpaceDown(false); drag.current = null; setPanning(false); };
     window.addEventListener('keydown', down); window.addEventListener('keyup', up); window.addEventListener('blur', blur);
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', blur); };
-  }, []);
+  }, [canvasTool, discardCropDrafts, discardPerspectiveDrafts, setCanvasTool]);
 
   const navigateSheet = (index: number) => {
     const next = Math.max(0, Math.min(sheets.length - 1, index));
@@ -1379,17 +1417,156 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
             </label>
 
             {canvasTool === 'crop' && (
-              <AspectCropControls
-                language={lang}
-                disabled={!!previewOnlyPage || !pages.some((page) => page.isHighlighted)}
-                onApply={(ratio) => {
-                  const page =
-                    pages.find((item) => item.id === currentEditPageId && item.isHighlighted) ??
-                    pages.find((item) => item.isHighlighted);
-                  return !!page && applyAspectRatioCrop(page.id, editScope, ratio);
-                }}
-              />
+              <>
+                <AspectCropControls
+                  language={lang}
+                  disabled={!!previewOnlyPage || !pages.some((page) => page.isHighlighted)}
+                  onApply={(ratio) => {
+                    const page =
+                      pages.find((item) => item.id === currentEditPageId && item.isHighlighted) ??
+                      pages.find((item) => item.isHighlighted);
+                    return !!page && applyAspectRatioCrop(page.id, editScope, ratio);
+                  }}
+                />
+                <button
+                  type="button"
+                  data-crop-apply
+                  onClick={() => setCanvasTool('move')}
+                  className="flex items-center gap-1 rounded bg-amber-500 px-2.5 py-0.5 font-bold text-white hover:bg-amber-600 cursor-pointer"
+                >
+                  <span>{lang === 'fa' ? 'اعمال برش و خروج' : 'Apply Crop'}</span>
+                </button>
+                <button
+                  type="button"
+                  data-crop-cancel
+                  onClick={() => {
+                    discardCropDrafts();
+                    setCanvasTool('move');
+                  }}
+                  className="flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-0.5 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+                >
+                  <span>{lang === 'fa' ? 'لغو' : 'Cancel'}</span>
+                </button>
+              </>
             )}
+
+            {canvasTool === 'perspective-crop' && (() => {
+              const targetPage =
+                pages.find((item) => item.id === currentEditPageId && item.isHighlighted) ??
+                pages.find((item) => item.isHighlighted) ??
+                pages[0];
+              const activeDraft = targetPage ? perspectiveDrafts[targetPage.id] : undefined;
+              const activeAspect: PerspectiveAspectPreset = activeDraft?.aspectPreset ?? 'auto';
+              const activeQuad = activeDraft?.quad ?? DEFAULT_PERSPECTIVE_QUAD;
+              const quadIsValid = isConvexQuad(activeQuad);
+              const hasAnyModified = Object.values(perspectiveDrafts).some(
+                (d) => !isDefaultPerspectiveQuad(d.quad) && isConvexQuad(d.quad)
+              );
+
+              return (
+                <div className="flex flex-wrap items-center gap-1.5" data-perspective-controls>
+                  <label className="flex items-center gap-1 text-slate-600 dark:text-slate-300">
+                    <span>{lang === 'fa' ? 'نسبت خروجی:' : 'Output ratio:'}</span>
+                    <select
+                      data-perspective-aspect
+                      value={activeAspect}
+                      disabled={!targetPage}
+                      onChange={(e) => {
+                        if (!targetPage) return;
+                        setPerspectiveDraft(targetPage.id, activeQuad, {
+                          aspectPreset: e.target.value as PerspectiveAspectPreset,
+                          customRatioW: activeDraft?.customRatioW ?? 210,
+                          customRatioH: activeDraft?.customRatioH ?? 297,
+                        });
+                      }}
+                      className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                    >
+                      {PERSPECTIVE_ASPECT_OPTIONS.map((opt) => (
+                        <option key={opt.id} value={opt.id}>
+                          {lang === 'fa' ? opt.labelFa : opt.labelEn}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {activeAspect === 'custom' && targetPage && (
+                    <div className="flex items-center gap-1" dir="ltr">
+                      <input
+                        type="number"
+                        min="0.1"
+                        step="any"
+                        aria-label={lang === 'fa' ? 'عرض سفارشی پرسپکتیو' : 'Custom perspective width'}
+                        value={activeDraft?.customRatioW ?? 210}
+                        onChange={(e) =>
+                          setPerspectiveDraft(targetPage.id, activeQuad, {
+                            aspectPreset: 'custom',
+                            customRatioW: Number(e.target.value) || 1,
+                            customRatioH: activeDraft?.customRatioH ?? 297,
+                          })
+                        }
+                        className="w-12 rounded border border-slate-300 bg-white px-1 py-0.5 text-center dark:border-slate-700 dark:bg-slate-800"
+                      />
+                      <span>:</span>
+                      <input
+                        type="number"
+                        min="0.1"
+                        step="any"
+                        aria-label={lang === 'fa' ? 'ارتفاع سفارشی پرسپکتیو' : 'Custom perspective height'}
+                        value={activeDraft?.customRatioH ?? 297}
+                        onChange={(e) =>
+                          setPerspectiveDraft(targetPage.id, activeQuad, {
+                            aspectPreset: 'custom',
+                            customRatioW: activeDraft?.customRatioW ?? 210,
+                            customRatioH: Number(e.target.value) || 1,
+                          })
+                        }
+                        className="w-12 rounded border border-slate-300 bg-white px-1 py-0.5 text-center dark:border-slate-700 dark:bg-slate-800"
+                      />
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    data-perspective-apply
+                    disabled={!!previewOnlyPage || isApplyingPerspectiveCrop || !hasAnyModified || !quadIsValid}
+                    onClick={() => {
+                      void applyPerspectiveCrop().then((ok) => {
+                        if (ok) useAppStore.setState({ canvasTool: 'move' });
+                      });
+                    }}
+                    className="flex items-center gap-1 rounded bg-sky-600 px-2.5 py-0.5 font-bold text-white hover:bg-sky-700 disabled:opacity-45 cursor-pointer"
+                  >
+                    <span>
+                      {isApplyingPerspectiveCrop
+                        ? lang === 'fa'
+                          ? 'در حال صاف‌سازی...'
+                          : 'Rectifying...'
+                        : lang === 'fa'
+                          ? 'اعمال و صاف‌سازی'
+                          : 'Apply Perspective'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    data-perspective-reset
+                    disabled={!targetPage}
+                    onClick={() => targetPage && resetPerspectiveDraft(targetPage.id)}
+                    className="rounded border border-slate-300 bg-white px-2 py-0.5 text-slate-700 hover:bg-slate-100 disabled:opacity-45 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+                  >
+                    {lang === 'fa' ? 'بازنشانی ۴ گوشه' : 'Reset Corners'}
+                  </button>
+                  <button
+                    type="button"
+                    data-perspective-cancel
+                    onClick={() => {
+                      discardPerspectiveDrafts();
+                      useAppStore.setState({ canvasTool: 'move' });
+                    }}
+                    className="rounded border border-slate-300 bg-white px-2 py-0.5 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+                  >
+                    {lang === 'fa' ? 'لغو' : 'Cancel'}
+                  </button>
+                </div>
+              );
+            })()}
 
             <button
               type="button"

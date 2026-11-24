@@ -98,7 +98,14 @@ import {
 } from '../engine/imageOverlays';
 import { defaultShapeStyle, normalizeShapeStyle, shapeCapabilities } from '../engine/shapes';
 import { isImageFile, measureImage, readFileAsDataUrl } from '../engine/imageImport';
-import { centeredAspectCrop, cropToMm, IDENTITY_TRANSFORM, type Insets } from '../engine/pageGeometry';
+import { centeredAspectCrop, cropToMm, IDENTITY_TRANSFORM, normalizeInsets, pageCropFractions, type Insets } from '../engine/pageGeometry';
+import {
+  clonePerspectiveQuad,
+  isDefaultPerspectiveQuad,
+  rectifyPagePerspective,
+  type PerspectiveAspectPreset,
+  type PerspectiveQuad,
+} from '../engine/perspectiveCrop';
 import { computeImpositionSheets, getSheetDimensionsMm, sortCellsByLayer, stripTrailingEmptyDuplexSides } from '../engine/layoutEngine';
 import { ipcBridge, selectOptimalPrinter } from '../engine/ipcBridge';
 import { adjustScriptRanges, setScriptRange } from '../engine/textFormatting';
@@ -179,7 +186,7 @@ export type InspectorToolId =
   | 'view'
   | 'file';
 
-export type CanvasTool = 'move' | 'crop' | 'layout' | 'measure';
+export type CanvasTool = 'move' | 'crop' | 'perspective-crop' | 'layout' | 'measure';
 
 export type WorkspaceDrawerState = 'batch' | 'printers' | 'closed' | null;
 
@@ -548,6 +555,18 @@ interface AppState {
   activeInspectorTool: InspectorToolId;
   inspectorCollapsed: boolean;
   canvasTool: CanvasTool;
+  cropDrafts: Record<string, Insets>;
+  perspectiveDrafts: Record<
+    string,
+    {
+      quad: PerspectiveQuad;
+      aspectPreset: PerspectiveAspectPreset;
+      customRatioW?: number;
+      customRatioH?: number;
+      effectiveRotation?: PageRotation;
+    }
+  >;
+  isApplyingPerspectiveCrop: boolean;
   showPreflight: boolean;
   fitPageNonce: number;
   pdfExportOptions: PdfExportOptions;
@@ -623,6 +642,22 @@ interface AppState {
   rotatePages: (pageIds: string[], deltaDeg: 90 | 180 | 270) => void;
   applyAspectRatioCrop: (pageId: string, scope: PageEditScope, ratio: number) => boolean;
   applyPageGeometry: (pageId: string, scope: PageEditScope, edit: { kind: 'crop'; crop: Insets } | { kind: 'transform'; transform: NonNullable<PageItem['overrides']>['transform'] } | { kind: 'reset' }) => void;
+  setCropDraft: (pageId: string, scope: PageEditScope, crop: Insets) => void;
+  commitCropDrafts: () => void;
+  discardCropDrafts: () => void;
+  setPerspectiveDraft: (
+    pageId: string,
+    quad: PerspectiveQuad,
+    opts?: {
+      aspectPreset?: PerspectiveAspectPreset;
+      customRatioW?: number;
+      customRatioH?: number;
+      effectiveRotation?: PageRotation;
+    }
+  ) => void;
+  resetPerspectiveDraft: (pageId?: string) => void;
+  discardPerspectiveDrafts: () => void;
+  applyPerspectiveCrop: (pageIds?: string[]) => Promise<boolean>;
   applyCellTransform: (pageId: string, occurrenceKey: string, transform: PageTransform) => void;
   resetCellGeometry: (pageId: string, occurrenceKey: string) => void;
   reorderCellLayer: (sheetIndex: number, occurrenceKey: string, direction: 'front' | 'back' | 'forward' | 'backward') => void;
@@ -1100,6 +1135,9 @@ export const useAppStore = create<AppState>((set, get) => {
     activeInspectorTool: 'layout',
     inspectorCollapsed: false,
     canvasTool: 'move',
+    cropDrafts: {},
+    perspectiveDrafts: {},
+    isApplyingPerspectiveCrop: false,
     showPreflight: false,
     fitPageNonce: 0,
     pdfExportOptions: { imageHandling: 'preserve', compression: 'lossless' },
@@ -1306,6 +1344,8 @@ export const useAppStore = create<AppState>((set, get) => {
         pages: [],
         bookmarks: [],
         overlays: [], selectedOverlayId: null, textEdit: null, activePageId: null, eraseTool: 'off', erasePending: null,
+        cropDrafts: {},
+        perspectiveDrafts: {},
         layout: { ...get().layout, cellOverrides: {} },
         activeSheetIndex: 0,
         previewPageRequest: null,
@@ -1323,6 +1363,8 @@ export const useAppStore = create<AppState>((set, get) => {
       const redoPeek = historyManager.peekRedo();
       set({
         ...snap.before,
+        cropDrafts: {},
+        perspectiveDrafts: {},
         printers: syncPrintersDuplex(get().printers, snap.before.layout.duplexMode),
         selectedOverlayId: snap.before.overlays.some(item => item.id === get().selectedOverlayId) ? get().selectedOverlayId : null,
         canUndo: historyManager.canUndo(),
@@ -1348,6 +1390,8 @@ export const useAppStore = create<AppState>((set, get) => {
       const redoPeek = historyManager.peekRedo();
       set({
         ...snap.after,
+        cropDrafts: {},
+        perspectiveDrafts: {},
         printers: syncPrintersDuplex(get().printers, snap.after.layout.duplexMode),
         selectedOverlayId: snap.after.overlays.some(item => item.id === get().selectedOverlayId) ? get().selectedOverlayId : null,
         canUndo: historyManager.canUndo(),
@@ -1602,13 +1646,19 @@ export const useAppStore = create<AppState>((set, get) => {
         const { transform: _transform, allowOverflow: _overflow, ...rest } = value;
         return [key,rest];
       }));
-      set({ layout:{...state.layout,cellOverrides}, pages:state.pages.map(page => {
-        const crop = crops.get(page.id);
-        if (!crop) return page;
-        const overrides = {...page.overrides, cropBoxMm:cropToMm(page,crop)};
-        delete overrides.transform;
-        return {...page,overrides};
-      }) });
+      const nextCropDrafts = { ...state.cropDrafts };
+      ids.forEach((id) => delete nextCropDrafts[id]);
+      set({
+        cropDrafts: nextCropDrafts,
+        layout: { ...state.layout, cellOverrides },
+        pages: state.pages.map(page => {
+          const crop = crops.get(page.id);
+          if (!crop) return page;
+          const overrides = { ...page.overrides, cropBoxMm: cropToMm(page, crop) };
+          delete overrides.transform;
+          return { ...page, overrides };
+        }),
+      });
       pushUndo('برش با نسبت ابعاد', 'Crop to aspect ratio', before, captureSnapshot(get()));
       return true;
     },
@@ -1620,23 +1670,252 @@ export const useAppStore = create<AppState>((set, get) => {
       const ids = new Set(targets.map(page => page.id));
       const before = captureSnapshot(state);
       set(current => {
+        const nextCropDrafts = { ...current.cropDrafts };
+        if (edit.kind === 'crop' || edit.kind === 'reset') {
+          ids.forEach((id) => delete nextCropDrafts[id]);
+        }
         const cellOverrides = Object.fromEntries(Object.entries(current.layout.cellOverrides ?? {}).map(([key, value]) => {
           if (!ids.has(value.pageId)) return [key, value];
           const { transform: _transform, allowOverflow: _overflow, ...rest } = value;
           return [key, rest];
         }));
-        return { layout: { ...current.layout, cellOverrides }, pages: current.pages.map(page => {
-          if (!ids.has(page.id)) return page;
-          const overrides = { ...page.overrides };
-          if (edit.kind === 'crop') {
-            overrides.cropBoxMm = cropToMm(page, edit.crop);
-            delete overrides.transform;
-          } else if (edit.kind === 'transform') overrides.transform = edit.transform;
-          else { delete overrides.cropBoxMm; delete overrides.transform; }
-          return { ...page, overrides };
-        }) };
+        return {
+          cropDrafts: nextCropDrafts,
+          layout: { ...current.layout, cellOverrides },
+          pages: current.pages.map(page => {
+            if (!ids.has(page.id)) return page;
+            const overrides = { ...page.overrides };
+            if (edit.kind === 'crop') {
+              overrides.cropBoxMm = cropToMm(page, edit.crop);
+              delete overrides.transform;
+            } else if (edit.kind === 'transform') overrides.transform = edit.transform;
+            else { delete overrides.cropBoxMm; delete overrides.transform; }
+            return { ...page, overrides };
+          }),
+        };
       });
       pushUndo('ویرایش هندسه صفحات', 'Edit page geometry', before, captureSnapshot(get()));
+    },
+
+    setCropDraft: (pageId, scope, crop) => {
+      const state = get();
+      const normalized = normalizeInsets(crop);
+      const targets = state.pages.filter((page) =>
+        scope === 'all' ? true : scope === 'selected' ? page.isHighlighted : page.id === pageId
+      );
+      if (!targets.length) return;
+      const next = { ...state.cropDrafts };
+      for (const target of targets) {
+        next[target.id] = normalized;
+      }
+      set({ cropDrafts: next });
+    },
+
+    commitCropDrafts: () => {
+      const state = get();
+      const entries = Object.entries(state.cropDrafts);
+      if (entries.length === 0) return;
+
+      const changedIds = new Set<string>();
+      for (const [pageId, draft] of entries) {
+        const page = state.pages.find((p) => p.id === pageId);
+        if (!page) continue;
+        const current = pageCropFractions(page);
+        if (
+          Math.abs(current.top - draft.top) > 1e-4 ||
+          Math.abs(current.right - draft.right) > 1e-4 ||
+          Math.abs(current.bottom - draft.bottom) > 1e-4 ||
+          Math.abs(current.left - draft.left) > 1e-4
+        ) {
+          changedIds.add(pageId);
+        }
+      }
+
+      if (changedIds.size === 0) {
+        set({ cropDrafts: {} });
+        return;
+      }
+
+      const before = captureSnapshot(state);
+      const cellOverrides = Object.fromEntries(
+        Object.entries(state.layout.cellOverrides ?? {}).map(([key, value]) => {
+          if (!changedIds.has(value.pageId)) return [key, value];
+          const { transform: _transform, allowOverflow: _overflow, ...rest } = value;
+          return [key, rest];
+        })
+      );
+
+      set({
+        cropDrafts: {},
+        layout: { ...state.layout, cellOverrides },
+        pages: state.pages.map((page) => {
+          if (!changedIds.has(page.id)) return page;
+          const draft = state.cropDrafts[page.id];
+          if (!draft) return page;
+          const overrides = { ...page.overrides };
+          if (draft.top === 0 && draft.right === 0 && draft.bottom === 0 && draft.left === 0) {
+            delete overrides.cropBoxMm;
+          } else {
+            overrides.cropBoxMm = cropToMm(page, draft);
+          }
+          delete overrides.transform;
+          return { ...page, overrides: Object.keys(overrides).length > 0 ? overrides : undefined };
+        }),
+      });
+      pushUndo('برش صفحات', 'Crop pages', before, captureSnapshot(get()));
+    },
+
+    discardCropDrafts: () => {
+      if (Object.keys(get().cropDrafts).length > 0) {
+        set({ cropDrafts: {} });
+      }
+    },
+
+    setPerspectiveDraft: (pageId, quad, opts) => {
+      set((state) => {
+        const existing = state.perspectiveDrafts[pageId];
+        return {
+          perspectiveDrafts: {
+            ...state.perspectiveDrafts,
+            [pageId]: {
+              quad: clonePerspectiveQuad(quad),
+              aspectPreset: opts?.aspectPreset ?? existing?.aspectPreset ?? 'auto',
+              customRatioW: opts?.customRatioW ?? existing?.customRatioW,
+              customRatioH: opts?.customRatioH ?? existing?.customRatioH,
+              effectiveRotation: opts?.effectiveRotation ?? existing?.effectiveRotation,
+            },
+          },
+        };
+      });
+    },
+
+    resetPerspectiveDraft: (pageId) => {
+      set((state) => {
+        if (!pageId) return { perspectiveDrafts: {} };
+        const next = { ...state.perspectiveDrafts };
+        delete next[pageId];
+        return { perspectiveDrafts: next };
+      });
+    },
+
+    discardPerspectiveDrafts: () => {
+      if (Object.keys(get().perspectiveDrafts).length > 0) {
+        set({ perspectiveDrafts: {} });
+      }
+    },
+
+    applyPerspectiveCrop: async (pageIds) => {
+      const state = get();
+      if (state.isApplyingPerspectiveCrop) return false;
+      const drafts = state.perspectiveDrafts;
+      const targetIds = (pageIds && pageIds.length > 0 ? pageIds : Object.keys(drafts)).filter((id) => {
+        const d = drafts[id];
+        return d && !isDefaultPerspectiveQuad(d.quad);
+      });
+
+      if (targetIds.length === 0) {
+        set({ perspectiveDrafts: {} });
+        return false;
+      }
+
+      const before = captureSnapshot(state);
+      const isFa = state.settings.language === 'fa';
+      set({ isApplyingPerspectiveCrop: true });
+
+      try {
+        const newDocs: SourceDocument[] = [];
+        const updatedPagesById = new Map<string, PageItem>();
+
+        for (const id of targetIds) {
+          const page = state.pages.find((p) => p.id === id);
+          const draft = drafts[id];
+          if (!page || !draft) continue;
+          const doc = state.documents.find((d) => d.id === page.documentId);
+          const rectified = await rectifyPagePerspective({
+            page,
+            sourceDoc: doc,
+            displayQuad: draft.quad,
+            effectiveRotation: draft.effectiveRotation ?? page.rotation,
+            aspectPreset: draft.aspectPreset,
+            customRatioW: draft.customRatioW,
+            customRatioH: draft.customRatioH,
+          });
+
+          const newDocId = `doc-persp-${page.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          newDocs.push({
+            id: newDocId,
+            name: `${page.documentName} (${isFa ? 'پرسپکتیو' : 'Rectified'})`,
+            filePath: '',
+            fileSize: rectified.pngBytes.byteLength,
+            fileType: 'image',
+            mimeType: 'image/png',
+            pageCount: 1,
+            createdAt: new Date().toISOString(),
+            rawBytes: rectified.pngBytes,
+          });
+
+          const nextOverrides = page.overrides ? { ...page.overrides } : {};
+          delete nextOverrides.cropBoxMm;
+          delete nextOverrides.transform;
+          delete nextOverrides.autoPackBaseRotation;
+          nextOverrides.manualRotation = true;
+
+          updatedPagesById.set(id, {
+            ...page,
+            documentId: newDocId,
+            sourcePageNumber: 1,
+            widthMm: rectified.widthMm,
+            heightMm: rectified.heightMm,
+            rotation: 0,
+            thumbnailDataUrl: rectified.thumbnailDataUrl,
+            overrides: nextOverrides,
+          });
+        }
+
+        if (updatedPagesById.size === 0) {
+          set({ isApplyingPerspectiveCrop: false, perspectiveDrafts: {} });
+          return false;
+        }
+
+        const affectedSet = new Set(updatedPagesById.keys());
+        const latest = get();
+        const cellOverrides = Object.fromEntries(
+          Object.entries(latest.layout.cellOverrides ?? {}).map(([key, value]) => {
+            if (!affectedSet.has(value.pageId)) return [key, value];
+            const { transform: _transform, allowOverflow: _overflow, ...rest } = value;
+            return [key, rest];
+          })
+        );
+
+        set({
+          documents: [...latest.documents, ...newDocs],
+          pages: latest.pages.map((p) => updatedPagesById.get(p.id) ?? p),
+          layout: { ...latest.layout, cellOverrides },
+          perspectiveDrafts: {},
+          isApplyingPerspectiveCrop: false,
+        });
+
+        pushUndo(
+          'برش پرسپکتیو و صاف‌سازی سند',
+          'Perspective crop & rectify',
+          before,
+          captureSnapshot(get())
+        );
+
+        get().addToast({
+          type: 'success',
+          title: isFa ? 'برش پرسپکتیو با موفقیت انجام شد' : 'Perspective crop applied',
+        });
+        return true;
+      } catch (err) {
+        set({ isApplyingPerspectiveCrop: false });
+        get().addToast({
+          type: 'error',
+          title: isFa ? 'خطا در برش پرسپکتیو' : 'Perspective crop failed',
+          message: err instanceof Error ? err.message : String(err),
+        });
+        return false;
+      }
     },
 
     applyCellTransform: (pageId, occurrenceKey, transform) => {
@@ -1659,11 +1938,20 @@ export const useAppStore = create<AppState>((set, get) => {
       if (page.overrides?.transform) { existing.transform = { ...IDENTITY_TRANSFORM }; existing.allowOverflow = false; }
       else { delete existing.transform; delete existing.allowOverflow; }
       cellOverrides[occurrenceKey] = existing;
-      set({ layout: { ...state.layout, cellOverrides }, pages: state.pages.map(item => {
-        if (item.id !== pageId) return item;
-        const overrides = { ...item.overrides }; delete overrides.cropBoxMm;
-        return { ...item, overrides };
-      }) });
+      const nextCropDrafts = { ...state.cropDrafts };
+      delete nextCropDrafts[pageId];
+      const nextPerspDrafts = { ...state.perspectiveDrafts };
+      delete nextPerspDrafts[pageId];
+      set({
+        cropDrafts: nextCropDrafts,
+        perspectiveDrafts: nextPerspDrafts,
+        layout: { ...state.layout, cellOverrides },
+        pages: state.pages.map(item => {
+          if (item.id !== pageId) return item;
+          const overrides = { ...item.overrides }; delete overrides.cropBoxMm;
+          return { ...item, overrides };
+        }),
+      });
       pushUndo('بازنشانی خانه', 'Reset cell geometry', before, captureSnapshot(get()));
     },
 
@@ -2577,6 +2865,17 @@ export const useAppStore = create<AppState>((set, get) => {
       return created.length;
     },
     setEraseTool: (tool) => {
+      if (tool !== 'off') {
+        const prev = get().canvasTool;
+        if (prev === 'crop') get().commitCropDrafts();
+        else if (prev === 'perspective-crop') {
+          const hasModified = Object.values(get().perspectiveDrafts).some(
+            (d) => !isDefaultPerspectiveQuad(d.quad)
+          );
+          if (hasModified) void get().applyPerspectiveCrop();
+          else set({ perspectiveDrafts: {} });
+        }
+      }
       // Leaving the eraser also hands the pointer back: a half-finished gesture must not survive a mode flip.
       set({
         eraseTool: tool,
@@ -5710,7 +6009,21 @@ export const useAppStore = create<AppState>((set, get) => {
         };
       }),
     setInspectorCollapsed: (collapsed) => set({ inspectorCollapsed: collapsed }),
-    setCanvasTool: (tool) => set({ canvasTool: tool }),
+    setCanvasTool: (tool) => {
+      const prev = get().canvasTool;
+      if (prev === 'crop' && tool !== 'crop') {
+        get().commitCropDrafts();
+      } else if (prev === 'perspective-crop' && tool !== 'perspective-crop') {
+        const drafts = get().perspectiveDrafts;
+        const hasModified = Object.values(drafts).some((d) => !isDefaultPerspectiveQuad(d.quad));
+        if (hasModified) {
+          void get().applyPerspectiveCrop();
+        } else if (Object.keys(drafts).length > 0) {
+          set({ perspectiveDrafts: {} });
+        }
+      }
+      set({ canvasTool: tool });
+    },
     setShowPreflight: (show) => set({ showPreflight: show }),
     triggerFitPage: () => set((state) => ({ fitPageNonce: state.fitPageNonce + 1 })),
     setWorkspaceDrawer: (drawer) => set({ workspaceDrawer: drawer }),
