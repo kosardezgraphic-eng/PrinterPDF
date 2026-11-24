@@ -1,7 +1,7 @@
 import { pageCropFractions } from './pageGeometry';
 import type { CustomCellSlot, MarginsMm, MeasurementUnit, PageItem } from '@shared/models';
 
-export const MAX_IMPOSITION_GRID = 50;
+export const MAX_IMPOSITION_GRID = 100;
 export const MIN_PACK_ITEM_MM = 5;
 export const MAX_PACK_ITEM_MM = 2000;
 

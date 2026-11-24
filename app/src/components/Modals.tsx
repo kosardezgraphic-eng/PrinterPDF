@@ -247,10 +247,10 @@ export const ModalsAndToasts: React.FC = () => {
     {
       titleFa: '۲. چیدمان حرفه‌ای چندصفحه و Step & Repeat (D1–D5)',
       descFa:
-        'در تب Page Layout می‌توانید از 1-Up تا ماتریس ۱۰×۱۰، تکرار یک کارت در تمام شیت (Step & Repeat)، حاشیه و چاپ دورو را با پیش‌نمایش زنده تنظیم کنید.',
+        'در تب Page Layout می‌توانید از 1-Up تا ماتریس ۱۰۰×۱۰۰، تکرار یک کارت در تمام شیت (Step & Repeat)، حاشیه و چاپ دورو را با پیش‌نمایش زنده تنظیم کنید.',
       titleEn: '2. N-Up Imposition & Step-and-Repeat (D1–D5)',
       descEn:
-        'Configure 1-Up to 10×10 matrices, Step & Repeat business cards, margins, gutters, and Duplex ordering.',
+        'Configure 1-Up to 100×100 matrices, Step & Repeat business cards, margins, gutters, and Duplex ordering.',
     },
     {
       titleFa: '۳. معکوس کردن رنگ (Invert) و پایپ‌لاین افکت‌ها (E1–E2)',

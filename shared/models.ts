@@ -169,9 +169,9 @@ export interface LayoutSettings {
   customWidthMm: number;
   customHeightMm: number;
   orientation: PageOrientation;
-  /** Grid rows (1..10) */
+  /** Grid rows (1..100) */
   rows: number;
-  /** Grid columns (1..10) */
+  /** Grid columns (1..100) */
   cols: number;
   /** D2: 'sequential' = each page in a cell, 'step-and-repeat' = repeat each page across all cells on sheet */
   placementMode: PlacementMode;

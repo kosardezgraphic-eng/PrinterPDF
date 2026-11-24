@@ -820,13 +820,13 @@ export const PageSetupModal: React.FC = () => {
                       <input
                         type="number"
                         min={1}
-                        max={50}
+                        max={100}
                         disabled={booklet.enabled}
                         value={booklet.enabled ? 1 : draft.rows}
                         onChange={(e) =>
                           setDraft((prev) => ({
                             ...prev,
-                            rows: Math.max(1, Math.min(50, Math.floor(Number(e.target.value) || 1))),
+                            rows: Math.max(1, Math.min(100, Math.floor(Number(e.target.value) || 1))),
                           }))
                         }
                         className={inputClass}
@@ -837,13 +837,13 @@ export const PageSetupModal: React.FC = () => {
                       <input
                         type="number"
                         min={1}
-                        max={50}
+                        max={100}
                         disabled={booklet.enabled}
                         value={booklet.enabled ? 2 : draft.cols}
                         onChange={(e) =>
                           setDraft((prev) => ({
                             ...prev,
-                            cols: Math.max(1, Math.min(50, Math.floor(Number(e.target.value) || 1))),
+                            cols: Math.max(1, Math.min(100, Math.floor(Number(e.target.value) || 1))),
                           }))
                         }
                         className={inputClass}

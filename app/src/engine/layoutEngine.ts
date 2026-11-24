@@ -1,6 +1,6 @@
 /**
  * PrintStudio Pro — Imposition & Page Layout Engine (D1 - D5)
- * Calculates exact WYSIWYG cell coordinates, N-Up matrices up to 10×10,
+ * Calculates exact WYSIWYG cell coordinates, N-Up matrices up to 100×100,
  * Step & Repeat, Unique Scale, Margins, Gutters, Auto-Rotate, and Duplex sheet ordering.
  */
 
@@ -107,8 +107,8 @@ export function getOrderedGridCoordinates(
   cols: number,
   order: SheetOrderMode
 ): Array<{ row: number; col: number }> {
-  const safeRows = Math.max(1, Math.min(50, Math.floor(rows)));
-  const safeCols = Math.max(1, Math.min(50, Math.floor(cols)));
+  const safeRows = Math.max(1, Math.min(100, Math.floor(rows)));
+  const safeCols = Math.max(1, Math.min(100, Math.floor(cols)));
   const coords: Array<{ row: number; col: number }> = [];
 
   if (order === 'ltr') {
@@ -215,8 +215,8 @@ export function computeImpositionSheets(
       ? layout.customCells
       : null;
 
-  const rows = Math.max(1, Math.min(50, Math.floor(layout.rows)));
-  const cols = Math.max(1, Math.min(50, Math.floor(layout.cols)));
+  const rows = Math.max(1, Math.min(100, Math.floor(layout.rows)));
+  const cols = Math.max(1, Math.min(100, Math.floor(layout.cols)));
   const cellsPerSide = customSlots ? customSlots.length : rows * cols;
 
   if (activePages.length === 0) {

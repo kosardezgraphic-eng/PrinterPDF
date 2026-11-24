@@ -8,7 +8,7 @@ import {
   getPageDisplayDimensionsMm,
   resolveAutoPackTargetDimensions,
 } from './autoPack';
-import { computeImpositionSheets } from './layoutEngine';
+import { computeImpositionSheets, getOrderedGridCoordinates } from './layoutEngine';
 import { DEFAULT_LAYOUT, DEFAULT_SETTINGS, useAppStore } from '../store/useAppStore';
 import { Ribbon } from '../components/Ribbon';
 
@@ -161,7 +161,7 @@ describe('Auto-Pack geometry engine', () => {
     expect(mixedPlan.isHybrid).toBe(true);
   });
 
-  it('supports dense packing beyond 10x10 (up to 50x50)', () => {
+  it('supports dense packing beyond 10x10 (up to 100x100)', () => {
     const plan = computeAutoPackPlan({
       sheetWidthMm: 210,
       sheetHeightMm: 297,
@@ -177,6 +177,23 @@ describe('Auto-Pack geometry engine', () => {
     expect(plan.cols).toBe(14);
     expect(plan.rows).toBe(20);
     expect(plan.totalPerSheet).toBe(280);
+  });
+
+  it('allows auto-pack grids to reach 100 rows and columns', () => {
+    const plan = computeAutoPackPlan({
+      sheetWidthMm: 500,
+      sheetHeightMm: 500,
+      baseMarginsMm: { top: 0, right: 0, bottom: 0, left: 0 },
+      itemWidthMm: 5,
+      itemHeightMm: 5,
+      horizontalGapMm: 0,
+      verticalGapMm: 0,
+      allowRotateForMax: false,
+      centerOnSheet: true,
+    });
+    expect(plan.rows).toBe(100);
+    expect(plan.cols).toBe(100);
+    expect(plan.totalPerSheet).toBe(10_000);
   });
 
   it('reports fits=false when item exceeds printable area', () => {
@@ -246,6 +263,14 @@ describe('Auto-Pack store integration & imposition output', () => {
       settings: { ...DEFAULT_SETTINGS, language: 'en', unit: 'mm' },
       printerMargins: { status: 'unavailable', reason: 'test' },
     });
+  });
+
+  it('supports matrix layouts up to 100 rows and columns', () => {
+    useAppStore.getState().setNUpMatrix(100, 100);
+    expect(useAppStore.getState().layout).toMatchObject({ rows: 100, cols: 100 });
+    const coordinates = getOrderedGridCoordinates(100, 100, 'ltr');
+    expect(coordinates).toHaveLength(10_000);
+    expect(coordinates[coordinates.length - 1]).toEqual({ row: 99, col: 99 });
   });
 
   it('packs selected image with exact cell sizes and exact spacing in computed imposition sheets, and supports Undo', () => {

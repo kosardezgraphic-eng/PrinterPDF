@@ -14,7 +14,7 @@
 |                        Renderer Process (/app - React 19 + TS)                    |
 |  - Tabbed Ribbon UI (RTL/LTR) + Virtualized Sidebar + 60fps WYSIWYG Sheet Canvas  |
 |  - Zustand Store + CommandHistoryManager (Unlimited Undo/Redo) + LRUPageCache     |
-|  - LayoutEngine (N-Up 1..10x10, Step & Repeat, Duplex) + EffectsPipeline (Invert) |
+|  - LayoutEngine (N-Up 1..100x100, Step & Repeat, Duplex) + EffectsPipeline (Invert) |
 |  - CounterEngine (Sheets, Sizes, Cost) + Watermark/Bates/Shamsi Engine            |
 +-----------------------------------------+-----------------------------------------+
                                           |

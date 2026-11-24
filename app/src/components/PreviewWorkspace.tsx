@@ -924,8 +924,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
 
               {/* Preview-only direct matrix gutter drag bands matching the booklet spine style (centered full-gap hatched bands). */}
               {!previewOnlyPage && !layout.booklet?.enabled && !layout.customCells?.length && activeGuideSheet !== sheetSide.sideIndex - 1 && (() => {
-                const matrixCols = Math.max(1, Math.min(50, Math.floor(layout.cols)));
-                const matrixRows = Math.max(1, Math.min(50, Math.floor(layout.rows)));
+                const matrixCols = Math.max(1, Math.min(100, Math.floor(layout.cols)));
+                const matrixRows = Math.max(1, Math.min(100, Math.floor(layout.rows)));
                 const hGutterMm = Math.max(0, layout.horizontalGutterMm);
                 const vGutterMm = Math.max(0, layout.verticalGutterMm);
                 const printableW = Math.max(10, sheetSide.widthMm - marginLeftMm - marginRightMm);
