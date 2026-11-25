@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Printing;
 using System.Printing.Interop;
@@ -8,6 +9,7 @@ using System.Windows.Documents;
 using System.Windows.Markup;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using System.Xml;
 using PrintStudio.PrinterService.Models;
 
@@ -57,37 +59,40 @@ public sealed class PrinterSpoolerService
 
             foreach (var queue in server.GetPrintQueues(flags))
             {
-                try
+                using (queue)
                 {
-                    queue.Refresh();
-                    var name = SanitizeDriverText(queue.FullName);
-                    if (string.IsNullOrWhiteSpace(name)) continue;
-                    var port = SanitizeDriverText(queue.QueuePort?.Name);
-                    if (string.IsNullOrWhiteSpace(port)) port = "LOCAL";
-                    var driver = SanitizeDriverText(queue.QueueDriver?.Name);
-                    if (string.IsNullOrWhiteSpace(driver)) driver = "Generic Driver";
-                    var status = MapQueueStatus(queue);
-                    var caps = QueryCapabilities(name, port, queue);
+                    try
+                    {
+                        queue.Refresh();
+                        var name = SanitizeDriverText(queue.FullName);
+                        if (string.IsNullOrWhiteSpace(name)) continue;
+                        var port = SanitizeDriverText(queue.QueuePort?.Name);
+                        if (string.IsNullOrWhiteSpace(port)) port = "LOCAL";
+                        var driver = SanitizeDriverText(queue.QueueDriver?.Name);
+                        if (string.IsNullOrWhiteSpace(driver)) driver = "Generic Driver";
+                        var status = MapQueueStatus(queue);
+                        var caps = QueryCapabilities(name, port, queue);
 
-                    var profile = _profiles.TryGetValue(name, out var cached)
-                        ? cached
-                        : ReadEffectiveProfile(name, port, caps, queue, IntPtr.Zero);
-                    _profiles[name] = profile;
+                        var profile = _profiles.TryGetValue(name, out var cached)
+                            ? cached
+                            : ReadEffectiveProfile(name, port, caps, queue, IntPtr.Zero);
+                        _profiles[name] = profile;
 
-                    var location = SanitizeDriverText(queue.Location);
-                    result.Add(new PrinterInfoDto(
-                        Name: name, DriverName: driver, PortName: port,
-                        IsDefault: string.Equals(name, defaultQueueName, StringComparison.OrdinalIgnoreCase),
-                        IsNetwork: name.StartsWith(@"\\", StringComparison.Ordinal) || port.StartsWith("IP_", StringComparison.OrdinalIgnoreCase),
-                        IsVirtual: IsVirtualPrinter(name), Status: status,
-                        JobsInQueue: queue.NumberOfJobs, TonerLevelPercent: null, TotalPageCounter: null,
-                        Location: string.IsNullOrWhiteSpace(location) ? null : location,
-                        Capabilities: caps, ActiveProfile: profile
-                    ));
-                }
-                catch (Exception ex)
-                {
-                    Program.Log($"Skipping printer queue '{SafeQueueName(queue)}': {ex.Message}");
+                        var location = SanitizeDriverText(queue.Location);
+                        result.Add(new PrinterInfoDto(
+                            Name: name, DriverName: driver, PortName: port,
+                            IsDefault: string.Equals(name, defaultQueueName, StringComparison.OrdinalIgnoreCase),
+                            IsNetwork: name.StartsWith(@"\\", StringComparison.Ordinal) || port.StartsWith("IP_", StringComparison.OrdinalIgnoreCase),
+                            IsVirtual: IsVirtualPrinter(name), Status: status,
+                            JobsInQueue: queue.NumberOfJobs, TonerLevelPercent: null, TotalPageCounter: null,
+                            Location: string.IsNullOrWhiteSpace(location) ? null : location,
+                            Capabilities: caps, ActiveProfile: profile
+                        ));
+                    }
+                    catch (Exception ex)
+                    {
+                        Program.Log($"Skipping printer queue '{SafeQueueName(queue)}': {ex.Message}");
+                    }
                 }
             }
         }
@@ -165,19 +170,21 @@ public sealed class PrinterSpoolerService
             return ListPrintersByNameOnly(flags);
 
         var buffer = Marshal.AllocHGlobal((int)needed);
+        LocalPrintServer? server = null;
+        var queueMap = new Dictionary<string, PrintQueue>(StringComparer.OrdinalIgnoreCase);
         try
         {
             if (!WinSpoolInterop.EnumPrinters(flags, null, 2, buffer, needed, out _, out var returned) || returned == 0)
                 return ListPrintersByNameOnly(flags);
 
-            // Best-effort PrintQueue map so we also enrich System.Printing PrintCapabilities & UserPrintTicket safely
-            var queueMap = new Dictionary<string, PrintQueue>(StringComparer.OrdinalIgnoreCase);
+            // Best-effort PrintQueue map kept alive for the entire enumeration loop so native handles
+            // are not prematurely finalized while System.Printing metadata is still being read.
             try
             {
-                using var server = new LocalPrintServer();
+                server = new LocalPrintServer();
                 foreach (var q in server.GetPrintQueues(new[] { EnumeratedPrintQueueTypes.Local, EnumeratedPrintQueueTypes.Connections }))
                 {
-                    try { queueMap[q.FullName] = q; } catch { /* skip broken queue */ }
+                    try { queueMap[q.FullName] = q; } catch { try { q.Dispose(); } catch { } }
                 }
             }
             catch
@@ -224,14 +231,17 @@ public sealed class PrinterSpoolerService
                     Capabilities: caps, ActiveProfile: profile));
             }
 
+            return result;
+        }
+        finally
+        {
             foreach (var q in queueMap.Values)
             {
                 try { q.Dispose(); } catch { }
             }
-
-            return result;
+            try { server?.Dispose(); } catch { }
+            Marshal.FreeHGlobal(buffer);
         }
-        finally { Marshal.FreeHGlobal(buffer); }
     }
 
     private IReadOnlyList<PrinterInfoDto> ListPrintersByNameOnly(uint flags)
@@ -325,7 +335,7 @@ public sealed class PrinterSpoolerService
                 if (gdiMargins != null && gdiOk && (MaxSide(gdiMargins) > 0 || wpfMargins == null || !wpfOk || MaxSide(wpfMargins) == 0))
                 {
                     if (wpfMargins != null && !wpfOk)
-                        Program.Log($"GetPrinterMargins '{queue.FullName}': rejected implausible WPF margins ({wpfMargins.Top}/{wpfMargins.Right}/{wpfMargins.Bottom}/{wpfMargins.Left} mm), using GDI ({gdiMargins.Top}/{gdiMargins.Right}/{gdiMargins.Bottom}/{gdiMargins.Left} mm)");
+                        Program.Log(string.Create(CultureInfo.InvariantCulture, $"GetPrinterMargins '{queue.FullName}': rejected implausible WPF margins ({wpfMargins.Top}/{wpfMargins.Right}/{wpfMargins.Bottom}/{wpfMargins.Left} mm), using GDI ({gdiMargins.Top}/{gdiMargins.Right}/{gdiMargins.Bottom}/{gdiMargins.Left} mm)"));
                     return new PrinterMarginResultDto("available", "hardware", gdiMargins);
                 }
 
@@ -334,7 +344,7 @@ public sealed class PrinterSpoolerService
 
                 if (gdiMargins != null || wpfMargins != null)
                 {
-                    Program.Log($"GetPrinterMargins '{queue.FullName}': rejected implausible non-zero margins gdi={gdiMargins?.Top}/{gdiMargins?.Right}/{gdiMargins?.Bottom}/{gdiMargins?.Left} wpf={wpfMargins?.Top}/{wpfMargins?.Right}/{wpfMargins?.Bottom}/{wpfMargins?.Left}");
+                    Program.Log(string.Create(CultureInfo.InvariantCulture, $"GetPrinterMargins '{queue.FullName}': rejected implausible non-zero margins gdi={gdiMargins?.Top}/{gdiMargins?.Right}/{gdiMargins?.Bottom}/{gdiMargins?.Left} wpf={wpfMargins?.Top}/{wpfMargins?.Right}/{wpfMargins?.Bottom}/{wpfMargins?.Left}"));
                     return Unavailable("Driver reported implausibly small non-zero hardware margins");
                 }
 
@@ -407,6 +417,7 @@ public sealed class PrinterSpoolerService
             if (dmSize <= 0) return null;
 
             pDevMode = Marshal.AllocHGlobal(dmSize);
+            Marshal.Copy(new byte[dmSize], 0, pDevMode, dmSize);
             if (WinSpoolInterop.DocumentProperties(IntPtr.Zero, hPrinter, printerName, pDevMode, IntPtr.Zero, WinSpoolInterop.DM_OUT_BUFFER) < 0)
                 return null;
 
@@ -624,6 +635,7 @@ public sealed class PrinterSpoolerService
                 if (dmSize > 0)
                 {
                     pDevMode = Marshal.AllocHGlobal(dmSize);
+                    Marshal.Copy(new byte[dmSize], 0, pDevMode, dmSize);
                     if (WinSpoolInterop.DocumentProperties(IntPtr.Zero, hPrinter, printerName, pDevMode, IntPtr.Zero, WinSpoolInterop.DM_OUT_BUFFER) >= 0)
                     {
                         return ReadActiveProfile(printerName, portName, caps, queue, pDevMode);
@@ -1270,6 +1282,7 @@ public sealed class PrinterSpoolerService
                 return null;
 
             pDevMode = Marshal.AllocHGlobal(dmBytes);
+            Marshal.Copy(new byte[dmBytes], 0, pDevMode, dmBytes);
             if (WinSpoolInterop.DocumentProperties(IntPtr.Zero, hPrinter, printerName, pDevMode, IntPtr.Zero, WinSpoolInterop.DM_OUT_BUFFER) < 0)
                 return null;
 
@@ -1871,6 +1884,17 @@ public sealed class PrinterSpoolerService
             {
                 captured = ex;
             }
+            finally
+            {
+                try
+                {
+                    Dispatcher.FromThread(Thread.CurrentThread)?.InvokeShutdown();
+                }
+                catch
+                {
+                    // Ignore dispatcher shutdown failures on thread teardown.
+                }
+            }
         });
         staThread.SetApartmentState(ApartmentState.STA);
         staThread.Start();
@@ -2018,31 +2042,47 @@ public sealed class PrinterSpoolerService
         var jobs = new List<SpoolerJobDto>();
         try
         {
-            foreach (var queue in OpenQueues(printerFilter))
+            using var server = new LocalPrintServer();
+            var queues = server.GetPrintQueues(new[]
             {
-                try
+                EnumeratedPrintQueueTypes.Local,
+                EnumeratedPrintQueueTypes.Connections
+            });
+
+            foreach (var queue in queues)
+            {
+                using (queue)
                 {
-                    queue.Refresh();
-                    var queueName = queue.FullName;
-                    foreach (var job in queue.GetPrintJobInfoCollection())
+                    try
                     {
-                        jobs.Add(new SpoolerJobDto(
-                            JobId: job.JobIdentifier,
-                            PrinterName: queueName,
-                            DocumentTitle: job.Name ?? "PrintStudio Document",
-                            UserName: job.Submitter ?? Environment.UserName,
-                            Status: MapJobStatus(job.JobStatus),
-                            TotalPages: Math.Max(1, job.NumberOfPages),
-                            PagesPrinted: Math.Max(0, job.NumberOfPagesPrinted),
-                            SizeBytes: job.JobSize,
-                            Priority: (int)job.Priority,
-                            SubmittedAt: job.TimeJobSubmitted.ToString("O")
-                        ));
+                        var queueName = queue.FullName;
+                        if (!string.IsNullOrWhiteSpace(printerFilter) &&
+                            !string.Equals(queueName, printerFilter, StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        queue.Refresh();
+                        foreach (var job in queue.GetPrintJobInfoCollection())
+                        {
+                            jobs.Add(new SpoolerJobDto(
+                                JobId: job.JobIdentifier,
+                                PrinterName: queueName,
+                                DocumentTitle: job.Name ?? "PrintStudio Document",
+                                UserName: job.Submitter ?? Environment.UserName,
+                                Status: MapJobStatus(job.JobStatus),
+                                TotalPages: Math.Max(1, job.NumberOfPages),
+                                PagesPrinted: Math.Max(0, job.NumberOfPagesPrinted),
+                                SizeBytes: job.JobSize,
+                                Priority: (int)job.Priority,
+                                SubmittedAt: job.TimeJobSubmitted.ToString("O")
+                            ));
+                        }
                     }
-                }
-                catch (Exception ex)
-                {
-                    Program.Log($"Skipping jobs of queue '{SafeQueueName(queue)}': {ex.Message}");
+                    catch (Exception ex)
+                    {
+                        Program.Log($"Skipping jobs of queue '{SafeQueueName(queue)}': {ex.Message}");
+                    }
                 }
             }
         }
@@ -2052,31 +2092,6 @@ public sealed class PrinterSpoolerService
         }
 
         return jobs;
-    }
-
-    private static IEnumerable<PrintQueue> OpenQueues(string? printerFilter)
-    {
-        using var server = new LocalPrintServer();
-        var queues = server.GetPrintQueues(new[]
-        {
-            EnumeratedPrintQueueTypes.Local,
-            EnumeratedPrintQueueTypes.Connections
-        });
-
-        foreach (var queue in queues)
-        {
-            string fullName;
-            try { fullName = queue.FullName; }
-            catch { continue; }
-
-            if (!string.IsNullOrWhiteSpace(printerFilter) &&
-                !string.Equals(fullName, printerFilter, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            yield return queue;
-        }
     }
 
     public bool ControlJob(ControlJobParams request)

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { PageItem, SourceDocument } from '@shared/models';
 import {
   computePerspectiveOutputDimensions,
+  detectDocumentQuadOffline,
   displayQuadToSourceQuad,
   evaluateHomography,
   isConvexQuad,
@@ -199,5 +200,60 @@ describe('perspectiveCrop engine', () => {
     expect(result.heightMm).toBe(55);
     expect(result.pngBytes.byteLength).toBeGreaterThan(20);
     expect(result.thumbnailDataUrl).toMatch(/^data:image\/png;base64,/);
+  });
+
+  it('detects 4 corners of a skewed white sheet on a dark background offline even with dark ink inside', () => {
+    const W = 200;
+    const H = 200;
+    const rgba = new Uint8ClampedArray(W * H * 4);
+    const trueQuad: PerspectiveQuad = {
+      tl: { x: 0.18, y: 0.14 },
+      tr: { x: 0.84, y: 0.2 },
+      br: { x: 0.88, y: 0.86 },
+      bl: { x: 0.12, y: 0.82 },
+    };
+    const inQuad = (nx: number, ny: number) => {
+      const pts = [trueQuad.tl, trueQuad.tr, trueQuad.br, trueQuad.bl];
+      let pos = 0;
+      let neg = 0;
+      for (let i = 0; i < 4; i++) {
+        const a = pts[i];
+        const b = pts[(i + 1) % 4];
+        const c = (b.x - a.x) * (ny - a.y) - (b.y - a.y) * (nx - a.x);
+        if (c >= 0) pos++;
+        if (c <= 0) neg++;
+      }
+      return pos === 4 || neg === 4;
+    };
+
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const idx = (y * W + x) * 4;
+        const nx = x / (W - 1);
+        const ny = y / (H - 1);
+        const inside = inQuad(nx, ny);
+        // Simulate dark printed text/blocks inside the bright sheet
+        const darkTextInside = inside && nx > 0.35 && nx < 0.65 && ny > 0.4 && ny < 0.58;
+        const v = darkTextInside ? 35 : inside ? 245 : 32;
+        rgba[idx] = v;
+        rgba[idx + 1] = v;
+        rgba[idx + 2] = v;
+        rgba[idx + 3] = 255;
+      }
+    }
+
+    const res = detectDocumentQuadOffline({ rgba, width: W, height: H });
+    expect(res.found).toBe(true);
+    expect(isConvexQuad(res.quad)).toBe(true);
+    expect(Math.hypot(res.quad.tl.x - trueQuad.tl.x, res.quad.tl.y - trueQuad.tl.y)).toBeLessThan(0.05);
+    expect(Math.hypot(res.quad.tr.x - trueQuad.tr.x, res.quad.tr.y - trueQuad.tr.y)).toBeLessThan(0.05);
+    expect(Math.hypot(res.quad.br.x - trueQuad.br.x, res.quad.br.y - trueQuad.br.y)).toBeLessThan(0.05);
+    expect(Math.hypot(res.quad.bl.x - trueQuad.bl.x, res.quad.bl.y - trueQuad.bl.y)).toBeLessThan(0.05);
+
+    // Uniform image returns found: false with default full-frame quad
+    const flat = new Uint8ClampedArray(30 * 30 * 4).fill(180);
+    const flatRes = detectDocumentQuadOffline({ rgba: flat, width: 30, height: 30 });
+    expect(flatRes.found).toBe(false);
+    expect(isDefaultPerspectiveQuad(flatRes.quad)).toBe(true);
   });
 });

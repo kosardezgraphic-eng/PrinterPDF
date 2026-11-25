@@ -2,7 +2,7 @@ import React,{useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import type {ComputedSheetSide,PageItem,PageOverlay,PageOverlayImage,PageOverlayShape,PageOverlayText} from '@shared/models';
 import {drawOverlayText} from '../engine/textOverlays';
 import {imageDrawRect,overlayPlacements,type OverlayPlacement} from '../engine/overlayPlacements';
-import {centreWithinLimits,moveOverlay,overlayLimitsForBox,resizeOverlay,resizeOverlayKeepingAspect,rotationFromPointer,pointerAngle,type OverlayHandle,type OverlayLimits} from '../engine/overlayGeometry';
+import {boxWithinLimits,centreWithinLimits,moveOverlay,overlayLimitsForBox,resizeOverlay,resizeOverlayKeepingAspect,rotationFromPointer,pointerAngle,type OverlayHandle,type OverlayLimits} from '../engine/overlayGeometry';
 import {rotateVector} from '../engine/pageGeometry';
 import type {EraseShape} from '@shared/models';
 import {beginEraseShape,commitEraseShape,colorFromPixels,eraseMaskCss,erasePaintCss,eraseRegionIsSelected,eraseShapeIsMeaningful,eraseShapeParts,eraseToolPaints,growEraseShape} from '../engine/imageErase';
@@ -254,10 +254,11 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
  useLayoutEffect(()=>{if(edit&&textarea.current){textarea.current.focus();textarea.current.setSelectionRange(edit.selectionStart,edit.selectionEnd);}},[!!edit]);
  useEffect(()=>{mounted.current=true;return ()=>{mounted.current=false;const pending=useAppStore.getState().textEdit;
   if(pending?.occurrenceKey===p.key)queueMicrotask(()=>{if(!mounted.current && useAppStore.getState().textEdit===pending)useAppStore.getState().finishTextEdit();});};},[p.key]);
+ const clampFn=item.kind==='numbering'?boxWithinLimits:centreWithinLimits;
  const geometry=(g:Gesture)=>{
   const angle=p.parentRotation+(g.handle==='move'?0:item.rotation);
   const delta=rotateVector(g.dx,g.dy,-angle),pw=p.parentWidth*pxPerMm,ph=p.parentHeight*pxPerMm;
-  if(g.handle==='move')return moveOverlay(item,delta.x/pw*100,delta.y/ph*100,limits);
+  if(g.handle==='move')return clampFn({...item,xPercent:item.xPercent+delta.x/pw*100,yPercent:item.yPercent+delta.y/ph*100},limits);
   const handle=g.handle as OverlayHandle;
   const next=(g.lock ?? lockedDefault)
     ? resizeOverlayKeepingAspect(item,handle,delta.x/pw*100,delta.y/ph*100,{parentWidth:p.parentWidth,parentHeight:p.parentHeight},1,limits)
@@ -266,7 +267,7 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
   const dy=((next.yPercent+next.heightPercent/2)-(item.yPercent+item.heightPercent/2))*ph/100;
   const shifted=rotateVector(dx,dy,item.rotation);
   // A rotated box grows its bounding rect, so the centre is moved back and re-clamped rather than the corners.
-  return centreWithinLimits({...next,
+  return clampFn({...next,
    xPercent:item.xPercent+item.widthPercent/2+shifted.x/pw*100-next.widthPercent/2,
    yPercent:item.yPercent+item.heightPercent/2+shifted.y/ph*100-next.heightPercent/2},limits);
  };
@@ -294,7 +295,7 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
    widthPercent:Math.max(1,(snapped.rectMm.width/p.parentWidth)*100),
    heightPercent:Math.max(1,(snapped.rectMm.height/p.parentHeight)*100),
   };
-  return centreWithinLimits(adjusted,limits);
+  return clampFn(adjusted,limits);
  };
  const paint=(g:Gesture)=>{
   if(g.handle==='rotate'){smartGuidesRef.current?.clearGuides();g.node.style.transform=`rotate(${rotationFromPointer(g.centerX,g.centerY,g.x+g.dx,g.y+g.dy,g.startRotation,g.startAngle,g.lock?15:undefined)}deg)`;return;}
@@ -376,7 +377,10 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
    if(step){e.preventDefault();e.stopPropagation();activate();
      // One millimetre on the sheet, five with Shift; the delta is rotated back into the parent box's own axes.
      const mm=(e.shiftKey?5:1),delta=rotateVector(step[0]*mm*pxPerMm,step[1]*mm*pxPerMm,-(p.parentRotation+item.rotation));
-     update(item.id,moveOverlay(item,delta.x/(p.parentWidth*pxPerMm)*100,delta.y/(p.parentHeight*pxPerMm)*100,limits));return;}
+     const moved=item.kind==='numbering'
+       ? boxWithinLimits({...item,xPercent:item.xPercent+delta.x/(p.parentWidth*pxPerMm)*100,yPercent:item.yPercent+delta.y/(p.parentHeight*pxPerMm)*100},limits)
+       : moveOverlay(item,delta.x/(p.parentWidth*pxPerMm)*100,delta.y/(p.parentHeight*pxPerMm)*100,limits);
+     update(item.id,moved);return;}
    if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();activate();if(editable)beginEdit(item.id,p.key);else select(item.id);}}}
    // The ring is the cursor, so it has to be where the pointer is the moment the pointer arrives — not only
    // after the first move. It stays on while a gesture holds the pointer, even outside the box: that stroke is
@@ -397,13 +401,13 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
    {isImage && eraseRegionIsSelected(selection) && <div style={{position:'absolute',...pictureFit(p)}}><EraseSelectionMark shape={selection} widthMm={pictureRect(p).width} heightMm={pictureRect(p).height}/></div>}
    {'formulaError' in p && p.formulaError && !edit && <span role="alert" className="absolute bottom-full left-0 whitespace-nowrap bg-red-800 px-1 text-white">{lang==='fa'?'فرمول نامعتبر':'Invalid formula'}</span>}
    {edit && editable && <textarea ref={textarea} data-inline-overlay-editor aria-label={lang==='fa'?'ویرایش متن روی صفحه':'Edit text on page'} value={edit.text}
-      wrap="off" spellCheck={false} dir={/[\u0590-\u08ff]/.test(edit.text)?'rtl':'ltr'}
+      wrap="soft" spellCheck={false} dir={/[\u0590-\u08ff]/.test(edit.text)?'rtl':'ltr'}
       onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()} onDoubleClick={e=>e.stopPropagation()}
       onChange={e=>useAppStore.getState().updateTextDraft(e.target.value,e.target.selectionStart,e.target.selectionEnd)}
       onSelect={e=>useAppStore.getState().selectTextDraft(e.currentTarget.selectionStart,e.currentTarget.selectionEnd)}
       onKeyDown={e=>{e.stopPropagation();if(e.nativeEvent.isComposing)return;if(e.key==='Escape'){e.preventDefault();useAppStore.getState().finishTextEdit(true);}else if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();useAppStore.getState().finishTextEdit();}}}
       onBlur={e=>{const related=e.relatedTarget instanceof Element?e.relatedTarget:null;if(!related?.closest('[data-text-control-panel]'))useAppStore.getState().finishTextEdit();}}
-      style={{width:'100%',height:'100%',resize:'none',border:0,padding:0,margin:0,outline:'none',overflow:'auto',background:editable.backgroundColor||'transparent',color:editable.color,
+      style={{width:'100%',height:'100%',resize:'none',border:0,padding:0,margin:0,outline:'1.5px dashed #0ea5e9',overflow:'auto',whiteSpace:'pre-wrap',wordBreak:'break-word',overflowWrap:'anywhere',background:editable.backgroundColor||'transparent',color:editable.color,
         fontFamily:`"${editable.fontFamily}", sans-serif`,fontWeight:editable.bold?'bold':'normal',fontStyle:editable.italic?'italic':'normal',textDecoration:editable.underline?'underline':'none',
         textAlign:editable.align,fontSize:editable.fontSize*pxPerMm/MM_TO_PT,lineHeight:editable.lineHeight??1.25,wordSpacing:`${(editable.wordSpacingPt??0)*pxPerMm/MM_TO_PT}px`,letterSpacing:`${(editable.letterSpacingPt??0)*pxPerMm/MM_TO_PT}px`,opacity:editable.opacity,touchAction:'auto'}} />}
    {selected && enabled && !edit && HANDLES.map(h=><button key={h.id} type="button" aria-label={`${isImage?(lang==='fa'?'تغییر اندازه تصویر':'Resize image'):isShape?(lang==='fa'?'تغییر اندازه شکل':'Resize shape'):item.kind==='numbering'?(lang==='fa'?'تغییر اندازه شماره':'Resize number'):(lang==='fa'?'تغییر اندازه متن':'Resize text')} ${h.id}`} data-text-resize={h.id}
@@ -444,7 +448,7 @@ export function TextOverlayLayer({sheet,totalSheets,pages,pageIndices,pxPerMm,en
   });
  },[rawPlacements,thumbnailMode,thumbnailPageId,thumbnailOccurrenceKey]);
  const sheetMm={width:sheet.widthMm,height:sheet.heightMm};
- return <div className="pointer-events-none absolute inset-0 z-10">{placements.map(p=>{
+ return <div className="pointer-events-none absolute inset-0 z-[25]">{placements.map(p=>{
   const item=targetOf(p);
   const c=p.clip;
   const clip=c?`inset(${c.y*pxPerMm}px ${Math.max(0,(sheet.widthMm-c.x-c.width)*pxPerMm)}px ${Math.max(0,(sheet.heightMm-c.y-c.height)*pxPerMm)}px ${c.x*pxPerMm}px)`:undefined;

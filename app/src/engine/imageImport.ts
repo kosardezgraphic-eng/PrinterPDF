@@ -106,7 +106,10 @@ export async function rasterizeOverlayImage(src:string,boxWidthPx:number,boxHeig
     applyEraseToContext(ctx,options.erase,{width:painted.width,height:painted.height,widthMm:options.eraseWidthMm,heightMm:options.eraseHeightMm});
     ctx.restore();
   }
-  return canvas.toDataURL('image/png');
+  const dataUrl = canvas.toDataURL('image/png');
+  canvas.width = 0;
+  canvas.height = 0;
+  return dataUrl;
 }
 function loadImage(src:string):Promise<HTMLImageElement>{
   if (typeof Image === 'undefined') throw new Error('This environment cannot decode the embedded picture');

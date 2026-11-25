@@ -362,6 +362,9 @@ function applyCachedProfileOverrides(printers: PrinterInfo[]): PrinterInfo[] {
 
 async function listRealWindowsPrinters(): Promise<PrinterInfo[]> {
   try {
+    if (!sidecar.isRunning && process.platform === 'win32') {
+      sidecar.restartIfStopped();
+    }
     const printers = await withSidecarDiagnostics(sidecar.listPrinters());
     lastNativeFallbackWorked = false;
     const resolved = applyCachedProfileOverrides(printers);
@@ -546,8 +549,25 @@ function registerIpcHandlers(): void {
         if (payload.request?.printerName) {
           await flushFallbackProfileSync(payload.request.printerName);
         }
+        if (!sidecar.isRunning && process.platform === 'win32') {
+          sidecar.restartIfStopped();
+        }
         if (sidecar.isRunning) {
-          return await sidecar.submitPrintJob(payload.request, tempPdfPath, tempImagePaths);
+          try {
+            return await sidecar.submitPrintJob(payload.request, tempPdfPath, tempImagePaths);
+          } catch (sidecarError) {
+            const msg = sidecarError instanceof Error ? sidecarError.message : String(sidecarError);
+            const pipeOrCrash =
+              !sidecar.isRunning ||
+              /Named pipe|Sidecar:|PrinterService\.exe|cannot reach|no process is listening/i.test(msg);
+            if (!pipeOrCrash || process.platform !== 'win32') {
+              throw sidecarError;
+            }
+            if (!sidecar.isRunning) {
+              sidecar.restartIfStopped();
+            }
+            return await printToWindowsPrinterViaPowerShell(payload.request, tempImagePaths);
+          }
         }
         if (process.platform === 'win32') {
           return await printToWindowsPrinterViaPowerShell(payload.request, tempImagePaths);

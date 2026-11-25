@@ -82,6 +82,29 @@ describe('picture header inspection', () => {
     expect(pictureFormat('data:image/gif;base64,R0lGODlhAQABAAAAACw=')).toMatchObject({ kind: 'unknown' });
     expect(pictureFormat(jpegDataUrl([sof(0xc0, 4, 4, 3)]))).toMatchObject({ kind: 'jpeg' });
   });
+
+  it('detects embedded ICC, chromaticity, and non-sRGB gamma color profiles', () => {
+    const iccp = pngBytes({ extra: pngChunk('iCCP', [0x50, 0x33, 0, 0, 0x78, 0x9c]) });
+    expect(inspectPng(iccp)).toMatchObject({ hasColorProfile: true });
+    expect(planPictureEmbedding(toDataUrl('image/png', iccp))).toMatchObject({ route: 'png', hasColorProfile: true });
+
+    const srgbGama = pngBytes({ extra: pngChunk('gAMA', [0, 0, 0xb1, 0x8f]) }); // 45455 (1/2.2)
+    expect(inspectPng(srgbGama)).toMatchObject({ hasColorProfile: false });
+
+    const nonSrgbGama = pngBytes({ extra: pngChunk('gAMA', [0, 0, 0xd8, 0xf0]) }); // 55536 (1/1.8)
+    expect(inspectPng(nonSrgbGama)).toMatchObject({ hasColorProfile: true });
+
+    const chrmWithSrgb = pngBytes({ extra: [...pngChunk('sRGB', [0]), ...pngChunk('cHRM', [0, 0, 0, 1])] });
+    expect(inspectPng(chrmWithSrgb)).toMatchObject({ hasColorProfile: false });
+
+    const chrmOnly = pngBytes({ extra: pngChunk('cHRM', [0, 0, 0, 1]) });
+    expect(inspectPng(chrmOnly)).toMatchObject({ hasColorProfile: true });
+
+    const iccApp2 = jpegSegment(0xe2, [0x49, 0x43, 0x43, 0x5f, 0x50, 0x52, 0x4f, 0x46, 0x49, 0x4c, 0x45, 0x00, 1, 1]);
+    const iccJpg = jpegBytes([iccApp2, sof(0xc0, 64, 48, 3)]);
+    expect(inspectJpeg(iccJpg)).toMatchObject({ hasColorProfile: true });
+    expect(planPictureEmbedding(toDataUrl('image/jpeg', iccJpg))).toMatchObject({ route: 'jpeg', hasColorProfile: true });
+  });
 });
 
 describe('embedding plan', () => {

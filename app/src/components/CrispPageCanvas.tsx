@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, RefObject } from 'react';
 import type { EffectsSettings, PageItem } from '@shared/models';
-import { buildCssFilterForPage } from '../engine/effectsPipeline';
+import { SvgEffectFilterDef, useExactPageFilter } from './PageContentImage';
 import { crispRenderSize, requestCrispFrame } from '../engine/vectorPreviewBridge';
 
 import type { VectorFrame } from '../engine/vectorPreview';
@@ -110,7 +110,16 @@ export function CrispPageCanvas({ page, effects, width, height, style, className
   }, [frame, width, height, onStaleFrame]);
   // Hidden, not unmounted: keeping the element in the tree means the crop box and the observer survive
   // the gap between "asked for a render" and "the render landed".
-  const paintStyle: CSSProperties = { ...style, filter: buildCssFilterForPage(page, effects) };
-  if (!frame) return <canvas ref={canvasRef} data-crisp-page={page.id} aria-hidden="true" className={className} style={{ ...paintStyle, visibility: 'hidden' }} />;
-  return <canvas ref={canvasRef} data-crisp-page={page.id} data-crisp-size={`${frame.width}x${frame.height}`} aria-hidden="true" className={className} style={paintStyle} />;
+  const { filterStyle, svgFilterId, svgFilterSpec } = useExactPageFilter(page, effects);
+  const paintStyle: CSSProperties = { ...style, filter: filterStyle };
+  return (
+    <>
+      {svgFilterId && svgFilterSpec && <SvgEffectFilterDef id={svgFilterId} spec={svgFilterSpec} />}
+      {!frame ? (
+        <canvas ref={canvasRef} data-crisp-page={page.id} aria-hidden="true" className={className} style={{ ...paintStyle, visibility: 'hidden' }} />
+      ) : (
+        <canvas ref={canvasRef} data-crisp-page={page.id} data-crisp-size={`${frame.width}x${frame.height}`} aria-hidden="true" className={className} style={paintStyle} />
+      )}
+    </>
+  );
 }

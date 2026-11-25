@@ -842,5 +842,58 @@ class TestOffscreenCanvas {
       vi.unstubAllGlobals();
     }
   });
+
+  it('converts ICC-profiled page PNGs to sRGB via Canvas even when preserve + lossless options are active', async () => {
+    const srcCanvas = createCanvas(40, 40);
+    const sCtx = srcCanvas.getContext('2d');
+    sCtx.fillStyle = 'rgb(12, 180, 95)';
+    sCtx.fillRect(0, 0, 40, 40);
+    const rawPng = new Uint8Array(await srcCanvas.encode('png'));
+    const { pngChunk } = await import('./imageFixtures');
+    const iccpChunk = Uint8Array.from(pngChunk('iCCP', [0x50, 0x33, 0, 0, 0x78, 0x9c]));
+    const iendOffset = rawPng.length - 12;
+    const withIcc = new Uint8Array(rawPng.length + iccpChunk.length);
+    withIcc.set(rawPng.subarray(0, 33), 0);
+    withIcc.set(iccpChunk, 33);
+    withIcc.set(rawPng.subarray(33, iendOffset + 12), 33 + iccpChunk.length);
+
+    let decodeCalled = 0;
+    vi.stubGlobal('OffscreenCanvas', TestOffscreenCanvas);
+    vi.stubGlobal('createImageBitmap', async (blob: Blob) => {
+      decodeCalled++;
+      const img = await loadImage(Buffer.from(await blob.arrayBuffer()));
+      return Object.assign(img, { close: () => {} });
+    });
+
+    try {
+      const doc: SourceDocument = {
+        id: 'icc-img',
+        name: 'p3.png',
+        filePath: 'p3.png',
+        fileSize: withIcc.byteLength,
+        fileType: 'image',
+        mimeType: 'image/png',
+        pageCount: 1,
+        createdAt: new Date().toISOString(),
+        rawBytes: withIcc,
+      };
+      const outBytes = await exportImposedPdf({
+        documents: [doc],
+        pages: [{ ...page(0), documentId: 'icc-img', widthMm: 40 * ptToMm, heightMm: 40 * ptToMm }],
+        layout,
+        effects: { ...DEFAULT_EFFECTS, enabled: false },
+        watermark: { ...getDefaultWatermarkSettings(), enabled: false },
+        pageNumbering: { ...getDefaultPageNumberSettings(), enabled: false },
+        exportOptions: { imageHandling: 'preserve', compression: 'lossless' },
+        userName: 'test',
+      });
+      expect(decodeCalled).toBeGreaterThan(0);
+      const rendered = await render(outBytes);
+      expect(pixel(rendered, 20, 20)).toEqual([12, 180, 95]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
+
 

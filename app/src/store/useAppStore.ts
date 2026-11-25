@@ -101,6 +101,7 @@ import { defaultShapeStyle, normalizeShapeStyle, shapeCapabilities } from '../en
 import { isImageFile, measureImage, readFileAsDataUrl } from '../engine/imageImport';
 import { centeredAspectCrop, cropToMm, IDENTITY_TRANSFORM, normalizeInsets, pageCropFractions, type Insets } from '../engine/pageGeometry';
 import {
+  autoDetectPagePerspectiveQuad,
   clonePerspectiveQuad,
   isDefaultPerspectiveQuad,
   rectifyPagePerspective,
@@ -570,6 +571,7 @@ interface AppState {
     }
   >;
   isApplyingPerspectiveCrop: boolean;
+  isAutoDetectingPerspective: boolean;
   showPreflight: boolean;
   fitPageNonce: number;
   pdfExportOptions: PdfExportOptions;
@@ -660,6 +662,7 @@ interface AppState {
   ) => void;
   resetPerspectiveDraft: (pageId?: string) => void;
   discardPerspectiveDrafts: () => void;
+  autoDetectPerspectiveDraft: (pageId?: string, opts?: { silent?: boolean }) => Promise<boolean>;
   applyPerspectiveCrop: (pageIds?: string[]) => Promise<boolean>;
   applyCellTransform: (pageId: string, occurrenceKey: string, transform: PageTransform) => void;
   resetCellGeometry: (pageId: string, occurrenceKey: string) => void;
@@ -1146,6 +1149,7 @@ export const useAppStore = create<AppState>((set, get) => {
     cropDrafts: {},
     perspectiveDrafts: {},
     isApplyingPerspectiveCrop: false,
+    isAutoDetectingPerspective: false,
     showPreflight: false,
     fitPageNonce: 0,
     pdfExportOptions: { imageHandling: 'preserve', compression: 'lossless' },
@@ -1262,11 +1266,18 @@ export const useAppStore = create<AppState>((set, get) => {
       const result = await importFilesBatch(files);
 
       if (result.documents.length > 0) {
-        set((state) => ({
-          documents: [...state.documents, ...result.documents],
-          pages: [...state.pages, ...result.pages],
-          bookmarks: [...state.bookmarks, ...result.bookmarks],
-        }));
+        set((state) => {
+          const existingPageCount = state.pages.length;
+          const adjustedBookmarks = result.bookmarks.map((bm) => ({
+            ...bm,
+            pageIndex: existingPageCount + bm.pageIndex,
+          }));
+          return {
+            documents: [...state.documents, ...result.documents],
+            pages: [...state.pages, ...result.pages],
+            bookmarks: [...state.bookmarks, ...adjustedBookmarks],
+          };
+        });
         pushUndo(
           `افزودن ${result.documents.length} فایل`,
           `Import ${result.documents.length} file(s)`,
@@ -1812,6 +1823,62 @@ export const useAppStore = create<AppState>((set, get) => {
       }
     },
 
+    autoDetectPerspectiveDraft: async (pageId, opts) => {
+      const state = get();
+      if (state.isAutoDetectingPerspective || state.isApplyingPerspectiveCrop) return false;
+      const targetPage =
+        (pageId ? state.pages.find((p) => p.id === pageId) : undefined) ??
+        state.pages.find((p) => p.id === state.activePageId && p.isHighlighted) ??
+        state.pages.find((p) => p.isHighlighted) ??
+        state.pages[0];
+      if (!targetPage) return false;
+
+      const doc = state.documents.find((d) => d.id === targetPage.documentId);
+      const isFa = state.settings.language === 'fa';
+      const sheets = computeImpositionSheets(state.pages, state.layout);
+      const matchingCell = sheets.flatMap((s) => s.cells).find((c) => c.page?.id === targetPage.id);
+      const effectiveRotation = matchingCell?.effectiveRotation ?? targetPage.rotation;
+
+      set({ isAutoDetectingPerspective: true });
+      try {
+        const res = await autoDetectPagePerspectiveQuad({
+          page: targetPage,
+          sourceDoc: doc,
+          effectiveRotation,
+        });
+        const latest = get();
+        // Only apply if still targeting an active perspective session or manual trigger
+        if (res.found) {
+          latest.setPerspectiveDraft(targetPage.id, res.quad, { effectiveRotation });
+          set({ isAutoDetectingPerspective: false });
+          if (!opts?.silent) {
+            get().addToast({
+              type: 'success',
+              title: isFa ? '۴ گوشه برگه تشخیص داده شد' : '4 document corners detected',
+              message: isFa
+                ? 'می‌توانید نقاط گوشه را با ماوس جابه‌جا و ویرایش کنید.'
+                : 'You can drag any corner handle to fine-tune.',
+            });
+          }
+          return true;
+        }
+        set({ isAutoDetectingPerspective: false });
+        if (!opts?.silent) {
+          get().addToast({
+            type: 'info',
+            title: isFa ? 'مرز مشخصی برای برگه یافت نشد' : 'No distinct document boundary found',
+            message: isFa
+              ? 'لطفاً ۴ گوشه برگه را به‌صورت دستی جابه‌جا کنید.'
+              : 'Please drag the 4 corner handles manually.',
+          });
+        }
+        return false;
+      } catch {
+        set({ isAutoDetectingPerspective: false });
+        return false;
+      }
+    },
+
     applyPerspectiveCrop: async (pageIds) => {
       const state = get();
       if (state.isApplyingPerspectiveCrop) return false;
@@ -2149,7 +2216,31 @@ export const useAppStore = create<AppState>((set, get) => {
           documents: state.documents.filter((d) => d.id !== docId),
           pages: state.pages.filter((p) => p.documentId !== docId),
           layout: removeCellOverrides(state.layout, removedIds),
-          bookmarks: state.bookmarks.filter((b) => b.documentId !== docId),
+          bookmarks: state.bookmarks.flatMap((bm) => {
+            const nextDocIds = bm.documentIds?.filter((id) => id !== docId);
+            const nextPageIds = bm.pageIds?.filter((id) => !removedIds.has(id));
+            if (nextDocIds && nextDocIds.length > 0) {
+              const remainingPages = nextPageIds && nextPageIds.length > 0 ? nextPageIds : undefined;
+              const nextTargetPage =
+                bm.targetPageId && !removedIds.has(bm.targetPageId)
+                  ? bm.targetPageId
+                  : remainingPages?.[0] ?? bm.targetPageId;
+              return [
+                {
+                  ...bm,
+                  documentId: nextDocIds.includes(bm.documentId) ? bm.documentId : nextDocIds[0],
+                  documentIds: nextDocIds,
+                  pageIds: remainingPages,
+                  targetPageId: nextTargetPage,
+                  itemCount: remainingPages?.length ?? nextDocIds.length,
+                },
+              ];
+            }
+            if (bm.documentId === docId || (bm.documentIds && bm.documentIds.includes(docId))) {
+              return [];
+            }
+            return [bm];
+          }),
           ...(state.effects.targetPageIds !== undefined
             ? {
                 effects: {
@@ -6063,6 +6154,16 @@ export const useAppStore = create<AppState>((set, get) => {
         }
       }
       set({ canvasTool: tool });
+      if (tool === 'perspective-crop' && prev !== 'perspective-crop') {
+        const s = get();
+        const target =
+          s.pages.find((p) => p.id === s.activePageId && p.isHighlighted) ??
+          s.pages.find((p) => p.isHighlighted) ??
+          s.pages[0];
+        if (target && !s.perspectiveDrafts[target.id]) {
+          void s.autoDetectPerspectiveDraft(target.id, { silent: true });
+        }
+      }
     },
     setShowPreflight: (show) => set({ showPreflight: show }),
     triggerFitPage: () => set((state) => ({ fitPageNonce: state.fitPageNonce + 1 })),

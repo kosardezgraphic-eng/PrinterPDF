@@ -37,7 +37,7 @@ import { imagePlacements, imageDrawRect, shapePlacements } from './overlayPlacem
 import { MM_PER_PT, shapeColorComponents, shapeCommands, shapeDashPattern, shapeHasFill, shapeSvgPath } from './shapes';
 import { rasterizeOverlayImage } from './imageImport';
 import { eraseSignature } from './imageErase';
-import { planPictureEmbedding } from './imageFormat';
+import { inspectJpeg, inspectPng, planPictureEmbedding } from './imageFormat';
 import { computeImpositionSheets, sortCellsByLayer, stripTrailingEmptyDuplexSides } from './layoutEngine';
 import { normalizeAngle, pageCropFractions, rotateInsets } from './pageGeometry';
 import { applyEffectsToRgbaBuffer, resolvePageEffects, type ResolvedPageEffects } from './effectsPipeline';
@@ -513,6 +513,14 @@ export async function importFilesBatch(
   const pages: PageItem[] = [];
   const bookmarks: BookmarkItem[] = [];
   const errors: ImportErrorItem[] = [];
+  const importedImageBatches: Array<{
+    docId: string;
+    fileName: string;
+    firstPageId: string;
+    firstPageIndex: number;
+    docIds: string[];
+    pageIds: string[];
+  }> = [];
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
@@ -605,6 +613,12 @@ export async function importFilesBatch(
         // Universal Image import (PNG, JPEG, TIFF, PSD, WebP, HEIC/HEIF, BMP, GIF, SVG)
         const decodedPages = await decodeUniversalImageToPages(bytes, file.name, file.type);
         const imageDoc = await PDFDocument.create();
+        const batchDocIds: string[] = [];
+        const batchPageIds: string[] = [];
+        let firstDocId = '';
+        let firstPageId = '';
+        let firstPageIndex = -1;
+
         for (let pIdx = 0; pIdx < decodedPages.length; pIdx++) {
           const dPage = decodedPages[pIdx];
           // Verify PDF-embeddability via pdf-lib
@@ -668,15 +682,23 @@ export async function importFilesBatch(
           });
 
           if (pIdx === 0) {
-            bookmarks.push({
-              id: `bm-${docId}`,
-              title: file.name,
-              documentId: docId,
-              targetPageId: pageId,
-              pageIndex: pages.length - 1,
-              level: 0,
-            });
+            firstDocId = docId;
+            firstPageId = pageId;
+            firstPageIndex = pages.length - 1;
           }
+          batchDocIds.push(docId);
+          batchPageIds.push(pageId);
+        }
+
+        if (firstDocId && firstPageId) {
+          importedImageBatches.push({
+            docId: firstDocId,
+            fileName: file.name,
+            firstPageId,
+            firstPageIndex,
+            docIds: batchDocIds,
+            pageIds: batchPageIds,
+          });
         }
       }
     } catch (err) {
@@ -691,6 +713,40 @@ export async function importFilesBatch(
           'This file was safely skipped so remaining files could load. Please verify the source file.',
       });
     }
+  }
+
+  if (importedImageBatches.length === 1) {
+    const single = importedImageBatches[0];
+    bookmarks.push({
+      id: `bm-${single.docId}`,
+      title: single.fileName,
+      documentId: single.docId,
+      targetPageId: single.firstPageId,
+      pageIndex: single.firstPageIndex,
+      level: 0,
+      ...(single.pageIds.length > 1
+        ? {
+            documentIds: single.docIds,
+            pageIds: single.pageIds,
+            itemCount: single.pageIds.length,
+          }
+        : {}),
+    });
+  } else if (importedImageBatches.length > 1) {
+    const first = importedImageBatches[0];
+    const allDocIds = importedImageBatches.flatMap((entry) => entry.docIds);
+    const allPageIds = importedImageBatches.flatMap((entry) => entry.pageIds);
+    bookmarks.push({
+      id: `bm-img-batch-${first.docId}`,
+      title: `${first.fileName} (+${importedImageBatches.length - 1})`,
+      documentId: first.docId,
+      targetPageId: first.firstPageId,
+      pageIndex: first.firstPageIndex,
+      level: 0,
+      documentIds: allDocIds,
+      pageIds: allPageIds,
+      itemCount: allPageIds.length,
+    });
   }
 
   return { documents, pages, bookmarks, errors };
@@ -969,21 +1025,45 @@ export async function exportImposedPdf(params: {
       loadedSourceDocs.set(doc.id, src);
     } else if (doc.fileType === 'image' && doc.rawBytes) {
       let embedded: Awaited<ReturnType<typeof outPdf.embedPng>> | null = null;
-      if (imageHandling !== 'preserve' || jpegQuality !== null) {
+      const pngInfo = doc.mimeType === 'image/png' ? inspectPng(doc.rawBytes) : null;
+      const jpegInfo = (doc.mimeType === 'image/jpeg' || doc.mimeType === 'image/jpg') ? inspectJpeg(doc.rawBytes) : null;
+      const hasAlphaPng = Boolean(pngInfo && (pngInfo.colorType === 4 || pngInfo.colorType === 6 || pngInfo.hasTrns));
+      const needsColorConversion = Boolean(
+        pngInfo?.hasColorProfile ||
+        pngInfo?.animated ||
+        (pngInfo && ![0, 2, 3, 4, 6].includes(pngInfo.colorType)) ||
+        jpegInfo?.hasColorProfile ||
+        jpegInfo?.components === 4 ||
+        (jpegInfo && jpegInfo.orientation !== 1)
+      );
+      if (imageHandling !== 'preserve' || jpegQuality !== null || needsColorConversion) {
         try {
           const decoded = await decodeImageSource(doc.rawBytes, doc.mimeType || 'image/png');
           try {
-            const scale = Math.min(1, maxRasterSidePx / Math.max(1, decoded.width, decoded.height));
-            const shouldReencode = scale < 1 || jpegQuality !== null;
+            const scale =
+              imageHandling === 'preserve'
+                ? 1
+                : Math.min(1, maxRasterSidePx / Math.max(1, decoded.width, decoded.height));
+            const shouldReencode = scale < 1 || jpegQuality !== null || needsColorConversion;
             if (shouldReencode) {
               const w = Math.max(1, Math.round(decoded.width * scale));
               const h = Math.max(1, Math.round(decoded.height * scale));
               const surface = createCanvas2DSurface(w, h);
               if (surface) {
-                surface.ctx.fillStyle = '#ffffff';
-                surface.ctx.fillRect(0, 0, w, h);
-                surface.ctx.drawImage(decoded.source, 0, 0, w, h);
-                embedded = await embedSurfaceOpaque(surface.canvas);
+                if (hasAlphaPng && jpegQuality === null) {
+                  surface.ctx.clearRect(0, 0, w, h);
+                  surface.ctx.drawImage(decoded.source, 0, 0, w, h);
+                  embedded = await outPdf.embedPng(await surfaceToPngBytes(surface.canvas));
+                } else {
+                  surface.ctx.fillStyle = '#ffffff';
+                  surface.ctx.fillRect(0, 0, w, h);
+                  surface.ctx.drawImage(decoded.source, 0, 0, w, h);
+                  embedded = await embedSurfaceOpaque(surface.canvas);
+                }
+                if ('width' in surface.canvas) {
+                  surface.canvas.width = 0;
+                  surface.canvas.height = 0;
+                }
               }
             }
           } finally {
@@ -995,8 +1075,15 @@ export async function exportImposedPdf(params: {
       }
       if (!embedded) {
         if (doc.mimeType === 'image/png') embedded = await outPdf.embedPng(doc.rawBytes);
-        else if (doc.mimeType === 'image/jpeg' || doc.mimeType === 'image/jpg') embedded = await outPdf.embedJpg(doc.rawBytes);
-        else throw new Error(`Unsupported image format: ${doc.mimeType}`);
+        else if (doc.mimeType === 'image/jpeg' || doc.mimeType === 'image/jpg') {
+          embedded = await outPdf.embedJpg(doc.rawBytes);
+          const isPlainCmyk = Boolean(
+            jpegInfo &&
+            jpegInfo.components === 4 &&
+            (!jpegInfo.adobe || (jpegInfo.adobeTransform !== null && jpegInfo.adobeTransform < 2))
+          );
+          if (isPlainCmyk) await applyCmykDecode(outPdf, embedded);
+        } else throw new Error(`Unsupported image format: ${doc.mimeType}`);
       }
       loadedImages.set(doc.id, embedded);
     }
@@ -1577,6 +1664,8 @@ export async function exportImposedPdf(params: {
         let drewCachedTokens = false;
         if (
           !wholeImage &&
+          item.verticalAlign === 'middle' &&
+          item.align !== 'justify' &&
           !item.text.includes('\n') &&
           !(item.scriptRanges?.length) &&
           !item.underline &&
@@ -1593,8 +1682,8 @@ export async function exportImposedPdf(params: {
             const pxPerPt = scale;
             const lineHeight = Math.max(0.8, Math.min(3, item.lineHeight ?? 1.25));
             const requestedSize = Math.max(8, Math.min(80, item.fontSize)) * pxPerPt;
-            const fontPx = item.verticalAlign === 'middle' && boxPxH > 0 ? Math.max(1, Math.min(requestedSize, boxPxH / lineHeight)) : requestedSize;
-            const insetPx = item.verticalAlign === 'middle' ? Math.min(boxPxW * 0.06, fontPx * 0.35) : 0;
+            const fontPx = item.verticalAlign === 'middle' && boxPxH > 0 ? Math.max(1, Math.min(requestedSize, (boxPxH * 0.88) / lineHeight)) : requestedSize;
+            const insetPx = item.verticalAlign === 'middle' ? Math.min(boxPxW * 0.08, Math.max(fontPx * 0.35, 2 * pxPerPt)) : 0;
             const maxTextWidthPx = Math.max(1, boxPxW - insetPx * 2);
             const verticalOffsetPx = item.verticalAlign === 'middle' ? (boxPxH - fontPx * lineHeight) / 2 + fontPx / 2 : 0;
             const fontStr = `${item.italic ? 'italic ' : ''}${item.bold ? 'bold ' : ''}${fontPx}px "${item.fontFamily.replace(/["\\]/g, '')}", sans-serif`;
@@ -1782,9 +1871,10 @@ export async function exportImposedPdf(params: {
         // mirrored, inverted or eroded picture cannot be a raw embed any more, because the page has to show
         // something other than what the file contains. The overlay itself is untouched either way.
         const erase = eraseSignature(item.erase);
-        const needsRaster = plan.route === 'raster' || !!item.flipHorizontal || !!item.flipVertical || !!item.invert || erase.length > 0;
+        const colorManagedInBrowser = typeof document !== 'undefined' && (plan.hasColorProfile || plan.cmyk);
+        const needsRaster = plan.route === 'raster' || colorManagedInBrowser || !!item.flipHorizontal || !!item.flipVertical || !!item.invert || erase.length > 0;
         // Raw embeds depend on the bytes alone, so the same picture at two sizes is stored once.
-        const key = needsRaster ? JSON.stringify([item.src, item.fit, item.flipHorizontal, item.flipVertical, !!item.invert, erase, Math.round(w * 10), Math.round(h * 10)]) : item.src;
+        const key = needsRaster ? JSON.stringify([item.src, item.fit, item.flipHorizontal, item.flipVertical, !!item.invert, colorManagedInBrowser, erase, Math.round(w * 10), Math.round(h * 10)]) : item.src;
         let image = pictureImages.get(key);
         if (!image) {
           if (needsRaster) {
@@ -2030,6 +2120,8 @@ export async function renderPdfToSheetPngs(
             canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('PNG encoding failed'))), 'image/png');
           });
           pngs.push(new Uint8Array(await blob.arrayBuffer()));
+          canvas.width = 0;
+          canvas.height = 0;
         } else {
           const canvas = new OffscreenCanvas(width, height);
           const ctx = canvas.getContext('2d');
@@ -2042,6 +2134,8 @@ export async function renderPdfToSheetPngs(
           }).promise;
           const blob = await canvas.convertToBlob({ type: 'image/png' });
           pngs.push(new Uint8Array(await blob.arrayBuffer()));
+          canvas.width = 0;
+          canvas.height = 0;
         }
         onProgress?.(pageNo, pdf.numPages);
       } finally {

@@ -39,7 +39,7 @@ export interface TicketNumberSlot {
   backgroundColor: string;
   bold: boolean;
   italic: boolean;
-  align: 'left' | 'center' | 'right';
+  align: 'left' | 'center' | 'right' | 'justify';
   rotation: number;
   slotOffset: number;
 }
@@ -324,8 +324,8 @@ export function buildNumberingOverlayForSlot(
     targetScope: 'all',
     targetPageIds: [],
     targetSheetIndex: 1,
-    xPercent: clamp(slot.xPercent, 0, 96),
-    yPercent: clamp(slot.yPercent, 0, 96),
+    xPercent: clamp(slot.xPercent, 0, Math.max(0, 100 - clamp(slot.widthPercent, 4, 100))),
+    yPercent: clamp(slot.yPercent, 0, Math.max(0, 100 - clamp(slot.heightPercent, 4, 100))),
     widthPercent: clamp(slot.widthPercent, 4, 100),
     heightPercent: clamp(slot.heightPercent, 4, 100),
     opacity: 1,

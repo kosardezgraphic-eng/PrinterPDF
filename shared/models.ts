@@ -122,6 +122,12 @@ export interface BookmarkItem {
   targetPageId: string;
   pageIndex: number;
   level: number;
+  /** Member document IDs when a batch of images is grouped into a single bookmark. */
+  documentIds?: string[];
+  /** Member page IDs when a batch of images is grouped into a single bookmark. */
+  pageIds?: string[];
+  /** Total number of grouped images/pages inside this bookmark. */
+  itemCount?: number;
 }
 
 /**
@@ -757,7 +763,7 @@ export interface TextScriptRange { start: number; end: number; script: 'super' |
 export interface PageOverlayText extends OverlayBase {
   kind: 'text'; text: string; fontSize: number; fontFamily: string; color: string;
   backgroundColor?: string; bold: boolean; italic: boolean; underline: boolean;
-  align: 'right' | 'center' | 'left'; syncGroupId?: string;
+  align: 'right' | 'center' | 'left' | 'justify'; syncGroupId?: string;
   /** Numbering overlays use vertical centring and a small safe inset inside their box. */
   verticalAlign?: 'top' | 'middle';
   /** Document scopes use stable document IDs; ranges use UTF-16 offsets. */
@@ -797,7 +803,7 @@ export interface PageOverlayNumbering extends OverlayBase {
   kind: 'numbering'; enabled: boolean; fontSize: number; fontFamily: string; color: string;
   backgroundColor?: string; bold: boolean; italic: boolean;
   format: NumberingNumberFormat; template: string; startOffset: number; padZeros: number; customScript: string;
-  align?: 'left' | 'center' | 'right';
+  align?: 'left' | 'center' | 'right' | 'justify';
   /**
    * The axis every placed occurrence walks along. `page` counts pages in workspace order (the classic
    * "each page gets the next number, wherever the imposition puts it"); `row` and `column` count cells on

@@ -6,6 +6,7 @@ import {numberingSequence} from '../engine/numberingSequence';
 import {resolveNumberingTemplate} from '../engine/textOverlays';
 import {parseCoverageSelection,formatCoverageSelection} from '../engine/coverageSelection';
 import {useSystemFonts} from '../engine/systemFonts';
+import {boxWithinLimits,overlayPanelFrame} from '../engine/overlayGeometry';
 import {useAppStore} from '../store/useAppStore';
 
 const input='w-full rounded border border-slate-300 bg-white p-1 text-xs text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white';
@@ -55,6 +56,17 @@ export function NumberingControlPanel(){
  const applyRange=()=>{try{const numbers=parseCoverageSelection(range,item.target==='sheet'?sheets.length:pages.length);
    patch(item.target==='sheet'?{targetScope:'selected',targetSheetIndices:numbers}:{targetScope:'selected',targetPageIds:numbers.map(n=>pages[n-1].id)});setRangeError(false);
  }catch{setRangeError(true);}};
+  const boxFrame=overlayPanelFrame(previewSheet,{target:item.target==='sheet'?'sheet':'page',targetPageIds:item.targetPageIds});
+  const boxWidthMm=Math.round((item.widthPercent/100)*boxFrame.boxWidthMm*10)/10;
+  const boxHeightMm=Math.round((item.heightPercent/100)*boxFrame.boxHeightMm*10)/10;
+  const updateBoxSizeMm=(axis:'w'|'h',mmValue:number)=>{
+    if(!Number.isFinite(mmValue))return;
+    const clampedMm=Math.max(4,mmValue);
+    const nextWidthPct=axis==='w'&&boxFrame.boxWidthMm>0?(clampedMm/boxFrame.boxWidthMm)*100:item.widthPercent;
+    const nextHeightPct=axis==='h'&&boxFrame.boxHeightMm>0?(clampedMm/boxFrame.boxHeightMm)*100:item.heightPercent;
+    const bounded=boxWithinLimits({...item,widthPercent:Math.max(1,nextWidthPct),heightPercent:Math.max(1,nextHeightPct)},boxFrame.limits);
+    patch({xPercent:bounded.xPercent,yPercent:bounded.yPercent,widthPercent:bounded.widthPercent,heightPercent:bounded.heightPercent});
+  };
  const labels=fa?['همه','فرد','زوج','اول','آخر','صفحه / برگه جاری','انتخاب دلخواه']:['All','Odd','Even','First','Last','Current','Custom selection'];
  const scopes:OverlayScope[]=['all','odd','even','first','last','current','selected'];
  return <aside data-text-control-panel aria-label={fa?'تنظیمات شماره صفحه':'Page numbering controls'} className="w-full bg-white p-3 text-xs text-slate-800 dark:bg-slate-900 dark:text-slate-200 space-y-2">
@@ -98,9 +110,13 @@ export function NumberingControlPanel(){
      </div>
    </div>
    <label className="block">{fa?'اندازه فونت':'Font size'} {item.fontSize} pt<input aria-label={fa?'اندازه فونت شماره':'Number font size'} type="range" min="8" max="80" value={item.fontSize} onChange={e=>patch({fontSize:+e.target.value})} className="w-full"/></label>
+   <div className="grid grid-cols-2 gap-1.5">
+     <label className="block">{fa?'عرض باکس (mm)':'Box width (mm)'}<input aria-label={fa?'عرض باکس شماره (mm)':'Number box width (mm)'} type="number" dir="ltr" min="4" step="0.5" value={boxWidthMm} onChange={e=>updateBoxSizeMm('w',+e.target.value)} className={input}/></label>
+     <label className="block">{fa?'ارتفاع باکس (mm)':'Box height (mm)'}<input aria-label={fa?'ارتفاع باکس شماره (mm)':'Number box height (mm)'} type="number" dir="ltr" min="4" step="0.5" value={boxHeightMm} onChange={e=>updateBoxSizeMm('h',+e.target.value)} className={input}/></label>
+   </div>
    <label className="block">{fa?'رنگ':'Color'}<input aria-label={fa?'رنگ شماره':'Number color'} type="color" value={/^#[0-9a-f]{6}$/i.test(item.color)?item.color:'#000000'} onChange={e=>patch({color:e.target.value})}/></label>
    <div className="flex flex-wrap gap-1">{(['bold','italic'] as const).map((k,i)=><button type="button" key={k} aria-label={(fa?['درشت','کج']:['Bold','Italic'])[i]} aria-pressed={item[k]} onClick={()=>patch({[k]:!item[k]})} className={`rounded px-2 py-1 cursor-pointer ${item[k]?'bg-sky-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{k==='bold'?'B':'I'}</button>)}
-   {(['left','center','right'] as const).map(a=><button type="button" key={a} aria-label={`${fa?'چینش':'Align'} ${a}`} aria-pressed={(item.align??'center')===a} onClick={()=>patch({align:a})} className={`rounded px-2 py-1 cursor-pointer ${(item.align??'center')===a?'bg-sky-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{a[0].toUpperCase()}</button>)}</div>
+   {(['left','center','right','justify'] as const).map(a=>{const label=fa?{left:'چپ',center:'وسط',right:'راست',justify:'جاستیفای'}[a]:{left:'Left',center:'Center',right:'Right',justify:'Justify'}[a];return <button type="button" key={a} title={label} aria-label={`${fa?'چینش':'Align'} ${a}`} aria-pressed={(item.align??'center')===a} onClick={()=>patch({align:a})} className={`rounded px-2 py-1 cursor-pointer ${(item.align??'center')===a?'bg-sky-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{fa?label:a[0].toUpperCase()}</button>;})}</div>
    <label className="flex items-center gap-1.5"><input type="checkbox" aria-label={fa?'قفل نسبت ابعاد شماره':'Lock number aspect ratio'} checked={item.lockAspect ?? true} onChange={e=>patch({lockAspect:e.target.checked})}/>
      {fa?'قفل نسبت ابعاد در تغییر اندازه':'Lock aspect ratio while resizing'} <span className="text-slate-500 dark:text-slate-400">({fa?'Shift موقتاً باز می‌کند':'Shift unlocks it'})</span></label>
    <label className="block">{fa?'شفافیت':'Opacity'} {Math.round(item.opacity*100)}%<input aria-label={fa?'شفافیت شماره':'Number opacity'} type="range" min="10" max="100" value={item.opacity*100} onChange={e=>patch({opacity:+e.target.value/100})} className="w-full"/></label>

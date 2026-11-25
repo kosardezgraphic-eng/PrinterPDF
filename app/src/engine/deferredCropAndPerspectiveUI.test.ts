@@ -225,4 +225,87 @@ describe('Deferred full-image Crop mode and Perspective Crop UI', () => {
     act(() => useAppStore.getState().undo());
     expect(useAppStore.getState().pages[0].documentId).toBe('skew-doc');
   });
+
+  it('auto-detects 4 sheet corners offline in UI and allows manual handle adjustment afterwards', async () => {
+    const W = 80;
+    const H = 80;
+    const raw = new Uint8ClampedArray(W * H * 4);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const idx = (y * W + x) * 4;
+        const nx = x / (W - 1);
+        const ny = y / (H - 1);
+        const inside = nx >= 0.2 && nx <= 0.8 && ny >= 0.15 && ny <= 0.85;
+        const c = inside ? 245 : 30;
+        raw[idx] = c;
+        raw[idx + 1] = c;
+        raw[idx + 2] = c;
+        raw[idx + 3] = 255;
+      }
+    }
+    const pngBytes = await encodeRgbaToPngBytesUniversal(raw, W, H);
+    const doc: SourceDocument = {
+      id: 'auto-doc',
+      name: 'sheet-on-desk.png',
+      filePath: '',
+      fileSize: pngBytes.byteLength,
+      fileType: 'image',
+      mimeType: 'image/png',
+      pageCount: 1,
+      createdAt: '',
+      rawBytes: pngBytes,
+    };
+    act(() => {
+      useAppStore.setState({
+        documents: [doc],
+        pages: [
+          {
+            id: 'auto-p1',
+            documentId: 'auto-doc',
+            documentName: 'sheet-on-desk.png',
+            sourcePageNumber: 1,
+            widthMm: 100,
+            heightMm: 100,
+            rotation: 0,
+            selectedForPrint: true,
+            isHighlighted: true,
+            isBlankPage: false,
+            colorProfile: 'color',
+            inkCoveragePercent: 25,
+            thumbnailDataUrl: 'data:image/png;base64,AA==',
+          },
+        ],
+      });
+    });
+
+    const perspBtn = container.querySelector<HTMLButtonElement>('[data-ribbon-tool="perspective-crop"]')!;
+    act(() => perspBtn.click());
+    const autoBtn = container.querySelector<HTMLButtonElement>('[data-perspective-autodetect]')!;
+    expect(autoBtn).not.toBeNull();
+
+    await act(async () => {
+      autoBtn.click();
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        const s = useAppStore.getState();
+        if (!s.isAutoDetectingPerspective && s.perspectiveDrafts['auto-p1']) break;
+        await new Promise((r) => setTimeout(r, 15));
+      }
+    });
+
+    const detected = useAppStore.getState().perspectiveDrafts['auto-p1'];
+    expect(detected).toBeDefined();
+    expect(detected.quad.tl.x).toBeGreaterThan(0.12);
+    expect(detected.quad.tl.x).toBeLessThan(0.28);
+    expect(detected.quad.br.x).toBeGreaterThan(0.72);
+    expect(detected.quad.br.x).toBeLessThan(0.88);
+
+    // Corner handles remain editable after auto-detection
+    const startTlX = detected.quad.tl.x;
+    const tlHandle = container.querySelector('[data-perspective-corner="tl"]')!;
+    pointer(tlHandle, 'pointerdown', 39, 29);
+    pointer(tlHandle, 'pointermove', 59, 29);
+    pointer(tlHandle, 'pointerup', 59, 29);
+    expect(useAppStore.getState().perspectiveDrafts['auto-p1'].quad.tl.x).toBeGreaterThan(startTlX + 0.05);
+  });
 });

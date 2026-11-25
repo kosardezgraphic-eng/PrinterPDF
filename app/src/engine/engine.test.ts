@@ -19,6 +19,8 @@ import {
 import {
   applyEffectsToRgbaBuffer,
   buildCssFilterForPage,
+  buildSvgEffectFilterSpec,
+  needsExactSvgEffectFilter,
 } from './effectsPipeline';
 import {
   formatPageNumberLabel,
@@ -189,6 +191,26 @@ describe('PrintStudio Pro — Core Engines Unit & Integration Tests', () => {
     expect(invertedPixel[1]).toBe(0);
     expect(invertedPixel[2]).toBe(0);
     expect(invertedPixel[3]).toBe(255);
+
+    expect(needsExactSvgEffectFilter(page, { ...effects, brightness: 0, contrast: 0 })).toBe(false);
+    expect(needsExactSvgEffectFilter(page, effects)).toBe(true);
+
+    const toneOnly = { ...effects, invert: false, grayscale: false, contrast: 35, brightness: -15, gamma: 1.4 };
+    const spec = buildSvgEffectFilterSpec(page, toneOnly);
+    const table = spec.toneTableValues!.split(' ').map(Number);
+    expect(table).toHaveLength(256);
+    for (const sample of [0, 40, 128, 210, 255]) {
+      const expected = applyEffectsToRgbaBuffer(new Uint8ClampedArray([sample, sample, sample, 255]), toneOnly)[0];
+      expect(Math.round(table[sample] * 255)).toBe(expected);
+    }
+
+    const bwSpec = buildSvgEffectFilterSpec(page, { ...effects, blackAndWhite: true, threshold: 130, blackText: true });
+    expect(bwSpec.grayscale).toBe(true);
+    expect(bwSpec.blackTextTableValues!.split(' ')[74]).toBe('0');
+    expect(bwSpec.blackTextTableValues!.split(' ')[75]).toBe('1');
+    expect(bwSpec.thresholdTableValues!.split(' ')[129]).toBe('0');
+    expect(bwSpec.thresholdTableValues!.split(' ')[130]).toBe('1');
+    expect(bwSpec.invert).toBe(true);
   });
 
   it('F1-F2 & Shamsi Calendar: resolves macros, Shamsi dates, Persian digits, and Bates numbers', () => {

@@ -16,6 +16,8 @@ export interface PngInfo {
   interlaced: boolean;
   hasTrns: boolean;
   animated: boolean;
+  /** True when the PNG carries an ICC profile, chromaticities, or non-sRGB gamma chunk. */
+  hasColorProfile: boolean;
   /** True when the chunk walk ran out of bytes before the first IDAT, so tRNS/acTL may be unseen. */
   truncated: boolean;
 }
@@ -34,6 +36,8 @@ export interface JpegInfo {
    */
   adobeTransform: number | null;
   progressive: boolean;
+  /** True when an APP2 ICC_PROFILE segment is embedded in the JPEG stream. */
+  hasColorProfile: boolean;
   /** 1..8 from EXIF, or 1 when there is no orientation tag. */
   orientation: number;
 }
@@ -44,6 +48,7 @@ export type PictureFormat =
   | { kind: 'unknown'; reason: string };
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+const ICC_PROFILE_HEADER = [0x49, 0x43, 0x43, 0x5f, 0x50, 0x52, 0x4f, 0x46, 0x49, 0x4c, 0x45, 0x00]; // "ICC_PROFILE\0"
 /** Colour types pdf-lib decodes through UPNG; anything else has to go through the Canvas. */
 const PNG_EMBEDDABLE_TYPES = new Set([0, 2, 3, 4, 6]);
 const PNG_ALPHA_TYPES = new Set([4, 6]);
@@ -75,9 +80,13 @@ export function inspectPng(bytes: Uint8Array): PngInfo | null {
   const info: PngInfo = {
     width: view.getUint32(16), height: view.getUint32(20),
     bitDepth: bytes[24], colorType: bytes[25],
-    interlaced: bytes[28] === 1, hasTrns: false, animated: false, truncated: true,
+    interlaced: bytes[28] === 1, hasTrns: false, animated: false, hasColorProfile: false, truncated: true,
   };
-  // Walk the chunk list up to the first IDAT: tRNS/acTL always precede the pixel data.
+  let sawIccp = false;
+  let sawSrgb = false;
+  let sawChrm = false;
+  let sawNonSrgbGama = false;
+  // Walk the chunk list up to the first IDAT: tRNS/acTL/iCCP always precede the pixel data.
   let offset = 8;
   while (offset + 12 <= bytes.length) {
     const length = view.getUint32(offset);
@@ -85,9 +94,17 @@ export function inspectPng(bytes: Uint8Array): PngInfo | null {
     const type = String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]);
     if (type === 'tRNS') info.hasTrns = true;
     if (type === 'acTL') info.animated = true;
+    if (type === 'iCCP') sawIccp = true;
+    if (type === 'sRGB') sawSrgb = true;
+    if (type === 'cHRM') sawChrm = true;
+    if (type === 'gAMA' && length >= 4) {
+      const gamma = view.getUint32(offset + 8);
+      if (Math.abs(gamma - 45455) > 1500) sawNonSrgbGama = true;
+    }
     if (type === 'IDAT' || type === 'IEND') { info.truncated = false; break; }
     offset += 12 + length;
   }
+  info.hasColorProfile = sawIccp || ((sawChrm || sawNonSrgbGama) && !sawSrgb);
   return info;
 }
 
@@ -127,7 +144,7 @@ export function inspectJpeg(bytes: Uint8Array): JpegInfo | null {
   if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const end = bytes.byteLength;
-  const info: JpegInfo = { width: 0, height: 0, components: 0, adobe: false, adobeTransform: null, progressive: false, orientation: 1 };
+  const info: JpegInfo = { width: 0, height: 0, components: 0, adobe: false, adobeTransform: null, progressive: false, hasColorProfile: false, orientation: 1 };
   let offset = 2;
   while (offset + 4 <= end) {
     while (offset < end && bytes[offset] !== 0xff) offset++;
@@ -145,6 +162,15 @@ export function inspectJpeg(bytes: Uint8Array): JpegInfo | null {
         info.width = view.getUint16(start + 3);
         info.components = bytes[start + 5];
         info.progressive = marker === 0xc2;
+      }
+    } else if (marker === 0xe2) {                                                    // APP2 (ICC_PROFILE\0)
+      const segLen = length - 2;
+      if (segLen >= ICC_PROFILE_HEADER.length) {
+        let isIcc = true;
+        for (let i = 0; i < ICC_PROFILE_HEADER.length; i++) {
+          if (bytes[start + i] !== ICC_PROFILE_HEADER[i]) { isIcc = false; break; }
+        }
+        if (isIcc) info.hasColorProfile = true;
       }
     } else if (marker === 0xee) {                                                    // APP14
       const payload = bytes.subarray(start, Math.min(end, start + length - 2));
@@ -179,6 +205,8 @@ export interface PicturePlan {
   /** The stored bytes carry real transparency, so the PDF needs its soft mask. */
   alpha: boolean;
   cmyk: boolean;
+  /** True when the image carries a non-sRGB ICC/chromaticity/gamma profile that browsers convert to sRGB. */
+  hasColorProfile: boolean;
   /**
    * pdf-lib always complements CMYK samples. That is right for Adobe's inverted CMYK
    * (APP14 transform 2) and wrong for plain CMYK, whose Decode has to be set to identity.
@@ -196,7 +224,7 @@ export interface PicturePlan {
  * but PDF viewers do not (EXIF rotation, animation, exotic colour types) forces the raster route.
  */
 export function planPictureEmbedding(src: string): PicturePlan {
-  const plan: PicturePlan = { route: 'raster', alpha: false, cmyk: false, patchDecode: false, width: 0, height: 0, notes: [] };
+  const plan: PicturePlan = { route: 'raster', alpha: false, cmyk: false, hasColorProfile: false, patchDecode: false, width: 0, height: 0, notes: [] };
   const format = pictureFormat(src);
 
   if (format.kind === 'png') {
@@ -204,6 +232,7 @@ export function planPictureEmbedding(src: string): PicturePlan {
     plan.width = png.width;
     plan.height = png.height;
     plan.alpha = PNG_ALPHA_TYPES.has(png.colorType) || png.hasTrns;
+    plan.hasColorProfile = png.hasColorProfile;
     if (png.animated) { plan.notes.push('the animation is flattened to its first frame'); return plan; }
     if (!PNG_EMBEDDABLE_TYPES.has(png.colorType)) { plan.notes.push(`PNG colour type ${png.colorType} cannot be stored in a PDF`); return plan; }
     if (png.bitDepth !== 8 && png.bitDepth !== 1 && png.bitDepth !== 4) plan.notes.push(`${png.bitDepth}-bit samples are reduced to 8 bits`);
@@ -216,6 +245,7 @@ export function planPictureEmbedding(src: string): PicturePlan {
     plan.width = jpeg.width;
     plan.height = jpeg.height;
     plan.cmyk = jpeg.components === 4;
+    plan.hasColorProfile = jpeg.hasColorProfile;
     if (jpeg.components > 0 && jpeg.components !== 1 && jpeg.components !== 3 && !plan.cmyk) {
       plan.notes.push(`a JPEG with ${jpeg.components} components cannot be stored in a PDF`);
       return plan;

@@ -1007,7 +1007,11 @@ export const TicketNumberingWorkspace: React.FC = () => {
                       value={selectedSlot.xPercent}
                       onChange={(e) =>
                         updateSlot(selectedSlot.id, {
-                          xPercent: clamp(Number(e.target.value), 0, 95),
+                          xPercent: clamp(
+                            Number(e.target.value),
+                            0,
+                            Math.max(0, 100 - selectedSlot.widthPercent)
+                          ),
                         })
                       }
                       className={inputClass}
@@ -1021,7 +1025,11 @@ export const TicketNumberingWorkspace: React.FC = () => {
                       value={selectedSlot.yPercent}
                       onChange={(e) =>
                         updateSlot(selectedSlot.id, {
-                          yPercent: clamp(Number(e.target.value), 0, 95),
+                          yPercent: clamp(
+                            Number(e.target.value),
+                            0,
+                            Math.max(0, 100 - selectedSlot.heightPercent)
+                          ),
                         })
                       }
                       className={inputClass}
@@ -1033,11 +1041,13 @@ export const TicketNumberingWorkspace: React.FC = () => {
                       type="number"
                       step={0.5}
                       value={selectedSlot.widthPercent}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        const nextW = clamp(Number(e.target.value), 4, 100);
                         updateSlot(selectedSlot.id, {
-                          widthPercent: clamp(Number(e.target.value), 4, 100),
-                        })
-                      }
+                          widthPercent: nextW,
+                          xPercent: clamp(selectedSlot.xPercent, 0, Math.max(0, 100 - nextW)),
+                        });
+                      }}
                       className={inputClass}
                     />
                   </label>
@@ -1047,11 +1057,13 @@ export const TicketNumberingWorkspace: React.FC = () => {
                       type="number"
                       step={0.5}
                       value={selectedSlot.heightPercent}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        const nextH = clamp(Number(e.target.value), 4, 100);
                         updateSlot(selectedSlot.id, {
-                          heightPercent: clamp(Number(e.target.value), 4, 100),
-                        })
-                      }
+                          heightPercent: nextH,
+                          yPercent: clamp(selectedSlot.yPercent, 0, Math.max(0, 100 - nextH)),
+                        });
+                      }}
                       className={inputClass}
                     />
                   </label>
@@ -1116,7 +1128,7 @@ export const TicketNumberingWorkspace: React.FC = () => {
                     >
                       B
                     </button>
-                    {(['right', 'center', 'left'] as const).map((al) => (
+                    {(['right', 'center', 'left', 'justify'] as const).map((al) => (
                       <button
                         key={al}
                         type="button"
@@ -1127,7 +1139,7 @@ export const TicketNumberingWorkspace: React.FC = () => {
                             : 'border border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
                         }`}
                       >
-                        {isFa ? { right: 'راست', center: 'وسط', left: 'چپ' }[al] : al[0].toUpperCase()}
+                        {isFa ? { right: 'راست', center: 'وسط', left: 'چپ', justify: 'جاستیفای' }[al] : al[0].toUpperCase()}
                       </button>
                     ))}
                   </div>
@@ -1768,7 +1780,7 @@ export const TicketNumberingWorkspace: React.FC = () => {
                                   textAlign: slot.align,
                                   cursor: drawTool === 'select' ? 'move' : 'crosshair',
                                 }}
-                                className={`absolute z-30 flex items-center justify-center rounded px-1 leading-none transition-shadow ${
+                                className={`absolute z-30 flex items-center justify-center rounded px-0.5 leading-[1.2] overflow-visible transition-shadow ${
                                   isSelected
                                     ? 'border border-sky-600 ring-2 ring-sky-400/40'
                                     : 'border border-dashed border-sky-500/60 hover:border-sky-600'
@@ -1776,8 +1788,12 @@ export const TicketNumberingWorkspace: React.FC = () => {
                               >
                                 <span
                                   dir="auto"
-                                  className="pointer-events-none w-full truncate"
-                                  style={{ textAlign: slot.align }}
+                                  className="pointer-events-none w-full break-words"
+                                  style={{
+                                    textAlign: slot.align,
+                                    whiteSpace: 'pre-wrap',
+                                    overflowWrap: 'anywhere',
+                                  }}
                                 >
                                   {labelText}
                                 </span>

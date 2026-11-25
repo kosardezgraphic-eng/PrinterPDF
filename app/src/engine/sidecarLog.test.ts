@@ -152,5 +152,19 @@ describe('sidecar Win32 DEVMODE & PrintTicket driver sync contract', () => {
     expect(service).not.toContain('ResolutionX');
     expect(service).not.toContain('ResolutionY');
   });
+
+  it('serializes C# spooler RPC calls on STA threads and guards Electron against mid-job native crashes', () => {
+    const client = read('../../../electron/printerSidecarClient.ts');
+    const mainTs = read('../../../electron/main.ts');
+    expect(program).toContain('RpcSerialGate');
+    expect(program).toContain('ApartmentState.STA');
+    expect(program).toContain('Dispatcher.FromThread');
+    expect(client).toContain('RPC_PRINT_TIMEOUT_MS');
+    expect(client).toContain("client.once('close'");
+    expect(client).toContain('restartIfStopped');
+    expect(mainTs).toContain('sidecar.restartIfStopped()');
+    expect(mainTs).toContain('printToWindowsPrinterViaPowerShell(payload.request, tempImagePaths)');
+  });
 });
+
 

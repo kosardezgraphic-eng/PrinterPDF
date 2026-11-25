@@ -751,3 +751,522 @@ export async function rectifyPagePerspective(params: {
     heightMm: dims.heightMm,
   };
 }
+
+export interface AutoDetectQuadResult {
+  found: boolean;
+  quad: PerspectiveQuad;
+  confidence: number;
+}
+
+function clamp01(v: number): number {
+  if (!Number.isFinite(v)) return 0;
+  return Math.max(0, Math.min(1, v));
+}
+
+function quadAreaNormalized(pts: NormalizedPoint[]): number {
+  let sum = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    sum += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(sum) * 0.5;
+}
+
+function convexHullPoints(points: NormalizedPoint[]): NormalizedPoint[] {
+  if (points.length <= 3) return points.slice();
+  const sorted = points
+    .slice()
+    .sort((a, b) => (a.x !== b.x ? a.x - b.x : a.y - b.y));
+  const cross = (o: NormalizedPoint, a: NormalizedPoint, b: NormalizedPoint) =>
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower: NormalizedPoint[] = [];
+  for (const p of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+      lower.pop();
+    }
+    lower.push(p);
+  }
+  const upper: NormalizedPoint[] = [];
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const p = sorted[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+      upper.pop();
+    }
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+}
+
+function reduceHullToQuad(hull: NormalizedPoint[]): NormalizedPoint[] | null {
+  if (hull.length < 4) return null;
+  const pts = hull.slice();
+  while (pts.length > 4) {
+    let minArea = Infinity;
+    let removeIdx = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const prev = pts[(i - 1 + pts.length) % pts.length];
+      const curr = pts[i];
+      const next = pts[(i + 1) % pts.length];
+      const area = Math.abs((prev.x - curr.x) * (next.y - curr.y) - (prev.y - curr.y) * (next.x - curr.x)) * 0.5;
+      if (area < minArea) {
+        minArea = area;
+        removeIdx = i;
+      }
+    }
+    pts.splice(removeIdx, 1);
+  }
+  return pts;
+}
+
+function fitLineThroughSegment(
+  pts: NormalizedPoint[],
+  a: NormalizedPoint,
+  b: NormalizedPoint,
+  maxDist: number
+): { nx: number; ny: number; c: number } | null {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-4) return null;
+  const enx = -dy / len;
+  const eny = dx / len;
+  const near: NormalizedPoint[] = [];
+  for (const p of pts) {
+    const t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / (len * len);
+    if (t < -0.04 || t > 1.04) continue;
+    const dist = Math.abs((p.x - a.x) * enx + (p.y - a.y) * eny);
+    if (dist <= maxDist) near.push(p);
+  }
+  if (near.length < 6) {
+    return { nx: enx, ny: eny, c: enx * a.x + eny * a.y };
+  }
+  let mx = 0;
+  let my = 0;
+  for (const p of near) {
+    mx += p.x;
+    my += p.y;
+  }
+  mx /= near.length;
+  my /= near.length;
+  let sxx = 0;
+  let syy = 0;
+  let sxy = 0;
+  for (const p of near) {
+    const ux = p.x - mx;
+    const uy = p.y - my;
+    sxx += ux * ux;
+    syy += uy * uy;
+    sxy += ux * uy;
+  }
+  // Smallest eigenvector of covariance matrix gives fitted line normal
+  const trace = sxx + syy;
+  const detTerm = Math.sqrt(Math.max(0, (sxx - syy) * (sxx - syy) + 4 * sxy * sxy));
+  const lambdaMin = 0.5 * (trace - detTerm);
+  let nx = sxy;
+  let ny = lambdaMin - sxx;
+  if (Math.hypot(nx, ny) < 1e-9) {
+    nx = lambdaMin - syy;
+    ny = sxy;
+  }
+  const nLen = Math.hypot(nx, ny);
+  if (nLen < 1e-9) return { nx: enx, ny: eny, c: enx * a.x + eny * a.y };
+  nx /= nLen;
+  ny /= nLen;
+  return { nx, ny, c: nx * mx + ny * my };
+}
+
+function intersectLines(
+  l1: { nx: number; ny: number; c: number },
+  l2: { nx: number; ny: number; c: number }
+): NormalizedPoint | null {
+  const det = l1.nx * l2.ny - l1.ny * l2.nx;
+  if (Math.abs(det) < 1e-5) return null;
+  return {
+    x: (l1.c * l2.ny - l1.ny * l2.c) / det,
+    y: (l1.nx * l2.c - l1.c * l2.nx) / det,
+  };
+}
+
+export function orderCornersClockwise(pts: NormalizedPoint[]): PerspectiveQuad {
+  const cx = (pts[0].x + pts[1].x + pts[2].x + pts[3].x) / 4;
+  const cy = (pts[0].y + pts[1].y + pts[2].y + pts[3].y) / 4;
+  // Screen y grows downward: increasing atan2(y - cy, x - cx) orders clockwise
+  const sorted = pts
+    .slice()
+    .sort((a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx));
+  let tlIdx = 0;
+  let bestScore = Infinity;
+  for (let i = 0; i < 4; i++) {
+    const score = sorted[i].x + sorted[i].y;
+    if (score < bestScore) {
+      bestScore = score;
+      tlIdx = i;
+    }
+  }
+  return {
+    tl: { x: clamp01(sorted[tlIdx].x), y: clamp01(sorted[tlIdx].y) },
+    tr: { x: clamp01(sorted[(tlIdx + 1) % 4].x), y: clamp01(sorted[(tlIdx + 1) % 4].y) },
+    br: { x: clamp01(sorted[(tlIdx + 2) % 4].x), y: clamp01(sorted[(tlIdx + 2) % 4].y) },
+    bl: { x: clamp01(sorted[(tlIdx + 3) % 4].x), y: clamp01(sorted[(tlIdx + 3) % 4].y) },
+  };
+}
+
+/**
+ * Fast, 100% offline 4-corner sheet/document detector on RGBA pixels.
+ * Combines border-contrast sheet segmentation (with exterior flood-fill so printed dark text
+ * inside a sheet never creates interior holes) and Sobel edge boundary fitting.
+ * Returns normalized corners in source image [0..1] space.
+ */
+export function detectDocumentQuadOffline(params: {
+  rgba: Uint8ClampedArray;
+  width: number;
+  height: number;
+}): AutoDetectQuadResult {
+  const { rgba, width, height } = params;
+  if (width < 16 || height < 16 || rgba.length < width * height * 4) {
+    return { found: false, quad: clonePerspectiveQuad(DEFAULT_PERSPECTIVE_QUAD), confidence: 0 };
+  }
+
+  const maxSide = 220;
+  const scale = Math.min(1, maxSide / Math.max(width, height));
+  const w = Math.max(24, Math.round(width * scale));
+  const h = Math.max(24, Math.round(height * scale));
+  const n = w * h;
+
+  const rBuf = new Float32Array(n);
+  const gBuf = new Float32Array(n);
+  const bBuf = new Float32Array(n);
+  const lum = new Float32Array(n);
+
+  for (let y = 0; y < h; y++) {
+    const sy = Math.min(height - 1, Math.floor(((y + 0.5) * height) / h));
+    for (let x = 0; x < w; x++) {
+      const sx = Math.min(width - 1, Math.floor(((x + 0.5) * width) / w));
+      const si = (sy * width + sx) * 4;
+      const di = y * w + x;
+      const r = rgba[si];
+      const g = rgba[si + 1];
+      const b = rgba[si + 2];
+      rBuf[di] = r;
+      gBuf[di] = g;
+      bBuf[di] = b;
+      lum[di] = 0.299 * r + 0.587 * g + 0.114 * b;
+    }
+  }
+
+  // 3x3 Gaussian blur on luminance
+  const smooth = new Float32Array(n);
+  for (let y = 0; y < h; y++) {
+    const ym = Math.max(0, y - 1);
+    const yp = Math.min(h - 1, y + 1);
+    for (let x = 0; x < w; x++) {
+      const xm = Math.max(0, x - 1);
+      const xp = Math.min(w - 1, x + 1);
+      smooth[y * w + x] =
+        (lum[ym * w + xm] + 2 * lum[ym * w + x] + lum[ym * w + xp] +
+          2 * lum[y * w + xm] + 4 * lum[y * w + x] + 2 * lum[y * w + xp] +
+          lum[yp * w + xm] + 2 * lum[yp * w + x] + lum[yp * w + xp]) /
+        16;
+    }
+  }
+
+  // Estimate outer border background color & luminance
+  const borderPadX = Math.max(2, Math.floor(w * 0.04));
+  const borderPadY = Math.max(2, Math.floor(h * 0.04));
+  let bgR = 0, bgG = 0, bgB = 0, bgL = 0, bgCount = 0;
+  const bgLums: number[] = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (x < borderPadX || x >= w - borderPadX || y < borderPadY || y >= h - borderPadY) {
+        const i = y * w + x;
+        bgR += rBuf[i];
+        bgG += gBuf[i];
+        bgB += bBuf[i];
+        bgL += smooth[i];
+        bgLums.push(smooth[i]);
+        bgCount++;
+      }
+    }
+  }
+  if (bgCount > 0) {
+    bgR /= bgCount;
+    bgG /= bgCount;
+    bgB /= bgCount;
+    bgL /= bgCount;
+  }
+  let bgVar = 0;
+  for (const v of bgLums) bgVar += (v - bgL) * (v - bgL);
+  const bgStd = Math.sqrt(bgVar / Math.max(1, bgLums.length));
+
+  // Color + luminance distance from border background
+  const diff = new Float32Array(n);
+  const hist = new Int32Array(256);
+  let maxInteriorDiff = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const dLum = Math.abs(smooth[i] - bgL);
+      const dCol = (Math.abs(rBuf[i] - bgR) + Math.abs(gBuf[i] - bgG) + Math.abs(bBuf[i] - bgB)) / 3;
+      const d = Math.min(255, dLum * 0.7 + dCol * 0.55);
+      diff[i] = d;
+      hist[Math.min(255, Math.round(d))]++;
+      if (x >= borderPadX && x < w - borderPadX && y >= borderPadY && y < h - borderPadY) {
+        if (d > maxInteriorDiff) maxInteriorDiff = d;
+      }
+    }
+  }
+
+  // Otsu threshold on diff
+  let totalSum = 0;
+  for (let t = 0; t < 256; t++) totalSum += t * hist[t];
+  let sumB = 0;
+  let wB = 0;
+  let maxBetween = -1;
+  let otsuThresh = 24;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t];
+    if (wB === 0) continue;
+    const wF = n - wB;
+    if (wF === 0) break;
+    sumB += t * hist[t];
+    const mB = sumB / wB;
+    const mF = (totalSum - sumB) / wF;
+    const between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > maxBetween) {
+      maxBetween = between;
+      otsuThresh = t;
+    }
+  }
+  const segThresh = Math.max(18, Math.min(140, Math.max(otsuThresh * 0.85, bgStd * 2.2)));
+
+  let boundaryPts: NormalizedPoint[] = [];
+  let confidence = 0;
+
+  if (maxInteriorDiff >= 18) {
+    const fg = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      fg[i] = diff[i] >= segThresh ? 1 : 0;
+    }
+    // 1 pass morphological smooth to close narrow hairline gaps on border
+    const closed = new Uint8Array(n);
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const i = y * w + x;
+        const sum =
+          fg[i - w - 1] + fg[i - w] + fg[i - w + 1] +
+          fg[i - 1] + fg[i] + fg[i + 1] +
+          fg[i + w - 1] + fg[i + w] + fg[i + w + 1];
+        closed[i] = sum >= 4 ? 1 : 0;
+      }
+    }
+
+    // Flood-fill background from the outer image border so interior dark text holes inside the sheet become solid
+    const outside = new Uint8Array(n);
+    const queue = new Int32Array(n);
+    let qHead = 0;
+    let qTail = 0;
+    const pushIfBg = (idx: number) => {
+      if (!outside[idx] && closed[idx] === 0) {
+        outside[idx] = 1;
+        queue[qTail++] = idx;
+      }
+    };
+    for (let x = 0; x < w; x++) {
+      pushIfBg(x);
+      pushIfBg((h - 1) * w + x);
+    }
+    for (let y = 1; y < h - 1; y++) {
+      pushIfBg(y * w);
+      pushIfBg(y * w + (w - 1));
+    }
+    while (qHead < qTail) {
+      const idx = queue[qHead++];
+      const x = idx % w;
+      const y = (idx - x) / w;
+      if (x > 0) pushIfBg(idx - 1);
+      if (x + 1 < w) pushIfBg(idx + 1);
+      if (y > 0) pushIfBg(idx - w);
+      if (y + 1 < h) pushIfBg(idx + w);
+    }
+
+    // Keep largest connected solid interior component
+    const solid = new Uint8Array(n);
+    let fgPixels = 0;
+    for (let i = 0; i < n; i++) {
+      if (!outside[i]) {
+        solid[i] = 1;
+        fgPixels++;
+      }
+    }
+
+    const areaFrac = fgPixels / n;
+    if (areaFrac >= 0.08 && areaFrac <= 0.96) {
+      const visited = new Uint8Array(n);
+      let bestComp: number[] = [];
+      for (let i = 0; i < n; i++) {
+        if (!solid[i] || visited[i]) continue;
+        const comp: number[] = [];
+        let head = 0;
+        visited[i] = 1;
+        comp.push(i);
+        while (head < comp.length) {
+          const idx = comp[head++];
+          const x = idx % w;
+          const y = (idx - x) / w;
+          if (x > 0 && solid[idx - 1] && !visited[idx - 1]) { visited[idx - 1] = 1; comp.push(idx - 1); }
+          if (x + 1 < w && solid[idx + 1] && !visited[idx + 1]) { visited[idx + 1] = 1; comp.push(idx + 1); }
+          if (y > 0 && solid[idx - w] && !visited[idx - w]) { visited[idx - w] = 1; comp.push(idx - w); }
+          if (y + 1 < h && solid[idx + w] && !visited[idx + w]) { visited[idx + w] = 1; comp.push(idx + w); }
+        }
+        if (comp.length > bestComp.length) bestComp = comp;
+      }
+
+      if (bestComp.length >= n * 0.08) {
+        const compMask = new Uint8Array(n);
+        for (const idx of bestComp) compMask[idx] = 1;
+        for (const idx of bestComp) {
+          const x = idx % w;
+          const y = (idx - x) / w;
+          const isEdge =
+            x === 0 || x === w - 1 || y === 0 || y === h - 1 ||
+            !compMask[idx - 1] || !compMask[idx + 1] || !compMask[idx - w] || !compMask[idx + w];
+          if (isEdge) {
+            boundaryPts.push({ x: (x + 0.5) / w, y: (y + 0.5) / h });
+          }
+        }
+        confidence = Math.min(1, maxInteriorDiff / 70);
+      }
+    }
+  }
+
+  // Secondary edge-driven fallback if background contrast segmentation did not isolate a clear sheet
+  if (boundaryPts.length < 24) {
+    const grad = new Float32Array(n);
+    let maxGrad = 0;
+    for (let y = 2; y < h - 2; y++) {
+      for (let x = 2; x < w - 2; x++) {
+        const i = y * w + x;
+        const gx =
+          -smooth[i - w - 1] + smooth[i - w + 1] -
+          2 * smooth[i - 1] + 2 * smooth[i + 1] -
+          smooth[i + w - 1] + smooth[i + w + 1];
+        const gy =
+          -smooth[i - w - 1] - 2 * smooth[i - w] - smooth[i - w + 1] +
+          smooth[i + w - 1] + 2 * smooth[i + w] + smooth[i + w + 1];
+        const g = Math.hypot(gx, gy) / 4;
+        grad[i] = g;
+        if (g > maxGrad) maxGrad = g;
+      }
+    }
+    if (maxGrad >= 18) {
+      const thresh = Math.max(16, maxGrad * 0.35);
+      const edgePts: NormalizedPoint[] = [];
+      for (let y = 2; y < h - 2; y++) {
+        for (let x = 2; x < w - 2; x++) {
+          if (grad[y * w + x] >= thresh) {
+            edgePts.push({ x: (x + 0.5) / w, y: (y + 0.5) / h });
+          }
+        }
+      }
+      if (edgePts.length >= 24 && edgePts.length <= n * 0.45) {
+        boundaryPts = edgePts;
+        confidence = Math.min(0.85, maxGrad / 80);
+      }
+    }
+  }
+
+  if (boundaryPts.length < 16) {
+    return { found: false, quad: clonePerspectiveQuad(DEFAULT_PERSPECTIVE_QUAD), confidence: 0 };
+  }
+
+  const hull = convexHullPoints(boundaryPts);
+  const roughQuadPts = reduceHullToQuad(hull);
+  if (!roughQuadPts) {
+    return { found: false, quad: clonePerspectiveQuad(DEFAULT_PERSPECTIVE_QUAD), confidence: 0 };
+  }
+
+  let candidatePts = roughQuadPts;
+  // Refine edges via orthogonal line fitting to outer boundary points
+  const fittedLines = roughQuadPts.map((pt, i) =>
+    fitLineThroughSegment(boundaryPts, pt, roughQuadPts[(i + 1) % 4], 0.03)
+  );
+  if (fittedLines.every((l) => l !== null)) {
+    const intersections: NormalizedPoint[] = [];
+    for (let i = 0; i < 4; i++) {
+      const prevLine = fittedLines[(i + 3) % 4]!;
+      const currLine = fittedLines[i]!;
+      const hit = intersectLines(prevLine, currLine);
+      if (hit && hit.x >= -0.05 && hit.x <= 1.05 && hit.y >= -0.05 && hit.y <= 1.05) {
+        intersections.push({ x: clamp01(hit.x), y: clamp01(hit.y) });
+      }
+    }
+    if (intersections.length === 4) {
+      const refinedArea = quadAreaNormalized(intersections);
+      if (refinedArea >= 0.08) {
+        candidatePts = intersections;
+      }
+    }
+  }
+
+  const ordered = orderCornersClockwise(candidatePts);
+  const area = quadAreaNormalized([ordered.tl, ordered.tr, ordered.br, ordered.bl]);
+  if (!isConvexQuad(ordered, 0.08) || area > 0.975) {
+    return { found: false, quad: clonePerspectiveQuad(DEFAULT_PERSPECTIVE_QUAD), confidence: 0 };
+  }
+
+  // Verify the detected quad meaningfully differs from full frame
+  const cornerMovement = Math.max(
+    Math.hypot(ordered.tl.x - 0, ordered.tl.y - 0),
+    Math.hypot(ordered.tr.x - 1, ordered.tr.y - 0),
+    Math.hypot(ordered.br.x - 1, ordered.br.y - 1),
+    Math.hypot(ordered.bl.x - 0, ordered.bl.y - 1)
+  );
+  if (cornerMovement < 0.025) {
+    return { found: false, quad: clonePerspectiveQuad(DEFAULT_PERSPECTIVE_QUAD), confidence: 0 };
+  }
+
+  return {
+    found: true,
+    quad: ordered,
+    confidence: Math.max(0.25, Math.min(1, confidence)),
+  };
+}
+
+/**
+ * Runs offline 4-corner detection for a Studio PageItem and transforms the detected corners
+ * into display-rotated quad space ready for interactive editing in PageCanvasCell.
+ */
+export async function autoDetectPagePerspectiveQuad(params: {
+  page: PageItem;
+  sourceDoc: SourceDocument | undefined;
+  effectiveRotation: PageRotation;
+}): Promise<AutoDetectQuadResult> {
+  const { page, sourceDoc, effectiveRotation } = params;
+  const decoded = await renderSourcePageToRgba(page, sourceDoc);
+  const detected = detectDocumentQuadOffline({
+    rgba: decoded.rgba,
+    width: decoded.width,
+    height: decoded.height,
+  });
+  if (!detected.found) {
+    return detected;
+  }
+  const rotatedPts = [
+    sourcePointToDisplay(detected.quad.tl, effectiveRotation),
+    sourcePointToDisplay(detected.quad.tr, effectiveRotation),
+    sourcePointToDisplay(detected.quad.br, effectiveRotation),
+    sourcePointToDisplay(detected.quad.bl, effectiveRotation),
+  ];
+  const orderedDisplay = orderCornersClockwise(rotatedPts);
+  if (!isConvexQuad(orderedDisplay, 0.06)) {
+    return { found: false, quad: clonePerspectiveQuad(DEFAULT_PERSPECTIVE_QUAD), confidence: 0 };
+  }
+  return {
+    found: true,
+    quad: orderedDisplay,
+    confidence: detected.confidence,
+  };
+}

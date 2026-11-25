@@ -1,7 +1,10 @@
+using System.Globalization;
 using System.IO;
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Windows.Threading;
 using PrintStudio.PrinterService.Models;
 using PrintStudio.PrinterService.Services;
 
@@ -21,6 +24,9 @@ public static class Program
 
     private static readonly PrinterSpoolerService Spooler = new();
     private static readonly object LogGate = new();
+    /// Serializes WinSpool / WPF System.Printing / prntvpt.dll driver calls so non-reentrant
+    /// printer drivers (e.g. HP PCL 6) are never invoked concurrently across pipe connections.
+    private static readonly SemaphoreSlim RpcSerialGate = new(1, 1);
 
     /// %APPDATA%\PrintStudioPro\printer-service.log
     /// The service is spawned without a console, so when it dies the app only sees an exit code.
@@ -49,7 +55,7 @@ public static class Program
     /// </summary>
     internal static void Log(string message)
     {
-        var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {message}";
+        var line = $"{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture)} {message}";
         try { Console.Error.WriteLine(line); } catch { /* no console attached */ }
         if (LogPath is null) return;
         try
@@ -172,6 +178,51 @@ public static class Program
         }
     }
 
+    private static async Task<object?> RunSerializedOnStaAsync(Func<object?> action, CancellationToken ct)
+    {
+        await RpcSerialGate.WaitAsync(ct);
+        try
+        {
+            object? result = null;
+            Exception? captured = null;
+            var staThread = new Thread(() =>
+            {
+                try
+                {
+                    result = action();
+                }
+                catch (Exception ex)
+                {
+                    captured = ex;
+                }
+                finally
+                {
+                    try
+                    {
+                        Dispatcher.FromThread(Thread.CurrentThread)?.InvokeShutdown();
+                    }
+                    catch
+                    {
+                        // Ignore dispatcher shutdown failures on thread teardown.
+                    }
+                }
+            });
+            staThread.SetApartmentState(ApartmentState.STA);
+            staThread.Start();
+            await Task.Run(() => staThread.Join(), ct);
+
+            if (captured != null)
+            {
+                throw captured;
+            }
+            return result;
+        }
+        finally
+        {
+            RpcSerialGate.Release();
+        }
+    }
+
     private static async Task HandleClientConnectionAsync(NamedPipeServerStream pipe, CancellationToken ct)
     {
         using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
@@ -197,7 +248,7 @@ public static class Program
                     continue;
                 }
 
-                object? result = req.Method switch
+                object? result = await RunSerializedOnStaAsync(() => req.Method switch
                 {
                     "printer:list" => Spooler.ListPrinters(),
                     "printer:reload-profile" => Spooler.ReloadPrinters(
@@ -225,7 +276,7 @@ public static class Program
                         req.Params.GetProperty("printerName").GetString()!
                     ),
                     _ => throw new InvalidOperationException($"Unknown RPC method: {req.Method}")
-                };
+                }, ct);
 
                 response = new JsonRpcResponse("2.0", req.Id, Result: result);
             }

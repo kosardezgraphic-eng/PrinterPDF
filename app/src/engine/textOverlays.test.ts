@@ -117,4 +117,25 @@ describe('editable numbering placements',()=>{
   expect(parseNumberingTemplate('A_{b^{c}}D')).toEqual([{text:'A'},{text:'bc',script:'sub'},{text:'D'}]);
   expect(textPlacements(allSheets[0],3,all,[{...numbering,template:'{page}^{x}',customScript:'page/0'}])[0].formulaError).toBeTruthy();
  });
+ it('wraps text inside independent box width and distributes word gaps when align is justify',()=>{
+  const calls:Array<{text:string;x:number;y:number}>=[];
+  const ctx={clearRect:vi.fn(),fillRect:vi.fn(),fillText:(t:string,x:number,y:number)=>calls.push({text:t,x,y}),measureText:(v:string)=>({width:v.length*10}),save:vi.fn(),restore:vi.fn(),translate:vi.fn(),scale:vi.fn(),letterSpacing:'0px',wordSpacing:'0px'};
+  // Box width 110px wraps 'alpha beta gamma delta' across multiple lines, justifying the wrapped first line
+  drawOverlayText(ctx as unknown as CanvasRenderingContext2D,{...text,text:'alpha beta gamma delta',fontSize:14,align:'justify',verticalAlign:'top'},110,120,1);
+  // Words on the first justified line should be drawn individually across the full 110px width
+  const firstY=calls[0]?.y;
+  const firstLineCalls=calls.filter(c=>c.y===firstY);
+  expect(firstLineCalls.length).toBeGreaterThanOrEqual(2);
+  expect(firstLineCalls[0].x).toBeCloseTo(0,1);
+  const lastWord=firstLineCalls[firstLineCalls.length-1];
+  expect(lastWord.x+lastWord.text.length*10).toBeCloseTo(110,1);
+ });
+ it('renders edge-placed numbering completely without edge clipping',()=>{
+  const canvas=createCanvas(160,60),ctx=canvas.getContext('2d');
+  const p=textPlacements(allSheets[0],3,all,[{...numbering,xPercent:0,yPercent:0,widthPercent:40,heightPercent:20,fontSize:30,align:'left',template:'1234'}])[0];
+  drawOverlayText(ctx as unknown as CanvasRenderingContext2D,p.renderText,160,60,1);
+  const data=ctx.getImageData(0,0,160,60).data;
+  let ink=0;for(let i=0;i<data.length;i+=4)if(data[i+3]>0&&data[i]<128)ink++;
+  expect(ink).toBeGreaterThan(30);
+ });
 });

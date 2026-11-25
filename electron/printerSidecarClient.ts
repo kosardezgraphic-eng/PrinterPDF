@@ -18,8 +18,10 @@ import type {
 const PIPE_PATH = '\\\\.\\pipe\\PrintStudioPrinterService';
 /** How many stderr chunks of the child process are remembered for diagnostics. */
 const STDERR_TAIL_LINES = 40;
-/** Total time a call may spend connecting and waiting for the reply. */
+/** Default timeout for metadata/spooler queries over the named pipe. */
 const RPC_TIMEOUT_MS = 8000;
+/** Print jobs render/spool high-DPI pages through Windows drivers and may take longer. */
+const RPC_PRINT_TIMEOUT_MS = 120000;
 /** Gap between named-pipe connect attempts while the service is still starting. */
 const CONNECT_RETRY_DELAY_MS = 150;
 
@@ -66,6 +68,9 @@ export class PrinterSidecarClient {
   private blocked: string | null = null;
   /** Set once the app asked the sidecar to stop, so a normal quit is not read as a crash. */
   private stopping = false;
+  /** Becomes true after the app successfully connects to the named pipe at least once. */
+  private hasConnected = false;
+  private lastResourcesPath: string | null = null;
   private readonly stderrTail: string[] = [];
 
   /** The places PrinterService.exe is looked for, kept in one place for the messages. */
@@ -86,9 +91,11 @@ export class PrinterSidecarClient {
   }
 
   public startSidecar(resourcesPath: string): void {
+    this.lastResourcesPath = resourcesPath;
     this.startupError = null;
     this.blocked = null;
     this.stopping = false;
+    this.hasConnected = false;
     this.stderrTail.length = 0;
 
     if (process.platform !== 'win32') {
@@ -130,8 +137,11 @@ export class PrinterSidecarClient {
         return;
       }
       const tail = this.stderrTail.join('').trim();
+      const phase = this.hasConnected
+        ? 'stopped unexpectedly while handling printer requests'
+        : 'stopped before the app connected';
       this.startupError =
-        `PrinterService.exe stopped before the app connected (exit code ${code ?? 'unknown'}${signal ? `, signal ${signal}` : ''}).` +
+        `PrinterService.exe ${phase} (exit code ${code ?? 'unknown'}${signal ? `, signal ${signal}` : ''}).` +
         (tail
           ? ` Last output:\n${tail}`
           : // A native crash (0xC000041D from a missing WPF DLL, for instance) dies before the
@@ -139,6 +149,14 @@ export class PrinterSidecarClient {
             ` Nothing was written to stderr; check ${serviceLogPath() ?? 'the sidecar log file'} for the crash record.`);
       this.child = null;
     });
+  }
+
+  public restartIfStopped(): boolean {
+    if (this.isRunning || this.stopping || this.blocked || !this.lastResourcesPath) {
+      return false;
+    }
+    this.startSidecar(this.lastResourcesPath);
+    return this.isRunning;
   }
 
   public stopSidecar(): void {
@@ -151,7 +169,7 @@ export class PrinterSidecarClient {
 
   /** True while the spawned process is alive, i.e. the app is not waiting for something to start. */
   public get isRunning(): boolean {
-    return this.child !== null && !this.child.killed;
+    return this.child !== null && !this.child.killed && this.child.exitCode === null;
   }
 
   /**
@@ -180,7 +198,7 @@ export class PrinterSidecarClient {
   }
 
   public async callRpc<TResult>(method: string, params: unknown = {}): Promise<TResult> {
-    // Answer with the reason instead of a four-second wait when the service cannot possibly reply.
+    // Answer with the reason instead of waiting when the service cannot possibly reply.
     if (this.blocked) throw new Error(this.blocked);
     if (this.startupError) throw new Error(this.startupError);
     if (!this.child || this.child.exitCode !== null) {
@@ -189,6 +207,7 @@ export class PrinterSidecarClient {
 
     const id = this.reqCounter++;
     const payload: JsonRpcRequest = { jsonrpc: '2.0', id, method, params };
+    const timeoutMs = method === 'printer:print-job' ? RPC_PRINT_TIMEOUT_MS : RPC_TIMEOUT_MS;
 
     // The renderer asks for printers as soon as it mounts, which is often before the .NET process
     // has created its pipe, so transient connect errors are retried. The deadline is absolute:
@@ -198,8 +217,11 @@ export class PrinterSidecarClient {
       let settled = false;
       let activeClient: net.Socket | null = null;
       let responseBuffer = '';
-      const deadline = Date.now() + RPC_TIMEOUT_MS;
-      const timer = setTimeout(() => finish(new Error(this.describeFailure(`Named pipe RPC timeout on method ${method} after ${attempt} attempt(s)`))), RPC_TIMEOUT_MS);
+      const deadline = Date.now() + timeoutMs;
+      const timer = setTimeout(
+        () => finish(new Error(this.describeFailure(`Named pipe RPC timeout on method ${method} after ${attempt} attempt(s)`))),
+        timeoutMs
+      );
 
       const finish = (error?: Error, value?: TResult) => {
         if (settled) return;
@@ -214,10 +236,14 @@ export class PrinterSidecarClient {
         if (settled) return;
         attempt += 1;
         responseBuffer = '';
+        let requestSent = false;
+        let receivedReply = false;
         const client = net.connect(PIPE_PATH);
         activeClient = client;
 
         client.once('connect', () => {
+          this.hasConnected = true;
+          requestSent = true;
           client.write(JSON.stringify(payload) + '\n', 'utf8');
         });
 
@@ -225,6 +251,7 @@ export class PrinterSidecarClient {
           responseBuffer += chunk.toString('utf8');
           const newlineIndex = responseBuffer.indexOf('\n');
           if (newlineIndex === -1) return;
+          receivedReply = true;
           const line = responseBuffer.slice(0, newlineIndex).trim();
           client.end();
           try {
@@ -236,10 +263,20 @@ export class PrinterSidecarClient {
           }
         });
 
+        client.once('close', () => {
+          if (settled || receivedReply || !requestSent) return;
+          // Give child 'exit' handler a brief tick to capture the native exit code and stderr before formatting.
+          setTimeout(() => {
+            if (!settled) {
+              finish(new Error(this.describeFailure(`Named pipe closed unexpectedly while waiting for ${method}`)));
+            }
+          }, 50);
+        });
+
         client.once('error', (error: NodeJS.ErrnoException) => {
           client.destroy();
           if (settled) return;
-          if (Date.now() + CONNECT_RETRY_DELAY_MS < deadline) {
+          if (!requestSent && !this.startupError && Date.now() + CONNECT_RETRY_DELAY_MS < deadline) {
             setTimeout(connect, CONNECT_RETRY_DELAY_MS);
             return;
           }

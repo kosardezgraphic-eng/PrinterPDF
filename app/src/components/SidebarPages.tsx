@@ -593,15 +593,24 @@ export const SidebarPages: React.FC = () => {
                 highlightPage(bm.targetPageId);
                 setSidebarTab('pages');
               }}
-              className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-start text-xs text-slate-800 hover:border-sky-400 hover:bg-sky-50/50 dark:border-slate-800 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:border-sky-500/40 dark:hover:bg-slate-800/60 cursor-pointer"
+              className="flex w-full items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-start text-xs text-slate-800 hover:border-sky-400 hover:bg-sky-50/50 dark:border-slate-800 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:border-sky-500/40 dark:hover:bg-slate-800/60 cursor-pointer"
             >
               <div className="flex items-center gap-2 truncate">
                 <Bookmark className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
                 <span className="truncate font-semibold">{bm.title}</span>
               </div>
-              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-400 tabular-nums">
-                #{formatLocalizedNumber(bm.pageIndex + 1, lang)}
-              </span>
+              <div className="flex items-center gap-1 shrink-0">
+                {(bm.itemCount ?? 0) > 1 && (
+                  <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800 dark:bg-sky-900/50 dark:text-sky-300 tabular-nums">
+                    {lang === 'fa'
+                      ? `${formatLocalizedNumber(bm.itemCount!, lang)} تصویر`
+                      : `${bm.itemCount} images`}
+                  </span>
+                )}
+                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-400 tabular-nums">
+                  #{formatLocalizedNumber(bm.pageIndex + 1, lang)}
+                </span>
+              </div>
             </button>
           ))}
         </div>

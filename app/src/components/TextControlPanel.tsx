@@ -10,6 +10,7 @@ import {
   type AlignDirection,
   type AlignReferenceMode,
 } from '../engine/alignEngine';
+import { boxWithinLimits, overlayPanelFrame } from '../engine/overlayGeometry';
 const input='w-full rounded border border-slate-300 bg-white p-1 text-xs text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white';
 
 export function TextControlPanel(){
@@ -42,6 +43,17 @@ export function TextControlPanel(){
    const moved=resolveStudioOverlayAlignPercent(sheet,selected,dir,effAlignRef,otherBoxes);
    if(moved)patch({xPercent:moved.xPercent,yPercent:moved.yPercent});
  };
+  const boxFrame=selected?overlayPanelFrame(sheet,selected):null;
+  const boxWidthMm=selected&&boxFrame?Math.round((selected.widthPercent/100)*boxFrame.boxWidthMm*10)/10:0;
+  const boxHeightMm=selected&&boxFrame?Math.round((selected.heightPercent/100)*boxFrame.boxHeightMm*10)/10:0;
+  const updateBoxSizeMm=(axis:'w'|'h',mmValue:number)=>{
+    if(!selected||!boxFrame||!Number.isFinite(mmValue))return;
+    const clampedMm=Math.max(5,mmValue);
+    const nextWidthPct=axis==='w'&&boxFrame.boxWidthMm>0?(clampedMm/boxFrame.boxWidthMm)*100:selected.widthPercent;
+    const nextHeightPct=axis==='h'&&boxFrame.boxHeightMm>0?(clampedMm/boxFrame.boxHeightMm)*100:selected.heightPercent;
+    const bounded=boxWithinLimits({...selected,widthPercent:Math.max(1,nextWidthPct),heightPercent:Math.max(1,nextHeightPct)},boxFrame.limits);
+    patch({xPercent:bounded.xPercent,yPercent:bounded.yPercent,widthPercent:bounded.widthPercent,heightPercent:bounded.heightPercent});
+  };
  const scopes:OverlayScope[]=['current','all','even','odd','first','last','selected','document','selected-documents'];
  const scopeLabels=fa?['صفحه / برگه جاری','همه','زوج','فرد','اول','آخر','صفحات تیک‌خورده','سند فعال','سندهای صفحات انتخاب‌شده']:['Current','All','Even','Odd','First','Last','Checked pages','Active document','Documents of highlighted pages'];
  return <aside data-text-control-panel onBlur={e=>{const target=e.relatedTarget instanceof Element?e.relatedTarget:null;if(!target?.closest('[data-text-control-panel],[data-inline-overlay-editor]'))useAppStore.getState().finishTextEdit();}} className="w-full bg-white p-3 text-xs text-slate-800 dark:bg-slate-900 dark:text-slate-200" aria-label={fa?'تنظیمات متن':'Text controls'}>
@@ -74,8 +86,12 @@ export function TextControlPanel(){
     <label className="block">{fa?'اندازه':'Size'} {selected.fontSize} pt<input aria-label={fa?'اندازه فونت':'Font size'} type="range" min="8" max="80" value={selected.fontSize} onChange={e=>patch({fontSize:+e.target.value})} className="w-full"/></label>
     <label className="block">{fa?'رنگ متن':'Text color'} <input aria-label={fa?'انتخاب رنگ متن':'Pick text color'} type="color" value={/^#[0-9a-f]{6}$/i.test(selected.color)?selected.color:'#000000'} onChange={e=>patch({color:e.target.value})}/><input aria-label={fa?'مقدار رنگ متن':'Text color value'} className={input} value={selected.color} onChange={e=>patch({color:e.target.value})} /></label>
     <label className="block">{fa?'رنگ پس‌زمینه (اختیاری)':'Background (optional)'} <input type="color" aria-label={fa?'انتخاب رنگ پس‌زمینه':'Pick background color'} value={/^#[0-9a-f]{6}$/i.test(selected.backgroundColor??'')?selected.backgroundColor:'#ffffff'} onChange={e=>patch({backgroundColor:e.target.value})}/><input aria-label={fa?'مقدار رنگ پس‌زمینه':'Background color value'} className={input} placeholder="transparent" value={selected.backgroundColor??''} onChange={e=>patch({backgroundColor:e.target.value||undefined})}/></label>
+    <div className="grid grid-cols-2 gap-1.5">
+      <label className="block">{fa?'عرض باکس (mm)':'Box width (mm)'}<input aria-label={fa?'عرض باکس متن (mm)':'Text box width (mm)'} type="number" dir="ltr" min="5" step="0.5" value={boxWidthMm} onChange={e=>updateBoxSizeMm('w',+e.target.value)} className={input}/></label>
+      <label className="block">{fa?'ارتفاع باکس (mm)':'Box height (mm)'}<input aria-label={fa?'ارتفاع باکس متن (mm)':'Text box height (mm)'} type="number" dir="ltr" min="5" step="0.5" value={boxHeightMm} onChange={e=>updateBoxSizeMm('h',+e.target.value)} className={input}/></label>
+    </div>
     <div className="flex flex-wrap gap-1">{(['bold','italic','underline'] as const).map((key,i)=><button type="button" key={key} aria-label={(fa?['درشت','کج','زیرخط']:['Bold','Italic','Underline'])[i]} aria-pressed={selected[key]} onClick={()=>patch({[key]:!selected[key]})} className={`rounded px-2 py-1 cursor-pointer ${selected[key]?'bg-sky-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{['B','I','U'][i]}</button>)}
-    {(['left','center','right'] as const).map(a=>{const label=fa?{left:'چپ',center:'وسط',right:'راست'}[a]:{left:'Left',center:'Center',right:'Right'}[a];return <button type="button" key={a} title={label} aria-label={`${fa?'چینش':'Align'} ${label}`} aria-pressed={selected.align===a} onClick={()=>patch({align:a})} className={`rounded px-2 py-1 cursor-pointer ${selected.align===a?'bg-sky-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{fa?label:label[0]}</button>;})}</div>
+    {(['left','center','right','justify'] as const).map(a=>{const label=fa?{left:'چپ',center:'وسط',right:'راست',justify:'جاستیفای'}[a]:{left:'Left',center:'Center',right:'Right',justify:'Justify'}[a];return <button type="button" key={a} title={label} aria-label={`${fa?'چینش':'Align'} ${label}`} aria-pressed={selected.align===a} onClick={()=>patch({align:a})} className={`rounded px-2 py-1 cursor-pointer ${selected.align===a?'bg-sky-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{fa?label:label[0]}</button>;})}</div>
     {(typeof CanvasRenderingContext2D !== 'undefined' && !('wordSpacing' in CanvasRenderingContext2D.prototype) && (selected.wordSpacingPt??0)!==0 || typeof CanvasRenderingContext2D !== 'undefined' && !('letterSpacing' in CanvasRenderingContext2D.prototype) && (selected.letterSpacingPt??0)!==0) && <p role="alert" className="text-amber-600 dark:text-amber-300">{fa?'این محیط فاصله حروف یا کلمات را در خروجی پشتیبانی نمی‌کند.':'This environment cannot export the requested text spacing.'}</p>}
     <label className="block">{fa?'فاصله خطوط':'Line spacing'} {selected.lineHeight??1.25}<input aria-label={fa?'فاصله خطوط':'Line spacing'} type="range" min="0.8" max="3" step="0.05" value={selected.lineHeight??1.25} onChange={e=>patch({lineHeight:+e.target.value})} className="w-full"/></label>
     <label className="block">{fa?'فاصله کلمات':'Word spacing'} {selected.wordSpacingPt??0} pt<input aria-label={fa?'فاصله کلمات':'Word spacing'} type="range" min="0" max="20" step="0.5" value={selected.wordSpacingPt??0} onChange={e=>patch({wordSpacingPt:+e.target.value})} className="w-full"/></label>

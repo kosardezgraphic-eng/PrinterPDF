@@ -273,3 +273,89 @@ export function applyEffectsToRgbaBuffer(
 
   return out;
 }
+
+export interface SvgEffectFilterSpec {
+  /** 256 normalized [0..1] LUT entries for Brightness -> Contrast -> Gamma; null if identity. */
+  toneTableValues: string | null;
+  grayscale: boolean;
+  /** 256 discrete entries ('0'/'1') marking channel values >= 75 when blackText is enabled. */
+  blackTextTableValues: string | null;
+  /** 256 discrete entries ('0'/'1') for 1-bit B&W threshold; null if disabled. */
+  thresholdTableValues: string | null;
+  invert: boolean;
+}
+
+export function needsExactSvgEffectFilter(
+  page: PageItem,
+  effects: EffectsSettings
+): boolean {
+  const { applyGlobal, effectiveBlackAndWhite } = shouldApplyEffectsToPage(page, effects);
+  if (effectiveBlackAndWhite) return true;
+  if (!applyGlobal) return false;
+  return (
+    effects.brightness !== 0 ||
+    effects.contrast !== 0 ||
+    Math.abs((effects.gamma > 0 ? effects.gamma : 1) - 1) > 0.001 ||
+    effects.blackText
+  );
+}
+
+export function buildSvgEffectFilterSpec(
+  page: PageItem,
+  effects: EffectsSettings
+): SvgEffectFilterSpec {
+  const {
+    applyGlobal,
+    effectiveInvert,
+    effectiveGrayscale,
+    effectiveBlackAndWhite,
+  } = shouldApplyEffectsToPage(page, effects);
+
+  let toneTableValues: string | null = null;
+  if (applyGlobal) {
+    const gamma = effects.gamma > 0 ? effects.gamma : 1;
+    const invGamma = 1 / gamma;
+    const hasTone =
+      effects.brightness !== 0 ||
+      effects.contrast !== 0 ||
+      Math.abs(invGamma - 1) > 0.001;
+    if (hasTone) {
+      const brightnessOffset = (effects.brightness / 100) * 255;
+      const contrastFactor =
+        (259 * (effects.contrast + 255)) / (255 * (259 - effects.contrast));
+      const entries: string[] = new Array(256);
+      for (let v = 0; v < 256; v++) {
+        let out = Math.max(0, Math.min(255, contrastFactor * (v + brightnessOffset - 128) + 128));
+        if (invGamma !== 1) {
+          out = 255 * Math.pow(out / 255, invGamma);
+        }
+        entries[v] = (Math.max(0, Math.min(255, out)) / 255).toFixed(6);
+      }
+      toneTableValues = entries.join(' ');
+    }
+  }
+
+  let blackTextTableValues: string | null = null;
+  if (applyGlobal && effects.blackText) {
+    const btEntries: string[] = new Array(256);
+    for (let i = 0; i < 256; i++) btEntries[i] = i < 75 ? '0' : '1';
+    blackTextTableValues = btEntries.join(' ');
+  }
+
+  let thresholdTableValues: string | null = null;
+  if (effectiveBlackAndWhite) {
+    const threshold = Math.max(0, Math.min(255, effects.threshold));
+    const thEntries: string[] = new Array(256);
+    for (let i = 0; i < 256; i++) thEntries[i] = i < threshold ? '0' : '1';
+    thresholdTableValues = thEntries.join(' ');
+  }
+
+  return {
+    toneTableValues,
+    grayscale: effectiveGrayscale || effectiveBlackAndWhite,
+    blackTextTableValues,
+    thresholdTableValues,
+    invert: effectiveInvert,
+  };
+}
+

@@ -114,10 +114,12 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     setCanvasTool,
     perspectiveDrafts,
     isApplyingPerspectiveCrop,
+    isAutoDetectingPerspective,
     discardCropDrafts,
     setPerspectiveDraft,
     resetPerspectiveDraft,
     discardPerspectiveDrafts,
+    autoDetectPerspectiveDraft,
     applyPerspectiveCrop,
     showPreflight,
     setShowPreflight,
@@ -1168,7 +1170,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
 
               {hasTextOverlays && <TextOverlayLayer sheet={sheetSide} totalSheets={outputSheets.length} pages={pages} pageIndices={pageNumbers} pxPerMm={basePxPerMm} enabled={(canvasTool==='move' || !!layout.booklet?.enabled) && !spaceDown} previewOnly={!!previewOnlyPage}/>}
               {pictureDropSheet === sheetSide.sideIndex - 1 && (
-                <div className="pointer-events-none absolute inset-0 z-20 bg-sky-500/10">
+                <div className="pointer-events-none absolute inset-0 z-30 bg-sky-500/10">
                   <span
                     data-picture-drop-hint
                     ref={node => {
@@ -1233,7 +1235,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                   style={{
                     bottom: Math.max(4, pageNumbering.marginMm * basePxPerMm * 0.6),
                   }}
-                  className="pointer-events-none absolute inset-x-0 flex justify-center"
+                  className="pointer-events-none absolute inset-x-0 z-[26] flex justify-center"
                 >
                   <span className="rounded bg-white/85 px-2 py-0.5 font-mono text-[10px] font-bold text-slate-700 shadow-xs">
                     {pageNumText}
@@ -1645,6 +1647,21 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                       />
                     </div>
                   )}
+                  <button
+                    type="button"
+                    data-perspective-autodetect
+                    disabled={!!previewOnlyPage || !targetPage || isAutoDetectingPerspective || isApplyingPerspectiveCrop}
+                    onClick={() => targetPage && void autoDetectPerspectiveDraft(targetPage.id)}
+                    className="rounded border border-emerald-400/70 bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-45 dark:border-emerald-600/60 dark:bg-emerald-950/60 dark:text-emerald-200 dark:hover:bg-emerald-900/60 cursor-pointer"
+                  >
+                    {isAutoDetectingPerspective
+                      ? lang === 'fa'
+                        ? 'در حال تشخیص...'
+                        : 'Detecting...'
+                      : lang === 'fa'
+                        ? 'تشخیص خودکار ۴ گوشه'
+                        : 'Auto-Detect Corners'}
+                  </button>
                   <button
                     type="button"
                     data-perspective-apply
