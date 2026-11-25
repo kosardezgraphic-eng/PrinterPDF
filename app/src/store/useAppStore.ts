@@ -2517,8 +2517,8 @@ export const useAppStore = create<AppState>((set, get) => {
       set((state) => ({
         layout: {
           ...state.layout,
-          rows: Math.max(1, Math.min(50, rows)),
-          cols: Math.max(1, Math.min(50, cols)),
+          rows: Math.max(1, Math.min(100, rows)),
+          cols: Math.max(1, Math.min(100, cols)),
           placementMode: placementMode ?? state.layout.placementMode,
           customCells: undefined,
         },
