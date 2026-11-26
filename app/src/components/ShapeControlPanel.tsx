@@ -308,7 +308,9 @@ export function ShapeControlPanel() {
       </section>
 
       {/* 7. where it is printed */}
-      <section className="space-y-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">\n      <p className="font-semibold">{isFa ? 'محدوده چاپ و لایه' : 'Print scope & layers'}</p>\n      <label className="block">{isFa ? 'مبنا' : 'Attach to'}
+      <section className="space-y-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <p className="font-semibold">{isFa ? 'محدوده چاپ و لایه' : 'Print scope & layers'}</p>
+      <label className="block">{isFa ? 'مبنا' : 'Attach to'}
         <select data-shape-target className={input} value={item.target} onChange={e => setScope(item.targetScope, e.target.value as OverlayTarget)}>
           <option value="page">{isFa ? 'صفحه سند' : 'Document page'}</option>
           <option value="sheet">{isFa ? 'برگه خروجی' : 'Output sheet'}</option>
@@ -351,7 +353,7 @@ export function ShapeControlPanel() {
           ? 'شکل روی همان صفحه یا برگه‌هایی که دامنه‌اش را تعیین می‌کنید چاپ می‌شود؛ خطوط ویرایشگر روی کاغذ نمی‌افتند.'
           : 'A shape prints on the pages or sheets its scope selects; the editor outlines never reach the paper.'}
       </p>
-      </section>\n      </section>
+      </section>
       <button type="button" data-shape-delete onClick={() => removeOverlay(item.id)} className={`${chip} w-full bg-rose-600 text-white hover:bg-rose-500 dark:bg-rose-900 dark:text-rose-100 dark:hover:bg-rose-800`}>
         {isFa ? 'حذف شکل' : 'Delete shape'}
       </button>
@@ -385,17 +387,17 @@ export function ShapePicker({ onPick }: { onPick: (type: ShapeType) => void }) {
       </button>
       {open && (
         <div data-shape-menu dir={isFa ? 'rtl' : 'ltr'}
-          className="absolute z-50 mt-1 w-72 rounded-xl border border-slate-200 bg-white p-2 text-xs text-slate-800 shadow-2xl dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100">
-          <p className="mb-1 px-1 text-[10px] font-bold text-slate-500 dark:text-slate-400">
+          className="absolute z-50 mt-2 w-80 rounded-2xl border border-slate-200 bg-white p-3 text-xs text-slate-800 shadow-2xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
+          <p className="mb-3 px-1 text-[11px] leading-5 text-slate-500 dark:text-slate-400">
             {isFa ? 'یکی را بزنید؛ وسط صفحهٔ جاری گذاشته می‌شود و پنل تنظیماتش باز می‌شود.' : 'Pick one — it lands on the current page and its settings panel opens.'}
           </p>
-          <div className="grid grid-cols-5 gap-1">
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
             {SHAPE_TYPES.map(type => (
               <button key={type} type="button" data-shape-tool={type} title={shapeLabel(type, isFa)} aria-label={shapeLabel(type, isFa)}
                 onClick={() => { onPick(type); setOpen(false); }}
-                className="flex flex-col items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1.5 text-slate-700 hover:bg-slate-100 hover:border-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer">
+                className="flex min-h-[68px] flex-col items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 p-2 text-slate-700 transition hover:border-violet-400 hover:bg-violet-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-violet-500/10 cursor-pointer">
                 <ShapePreview type={type} size={22} />
-                <span className="text-[9px] leading-3">{SHAPE_NAMES[type][isFa ? 0 : 1]}</span>
+                <span className="text-[10px] font-medium leading-3">{SHAPE_NAMES[type][isFa ? 0 : 1]}</span>
               </button>
             ))}
           </div>
