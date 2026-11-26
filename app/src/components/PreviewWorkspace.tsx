@@ -203,7 +203,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const [previewOnlyPageId, setPreviewOnlyPageId] = useState<string | null>(null);
   const [navigationTarget, setNavigationTarget] = useState<{pageId: string; sheetIndex: number; previewOnly: boolean} | null>(null);
   const [panning, setPanning] = useState(false);
-  const [sheetContextMenu, setSheetContextMenu] = useState<{ x: number; y: number; pageIds: string[] } | null>(null);
+  const [sheetContextMenu, setSheetContextMenu] = useState<{ x: number; y: number; pageIds: string[]; sheetIndex: number } | null>(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   // A file drag fires `dragover` on the element under the cursor every few milliseconds and a
   // `dragleave` on the workspace each time the pointer crosses into a child element. Driving the
@@ -631,6 +631,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                   x: Math.max(0, Math.min(window.innerWidth - 240, e.clientX)),
                   y: Math.max(0, Math.min(window.innerHeight - 260, e.clientY)),
                   pageIds: [...new Set(sheetSide.cells.map(cell => cell.page?.id).filter((id): id is string => !!id))],
+                  sheetIndex: sheetSide.sideIndex - 1,
                 });
               }}
               onMouseMove={(e) => {
@@ -2810,7 +2811,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                     data-sheet-action="add-image"
                     className="flex w-full items-center gap-2 rounded px-3 py-2 text-start hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer"
                     onClick={() => {
-                      pendingImageSheetRef.current = sheets.find(sheet => sheet.cells.some(cell => cell.page?.id && sheetContextMenu.pageIds.includes(cell.page.id))) ?? null;
+                      pendingImageSheetRef.current = sheets[sheetContextMenu.sheetIndex] ?? null;
                       setSheetContextMenu(null);
                       sheetImageInputRef.current?.click();
                     }}
