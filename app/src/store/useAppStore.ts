@@ -3208,7 +3208,7 @@ export const useAppStore = create<AppState>((set, get) => {
     moveRulerGuide: (id, positionMm) => {
       const state = get(); const guides = state.layout.rulerGuides ?? [];
       const original = guides.find(item => item.id === id);
-      if (!original || !Number.isFinite(positionMm) || positionMm < 0 || original.positionMm === positionMm) return;
+      if (!original || original.locked || !Number.isFinite(positionMm) || positionMm < 0 || original.positionMm === positionMm) return;
       const before = captureSnapshot(state);
       set({layout:{...state.layout,rulerGuides:guides.map(item => item.id === id ? {...item,positionMm} : item)}});
       pushUndo('جابجایی خط راهنما', 'Move ruler guide', before, captureSnapshot(get()));
