@@ -155,6 +155,7 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
  /** The gesture under the pointer, kept out of the store until it is finished. */
  const [liveErase,setLiveErase]=useState<EraseShape|null>(null);
  const [imageMenu,setImageMenu]=useState<{x:number;y:number}|null>(null);
+ useEffect(()=>{if(!imageMenu)return;const close=(event:PointerEvent)=>{const target=event.target instanceof Element?event.target:null;if(!target?.closest('[data-image-context-menu]'))setImageMenu(null);};const key=(event:KeyboardEvent)=>{if(event.key==='Escape')setImageMenu(null);};document.addEventListener('pointerdown',close);window.addEventListener('keydown',key);return()=>{document.removeEventListener('pointerdown',close);window.removeEventListener('keydown',key);};},[imageMenu]);
  const erase=useRef<{pointer:number;anchor:{x:number;y:number};shape:EraseShape}|null>(null);
  const ring=useRef<HTMLDivElement>(null);
  const ringAt=useRef<{x:number;y:number}|null>(null);
