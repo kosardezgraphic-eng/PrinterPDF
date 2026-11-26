@@ -289,7 +289,9 @@
 .ruler-guide { pointer-events:auto; }
 .ruler-guide[data-axis="x"], .ruler-guide-ghost[data-axis="x"] { top:0; bottom:0; width:14px; transform:translateX(-50%); cursor:ew-resize; }
 .ruler-guide[data-axis="y"], .ruler-guide-ghost[data-axis="y"] { left:0; right:0; height:14px; transform:translateY(-50%); cursor:ns-resize; }
-.ruler-guide::before, .ruler-guide-ghost::before { content:""; position:absolute; background:#0891b2; box-shadow:0 0 1px white; }
+.ruler-guide::before, .ruler-guide-ghost::before { content:""; position:absolute; background:var(--guide-color,#0891b2); box-shadow:0 0 1px white; }
+.ruler-guide[data-locked="true"] { cursor:not-allowed; }
+.ruler-guide[data-locked="true"]::before { opacity:.7; }
 .ruler-guide[data-axis="x"]::before, .ruler-guide-ghost[data-axis="x"]::before { left:50%; top:0; bottom:0; width:1px; }
 .ruler-guide[data-axis="y"]::before, .ruler-guide-ghost[data-axis="y"]::before { top:50%; left:0; right:0; height:1px; }
 .ruler-guide-label { position:absolute; white-space:nowrap; border-radius:3px; padding:2px 4px; background:#0f172a; color:white; font:600 11px/1.2 sans-serif; direction:ltr; opacity:0; pointer-events:none; }
