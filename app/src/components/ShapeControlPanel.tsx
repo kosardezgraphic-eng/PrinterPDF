@@ -25,8 +25,8 @@ type PanelAlignRef = 'auto' | AlignReferenceMode;
  * the store applies, so a pasted value cannot put anything but a hex colour in front of the renderer.
  */
 
-const input = 'w-full rounded border border-slate-300 bg-white p-1 text-xs text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white';
-const chip = 'rounded px-2 py-1 cursor-pointer';
+const input = 'w-full min-h-9 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-900 shadow-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/15 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100';
+const chip = 'rounded-lg px-2.5 py-2 text-xs font-medium transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40';
 
 const SWATCHES = ['#000000', '#ffffff', '#ef4444', '#f59e0b', '#22c55e', '#0ea5e9', '#6366f1', '#ec4899'];
 
@@ -119,11 +119,11 @@ export function ShapeControlPanel() {
 
   return (
     <aside data-shape-control-panel aria-label={isFa ? 'تنظیمات شکل هندسی' : 'Shape controls'}
-      className="w-full bg-white p-3 text-xs text-slate-800 dark:bg-slate-900 dark:text-slate-200 space-y-2">
-      <div className="flex items-center justify-between">
-        <strong className="flex items-center gap-1.5 text-slate-900 dark:text-slate-100">
-          <ShapePreview type={item.type} size={18} shape={item} className="text-sky-600 dark:text-sky-300" />
-          {isFa ? 'تنظیمات شکل' : 'Shape'}
+      className="w-full space-y-3 overflow-y-auto bg-slate-50/80 p-3 text-xs text-slate-800 dark:bg-slate-950/70 dark:text-slate-200">
+      <div className="sticky top-0 z-10 -mx-3 -mt-3 flex items-center justify-between border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95">
+        <strong className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300"><ShapePreview type={item.type} size={22} shape={item} /></span>
+          <span>{isFa ? 'ویرایش شکل' : 'Edit shape'}<span className="mt-0.5 block text-[10px] font-normal text-slate-500">{shapeLabel(item.type, isFa)}</span></span>
         </strong>
         <button type="button" data-shape-duplicate
           title={isFa ? 'یک نسخه با همان تنظیمات کنارش گذاشته می‌شود' : 'Put a copy of this shape beside it'}
@@ -134,13 +134,13 @@ export function ShapeControlPanel() {
       {/* 1. the outline itself */}
       <div>
         <p className="mb-1 text-slate-600 dark:text-slate-400">{isFa ? 'شکل' : 'Shape'}</p>
-        <div className="grid grid-cols-5 gap-1" role="group" aria-label={isFa ? 'نوع شکل' : 'Shape type'}>
+        <div className="grid grid-cols-4 gap-2 sm:grid-cols-5" role="group" aria-label={isFa ? 'نوع شکل' : 'Shape type'}>
           {SHAPE_TYPES.map(type => (
             <button key={type} type="button" data-shape-type={type} aria-pressed={item.type === type}
               title={shapeLabel(type, isFa)}
               onClick={() => patch({ type, ...(type === 'rounded-rect' && !(item.borderRadius > 0) ? { borderRadius: 3 } : {}) })}
-              className={`flex items-center justify-center rounded-lg border py-1.5 cursor-pointer ${item.type === type ? 'border-sky-500 bg-sky-50 text-sky-700 dark:border-sky-400 dark:bg-sky-600/30 dark:text-white' : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'}`}>
-              <ShapePreview type={type} size={20} />
+              className={`flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-xl border p-2 transition ${item.type === type ? 'border-sky-500 bg-sky-50 text-sky-700 shadow-sm ring-2 ring-sky-500/10 dark:border-sky-400 dark:bg-sky-500/15 dark:text-sky-200' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700'}`}>
+              <ShapePreview type={type} size={23} /><span className="text-[9px] leading-3">{shapeLabel(type, isFa)}</span>
             </button>
           ))}
         </div>
@@ -247,7 +247,7 @@ export function ShapeControlPanel() {
       <div className="flex gap-1">
         <label className="flex-1">{isFa ? 'عرض (م‌م)' : 'Width (mm)'}
           <input data-shape-width type="number" min="0.5" step="0.1" className={input} value={Number(widthMm.toFixed(2))} onChange={e => setSize('width', Number(e.target.value))} /></label>
-        <label className="flex-1">{isFa ? 'ارتفاع (م‌م)' : 'Height (mm)'}
+        <label className="min-w-0">{isFa ? 'ارتفاع (م‌م)' : 'Height (mm)'}
           <input data-shape-height type="number" min="0.5" step="0.1" className={input} value={Number(heightMm.toFixed(2))} onChange={e => setSize('height', Number(e.target.value))} /></label>
       </div>
       <label className="flex items-center gap-1.5">
@@ -293,7 +293,7 @@ export function ShapeControlPanel() {
       </div>
 
       {/* 7. where it is printed */}
-      <label className="block">{isFa ? 'مبنا' : 'Attach to'}
+      <section className="space-y-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">\n      <p className="font-semibold">{isFa ? 'محدوده چاپ و لایه' : 'Print scope & layers'}</p>\n      <label className="block">{isFa ? 'مبنا' : 'Attach to'}
         <select data-shape-target className={input} value={item.target} onChange={e => setScope(item.targetScope, e.target.value as OverlayTarget)}>
           <option value="page">{isFa ? 'صفحه سند' : 'Document page'}</option>
           <option value="sheet">{isFa ? 'برگه خروجی' : 'Output sheet'}</option>
@@ -336,7 +336,7 @@ export function ShapeControlPanel() {
           ? 'شکل روی همان صفحه یا برگه‌هایی که دامنه‌اش را تعیین می‌کنید چاپ می‌شود؛ خطوط ویرایشگر روی کاغذ نمی‌افتند.'
           : 'A shape prints on the pages or sheets its scope selects; the editor outlines never reach the paper.'}
       </p>
-      <button type="button" data-shape-delete onClick={() => removeOverlay(item.id)} className={`${chip} w-full bg-rose-600 text-white hover:bg-rose-500 dark:bg-rose-900 dark:text-rose-100 dark:hover:bg-rose-800`}>
+      </section>\n      <button type="button" data-shape-delete onClick={() => removeOverlay(item.id)} className={`${chip} w-full bg-rose-600 text-white hover:bg-rose-500 dark:bg-rose-900 dark:text-rose-100 dark:hover:bg-rose-800`}>
         {isFa ? 'حذف شکل' : 'Delete shape'}
       </button>
     </aside>
