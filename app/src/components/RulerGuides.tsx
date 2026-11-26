@@ -79,7 +79,13 @@ export function RulerGuideProvider({widthMm,heightMm,widthPx,heightPx,unit,langu
     const d=dragging.current;if(!d||d.pointer!==e.pointerId)return;
     e.preventDefault();e.stopPropagation();d.x=e.clientX;d.y=e.clientY;
     const value=position(d);const inPaper=inRect(d.x,d.y,d.rect);
-    const onRuler=inRect(d.x,d.y,(d.axis==='x'?rulerX.current:rulerY.current)?.getBoundingClientRect());
+    const rulerRect=(d.axis==='x'?rulerX.current:rulerY.current)?.getBoundingClientRect();
+    // Pointer capture keeps events on the guide while dragging; accept the ruler itself and a small
+    // drop band along the corresponding paper edge so the guide is still removed if the ruler's
+    // narrow hit area is missed by a few pixels.
+    const onRuler=inRect(d.x,d.y,rulerRect) || (d.axis==='x'
+      ? d.y<=d.rect.top && d.y>=d.rect.top-36 && d.x>=d.rect.left-20 && d.x<=d.rect.right+20
+      : d.x<=d.rect.left && d.x>=d.rect.left-36 && d.y>=d.rect.top-20 && d.y<=d.rect.bottom+20);
     clear(d);
     if(cancel)return;
     if(d.guide && !(useAppStore.getState().layout.rulerGuides ?? []).some(g=>g.id===d.guide!.id && g.axis===d.guide!.axis && g.positionMm===d.guide!.positionMm)) return;
