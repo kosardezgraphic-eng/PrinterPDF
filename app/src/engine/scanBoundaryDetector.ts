@@ -393,7 +393,10 @@ export function detectRawScanBoundaries(params: {
     return emptyResult();
   }
 
-  const maxSide = 220;
+  // Keep detection lightweight while retaining enough edge samples for accurate corners.
+  // 320px gives ~2.1x the edge detail of the previous 220px pass without processing
+  // the full-resolution photo (which would be substantially more expensive).
+  const maxSide = 320;
   const scale = Math.min(1, maxSide / Math.max(width, height));
   const w = Math.max(24, Math.round(width * scale));
   const h = Math.max(24, Math.round(height * scale));
@@ -697,7 +700,7 @@ export function detectRawScanBoundaries(params: {
   let candidatePts = roughQuadPts;
   // Refine edges via orthogonal line fitting to outer boundary points
   const fittedLines = roughQuadPts.map((pt, i) =>
-    fitLineThroughSegment(boundaryPts, pt, roughQuadPts[(i + 1) % 4], 0.03)
+    fitLineThroughSegment(boundaryPts, pt, roughQuadPts[(i + 1) % 4], 0.018)
   );
   if (fittedLines.every((l) => l !== null)) {
     const intersections: NormalizedPoint2D[] = [];

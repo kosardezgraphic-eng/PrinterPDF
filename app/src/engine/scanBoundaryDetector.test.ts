@@ -180,6 +180,36 @@ describe('scanBoundaryDetector offline CV utility & import pipeline', () => {
     expect(Math.hypot(result.quad.br.x - cardQuad.br.x, result.quad.br.y - cardQuad.br.y)).toBeLessThan(0.05);
   });
 
+  it('refines document corners accurately on high-resolution scans without following interior print', () => {
+    const trueQuad: QuadCorners = {
+      tl: { x: 0.137, y: 0.112 },
+      tr: { x: 0.861, y: 0.174 },
+      br: { x: 0.892, y: 0.887 },
+      bl: { x: 0.104, y: 0.824 },
+    };
+    const width = 1280;
+    const height = 960;
+    const rgba = makeRawScanRgba({
+      width,
+      height,
+      quad: trueQuad,
+      bgColor: [28, 30, 34],
+      sheetColor: [246, 244, 238],
+      withInteriorText: true,
+      withDustSpecks: true,
+    });
+
+    const result = detectRawScanBoundaries({ rgba, width, height });
+    expect(result.found).toBe(true);
+    expect(isConvexDetectedQuad(result.quad)).toBe(true);
+    for (const corner of ['tl', 'tr', 'br', 'bl'] as const) {
+      expect(Math.hypot(
+        result.quad[corner].x - trueQuad[corner].x,
+        result.quad[corner].y - trueQuad[corner].y
+      )).toBeLessThan(0.025);
+    }
+  });
+
   it('returns found: false on uniform or tiny non-scan images', async () => {
     const flat = new Uint8ClampedArray(60 * 60 * 4).fill(220);
     const pngBytes = await encodeRgbaToPngBytesUniversal(flat, 60, 60);
