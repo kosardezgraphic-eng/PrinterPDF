@@ -1,4 +1,5 @@
 import React,{useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
+import {Copy,FlipHorizontal,FlipVertical,Layers,RotateCw,Trash2} from 'lucide-react';
 import type {ComputedSheetSide,PageItem,PageOverlay,PageOverlayImage,PageOverlayShape,PageOverlayText} from '@shared/models';
 import {drawOverlayText} from '../engine/textOverlays';
 import {imageDrawRect,overlayPlacements,type OverlayPlacement} from '../engine/overlayPlacements';
@@ -136,7 +137,7 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
  const smartGuides=useSmartGuides();
  const smartGuidesRef=useRef(smartGuides);
  smartGuidesRef.current=smartGuides;
- const select=useAppStore(s=>s.selectOverlay),update=useAppStore(s=>s.updateOverlay),add=useAppStore(s=>s.addOverlay),beginEdit=useAppStore(s=>s.beginTextEdit);
+ const select=useAppStore(s=>s.selectOverlay),update=useAppStore(s=>s.updateOverlay),add=useAppStore(s=>s.addOverlay),remove=useAppStore(s=>s.removeOverlay),reorder=useAppStore(s=>s.reorderOverlay),beginEdit=useAppStore(s=>s.beginTextEdit);
  const edit=useAppStore(s=>s.textEdit?.occurrenceKey===p.key?s.textEdit:null);
  const textarea=useRef<HTMLTextAreaElement>(null);
  const mounted=useRef(false);
@@ -152,6 +153,7 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
  const pending=useAppStore(s=>s.erasePending&&s.erasePending.overlayId===item.id?s.erasePending.shape:null);
  /** The gesture under the pointer, kept out of the store until it is finished. */
  const [liveErase,setLiveErase]=useState<EraseShape|null>(null);
+ const [imageMenu,setImageMenu]=useState<{x:number;y:number}|null>(null);
  const erase=useRef<{pointer:number;anchor:{x:number;y:number};shape:EraseShape}|null>(null);
  const ring=useRef<HTMLDivElement>(null);
  const ringAt=useRef<{x:number;y:number}|null>(null);
@@ -378,6 +380,7 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
  const editable=!isImage && item.kind==='text' ? item as PageOverlayText : null;
  const label=isImage?(p as {image:PageOverlayImage}).image.name:isShape?(lang==='fa'?SHAPE_NAMES[(p as {shape:PageOverlayShape}).shape.type][0]:SHAPE_NAMES[(p as {shape:PageOverlayShape}).shape.type][1]):('renderText' in p ? p.renderText.text : '')||(lang==='fa'?'نوشته':'Overlay');
  return <div data-overlay-id={item.id} role="button" tabIndex={enabled?0:-1} aria-label={label || (lang==='fa'?'لایه':'Overlay')}
+   onContextMenu={e=>{if(!isImage||!enabled||edit)return;e.preventDefault();e.stopPropagation();activate();select(item.id);setImageMenu({x:Math.min(e.clientX,window.innerWidth-230),y:Math.min(e.clientY,window.innerHeight-290)});}}
    onDoubleClick={e=>{if(!enabled)return;e.stopPropagation();activate();if(editable)beginEdit(item.id,p.key);else{select(item.id);const el=document.querySelector<HTMLTextAreaElement>('[data-numbering-template],[data-image-source],[data-shape-fill]');if(el){el.focus();el.select();}}}}
    onKeyDown={e=>{if(!enabled)return;
    const arrows:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};
@@ -425,7 +428,20 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
       title={lang==='fa'?'برای چرخش آزاد بکشید؛ Shift گام ۱۵ درجه است.':'Drag to rotate; Shift snaps to 15°.'}
       onPointerDown={e=>start(e,'rotate')} onClick={e=>e.stopPropagation()}
       style={{position:'absolute',left:'50%',top:'-24px',transform:'translate(-50%,-50%)',cursor:'grab',touchAction:'none'}}
-      className="flex h-6 w-6 items-center justify-center rounded-full border border-white bg-sky-700"/>}
+      className="flex h-6 w-6 items-center justify-center rounded-full border border-white bg-sky-700"/>
+   {imageMenu && isImage && <div data-image-context-menu role="menu" dir={lang==='fa'?'rtl':'ltr'}
+      onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}
+      style={{position:'fixed',left:imageMenu.x,top:imageMenu.y,zIndex:1000}}
+      className="min-w-[210px] rounded-xl border border-slate-200 bg-white p-1.5 text-sm text-slate-800 shadow-2xl dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100">
+      <div className="border-b border-slate-100 px-3 py-2 text-xs font-bold text-slate-500 dark:border-slate-700 dark:text-slate-400">{lang==='fa'?'عملیات تصویر':'Image actions'}</div>
+      <button role="menuitem" type="button" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start hover:bg-slate-100 dark:hover:bg-slate-800" onClick={()=>{update(item.id,{rotation:(item.rotation+90)%360});setImageMenu(null);}}><RotateCw size={15}/>{lang==='fa'?'چرخش ۹۰ درجه':'Rotate 90°'}</button>
+      <button role="menuitem" type="button" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start hover:bg-slate-100 dark:hover:bg-slate-800" onClick={()=>{add({...item,id:newId(),xPercent:Math.min(95,item.xPercent+2),yPercent:Math.min(95,item.yPercent+2)} as PageOverlay);setImageMenu(null);}}><Copy size={15}/>{lang==='fa'?'تکثیر تصویر':'Duplicate image'}</button>
+      <button role="menuitem" type="button" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start hover:bg-slate-100 dark:hover:bg-slate-800" onClick={()=>{update(item.id,{flipHorizontal:!((p as {image:PageOverlayImage}).image.flipHorizontal)});setImageMenu(null);}}><FlipHorizontal size={15}/>{lang==='fa'?'قرینه افقی':'Flip horizontally'}</button>
+      <button role="menuitem" type="button" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start hover:bg-slate-100 dark:hover:bg-slate-800" onClick={()=>{update(item.id,{flipVertical:!((p as {image:PageOverlayImage}).image.flipVertical)});setImageMenu(null);}}><FlipVertical size={15}/>{lang==='fa'?'قرینه عمودی':'Flip vertically'}</button>
+      <button role="menuitem" type="button" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start hover:bg-slate-100 dark:hover:bg-slate-800" onClick={()=>{reorder(item.id,'front');setImageMenu(null);}}><Layers size={15}/>{lang==='fa'?'انتقال به جلو':'Bring to front'}</button>
+      <button role="menuitem" type="button" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/10" onClick={()=>{remove(item.id);setImageMenu(null);}}><Trash2 size={15}/>{lang==='fa'?'حذف تصویر':'Delete image'}</button>
+      <button type="button" className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800" onClick={()=>setImageMenu(null)}>{lang==='fa'?'بستن':'Close'}</button>
+    </div>}}
  </div>;
 }
 function ThumbnailOverlayOccurrence({p,pxPerMm}:{p:OverlayPlacement;pxPerMm:number}){
