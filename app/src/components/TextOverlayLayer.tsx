@@ -1,5 +1,6 @@
 import React,{useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {Copy,FlipHorizontal,FlipVertical,Layers,RotateCw,Trash2} from 'lucide-react';
+import {createPortal} from 'react-dom';
 import type {ComputedSheetSide,PageItem,PageOverlay,PageOverlayImage,PageOverlayShape,PageOverlayText} from '@shared/models';
 import {drawOverlayText} from '../engine/textOverlays';
 import {imageDrawRect,overlayPlacements,type OverlayPlacement} from '../engine/overlayPlacements';
@@ -428,8 +429,8 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
       title={lang==='fa'?'برای چرخش آزاد بکشید؛ Shift گام ۱۵ درجه است.':'Drag to rotate; Shift snaps to 15°.'}
       onPointerDown={e=>start(e,'rotate')} onClick={e=>e.stopPropagation()}
       style={{position:'absolute',left:'50%',top:'-24px',transform:'translate(-50%,-50%)',cursor:'grab',touchAction:'none'}}
-      className="flex h-6 w-6 items-center justify-center rounded-full border border-white bg-sky-700"/>
-   {imageMenu && isImage && <div data-image-context-menu role="menu" dir={lang==='fa'?'rtl':'ltr'}
+      className="flex h-6 w-6 items-center justify-center rounded-full border border-white bg-sky-700"/>}
+   {imageMenu && isImage && createPortal(<div data-image-context-menu role="menu" dir={lang==='fa'?'rtl':'ltr'}
       onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}
       style={{position:'fixed',left:imageMenu.x,top:imageMenu.y,zIndex:1000}}
       className="min-w-[210px] rounded-xl border border-slate-200 bg-white p-1.5 text-sm text-slate-800 shadow-2xl dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100">
@@ -441,7 +442,7 @@ function OverlayOccurrence({p,pxPerMm,selected,enabled,sheetMm}:{p:OverlayPlacem
       <button role="menuitem" type="button" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start hover:bg-slate-100 dark:hover:bg-slate-800" onClick={()=>{reorder(item.id,'front');setImageMenu(null);}}><Layers size={15}/>{lang==='fa'?'انتقال به جلو':'Bring to front'}</button>
       <button role="menuitem" type="button" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/10" onClick={()=>{remove(item.id);setImageMenu(null);}}><Trash2 size={15}/>{lang==='fa'?'حذف تصویر':'Delete image'}</button>
       <button type="button" className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800" onClick={()=>setImageMenu(null)}>{lang==='fa'?'بستن':'Close'}</button>
-    </div>}}
+    </div>,document.body)}
  </div>;
 }
 function ThumbnailOverlayOccurrence({p,pxPerMm}:{p:OverlayPlacement;pxPerMm:number}){
