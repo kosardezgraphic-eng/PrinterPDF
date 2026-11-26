@@ -708,6 +708,7 @@ interface AppState {
   applyMarginPreset: (presetId: MarginPresetId) => void;
   addRulerGuide: (guide: RulerGuide) => void;
   moveRulerGuide: (id: string, positionMm: number) => void;
+  updateRulerGuide: (id: string, patch: Partial<Pick<RulerGuide, 'locked' | 'color'>>) => void;
   removeRulerGuide: (id: string) => void;
   resetMarginsToPrinter: () => void;
   refreshPrinterMargins: () => void;
@@ -3211,6 +3212,16 @@ export const useAppStore = create<AppState>((set, get) => {
       const before = captureSnapshot(state);
       set({layout:{...state.layout,rulerGuides:guides.map(item => item.id === id ? {...item,positionMm} : item)}});
       pushUndo('جابجایی خط راهنما', 'Move ruler guide', before, captureSnapshot(get()));
+    },
+    updateRulerGuide: (id, patch) => {
+      const state = get(); const guides = state.layout.rulerGuides ?? [];
+      const original = guides.find(item => item.id === id);
+      if (!original) return;
+      const nextGuide = { ...original, ...patch };
+      if (nextGuide.locked === original.locked && nextGuide.color === original.color) return;
+      const before = captureSnapshot(state);
+      set({layout:{...state.layout,rulerGuides:guides.map(item => item.id === id ? nextGuide : item)}});
+      pushUndo('تنظیم خط راهنما', 'Update ruler guide', before, captureSnapshot(get()));
     },
     removeRulerGuide: (id) => {
       const state = get(); const guides = state.layout.rulerGuides ?? [];
