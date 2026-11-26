@@ -109,10 +109,10 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
   const [gapHMm, setGapHMm] = useState<number>(initialGapH);
   const [gapVMm, setGapVMm] = useState<number>(initialGapV);
   const [gapHDraft, setGapHDraft] = useState<string>(() =>
-    String(convertMmToUnit(initialGapH, unit))
+    String(initialGapH)
   );
   const [gapVDraft, setGapVDraft] = useState<string>(() =>
-    String(convertMmToUnit(initialGapV, unit))
+    String(initialGapV)
   );
 
   const initialOuterMarginMm = Math.max(
@@ -155,8 +155,6 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
     if (heightDraft.trim() !== '') {
       setHeightDraft(String(convertMmToUnit(heightMm, unit)));
     }
-    setGapHDraft(String(convertMmToUnit(gapHMm, unit)));
-    setGapVDraft(String(convertMmToUnit(gapVMm, unit)));
     setOuterMarginDraft(String(convertMmToUnit(outerMarginMm, unit)));
   }, [unit, widthMm, heightMm, gapHMm, gapVMm, outerMarginMm, widthDraft, heightDraft]);
 
@@ -310,7 +308,7 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
     }
     const parsed = Number(raw);
     if (!Number.isFinite(parsed) || parsed < 0) return;
-    const mm = Math.max(0, Math.min(200, convertUnitToMm(parsed, unit)));
+    const mm = Math.max(0, Math.min(200, parsed));
     setGapHMm(mm);
     if (syncGaps) {
       setGapVMm(mm);
@@ -330,7 +328,7 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
     }
     const parsed = Number(raw);
     if (!Number.isFinite(parsed) || parsed < 0) return;
-    const mm = Math.max(0, Math.min(200, convertUnitToMm(parsed, unit)));
+    const mm = Math.max(0, Math.min(200, parsed));
     setGapVMm(mm);
     if (syncGaps) {
       setGapHMm(mm);
@@ -497,7 +495,7 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
       {/* Spacing / Gaps & Outer Margin */}
       <div className="flex items-end gap-1.5">
         <label className="flex min-w-0 flex-1 flex-col gap-0.5 text-[10px] font-semibold text-slate-600 dark:text-slate-400">
-          <span>{isFa ? `فاصله افقی (${unit})` : `Gap H (${unit})`}</span>
+          <span>{isFa ? `فاصله افقی (mm)` : 'Gap H (mm)'}</span>
           <input
             type="number"
             step="any"
@@ -508,7 +506,7 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
             value={gapHDraft}
             placeholder="0"
             onChange={(e) => handleGapHInput(e.target.value)}
-            onBlur={() => setGapHDraft(String(convertMmToUnit(gapHMm, unit)))}
+            onBlur={() => setGapHDraft(String(gapHMm))}
             className={inputClass}
           />
         </label>
@@ -522,7 +520,7 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
             setSyncGaps(next);
             if (next) {
               setGapVMm(gapHMm);
-              setGapVDraft(String(convertMmToUnit(gapHMm, unit)));
+              setGapVDraft(String(gapHMm));
             }
           }}
           title={isFa ? 'همسان‌سازی فاصله افقی و عمودی' : 'Sync horizontal & vertical gaps'}
@@ -537,7 +535,7 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
         </button>
 
         <label className="flex min-w-0 flex-1 flex-col gap-0.5 text-[10px] font-semibold text-slate-600 dark:text-slate-400">
-          <span>{isFa ? `فاصله عمودی (${unit})` : `Gap V (${unit})`}</span>
+          <span>{isFa ? `فاصله عمودی (mm)` : 'Gap V (mm)'}</span>
           <input
             type="number"
             step="any"
@@ -548,7 +546,7 @@ export const AutoPackPanel: React.FC<AutoPackPanelProps> = ({ compact = false })
             value={gapVDraft}
             placeholder="0"
             onChange={(e) => handleGapVInput(e.target.value)}
-            onBlur={() => setGapVDraft(String(convertMmToUnit(gapVMm, unit)))}
+            onBlur={() => setGapVDraft(String(gapVMm))}
             className={inputClass}
           />
         </label>
