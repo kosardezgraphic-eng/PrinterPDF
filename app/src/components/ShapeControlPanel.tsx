@@ -132,6 +132,8 @@ export function ShapeControlPanel() {
       </div>
 
       {/* 1. the outline itself */}
+      <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="mb-2 flex items-center justify-between"><p className="font-semibold text-slate-800 dark:text-slate-100">{isFa ? 'انتخاب شکل' : 'Shape type'}</p><span className="text-[10px] text-slate-400">{SHAPE_TYPES.length} {isFa ? 'نوع' : 'types'}</span></div>
       <div>
         <p className="mb-1 text-slate-600 dark:text-slate-400">{isFa ? 'شکل' : 'Shape'}</p>
         <div className="grid grid-cols-4 gap-2 sm:grid-cols-5" role="group" aria-label={isFa ? 'نوع شکل' : 'Shape type'}>
@@ -145,12 +147,15 @@ export function ShapeControlPanel() {
           ))}
         </div>
       </div>
+      </section>
 
       {/* 2. fill */}
+      <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <p className="font-semibold text-slate-800 dark:text-slate-100">{isFa ? 'ظاهر و رنگ' : 'Appearance'}</p>
       {caps.fill && (
         <div>
-          <label className="flex items-center justify-between gap-1.5">
-            <span className="text-slate-600 dark:text-slate-400">{isFa ? 'رنگ داخل' : 'Fill'}</span>
+          <label className="flex items-center justify-between gap-1.5 rounded-lg bg-slate-50 p-2 dark:bg-slate-950">
+            <span className="font-medium text-slate-700 dark:text-slate-200">{isFa ? 'رنگ داخل' : 'Fill'}</span>
             <input data-shape-fill type="color" value={item.fillColor === 'transparent' ? '#000000' : item.fillColor}
               disabled={!shapeHasFill(item)} className="h-6 w-10 rounded border border-slate-300 bg-white dark:border-slate-600 dark:bg-slate-800"
               onChange={e => patch({ fillColor: e.target.value })} />
@@ -160,20 +165,20 @@ export function ShapeControlPanel() {
             className={`mt-1 w-full ${chip} ${shapeHasFill(item) ? 'border border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-700 dark:text-slate-100' : 'bg-sky-600 text-white dark:bg-sky-700'}`}>
             {shapeHasFill(item) ? (isFa ? 'بدون رنگ داخل' : 'No fill') : (isFa ? 'پر کردن با رنگ خط' : 'Fill with the stroke colour')}
           </button>
-          <div className="mt-1 flex flex-wrap gap-1">
+          <div className="mt-2 flex flex-wrap gap-2">
             {SWATCHES.map(color => (
               <button key={color} type="button" data-shape-swatch={color} aria-label={isFa ? `رنگ داخل ${color}` : `Fill ${color}`}
                 onClick={() => patch({ fillColor: color })}
-                className="h-4 w-4 rounded border border-slate-300 dark:border-slate-500 cursor-pointer" style={{ background: color }} />
+                className="h-7 w-7 rounded-lg border border-slate-300 shadow-sm transition hover:scale-105 dark:border-slate-500 cursor-pointer" style={{ background: color }} />
             ))}
           </div>
         </div>
       )}
 
       {/* 3. stroke */}
-      <div className="space-y-1">
-        <label className="flex items-center justify-between gap-1.5">
-          <span className="text-slate-600 dark:text-slate-400">{isFa ? 'رنگ خط' : 'Stroke'}</span>
+      <div className="space-y-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+        <label className="flex items-center justify-between gap-1.5 rounded-lg bg-slate-50 p-2 dark:bg-slate-950">
+          <span className="font-medium text-slate-700 dark:text-slate-200">{isFa ? 'رنگ خط' : 'Stroke'}</span>
           <input data-shape-stroke type="color" value={item.strokeColor} className="h-6 w-10 rounded border border-slate-300 bg-white dark:border-slate-600 dark:bg-slate-800"
             onChange={e => patch({ strokeColor: e.target.value })} />
         </label>
@@ -225,7 +230,11 @@ export function ShapeControlPanel() {
         </label>
       )}
 
+      </section>
+
       {/* 5. light and angle */}
+      <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <p className="font-semibold text-slate-800 dark:text-slate-100">{isFa ? 'شفافیت و چرخش' : 'Opacity & rotation'}</p>
       <label className="block">
         {isFa ? `شفافیت (${Math.round(item.opacity * 100)}٪)` : `Opacity (${Math.round(item.opacity * 100)}%)`}
         <input data-shape-opacity type="range" min="5" max="100" className="w-full" value={Math.round(item.opacity * 100)}
@@ -243,9 +252,13 @@ export function ShapeControlPanel() {
         ))}
       </div>
 
+      </section>
+
       {/* 6. size and place, in millimetres of the box it sits on */}
-      <div className="flex gap-1">
-        <label className="flex-1">{isFa ? 'عرض (م‌م)' : 'Width (mm)'}
+      <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <p className="font-semibold text-slate-800 dark:text-slate-100">{isFa ? 'اندازه و موقعیت' : 'Size & position'}</p>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="min-w-0">{isFa ? 'عرض (م‌م)' : 'Width (mm)'}
           <input data-shape-width type="number" min="0.5" step="0.1" className={input} value={Number(widthMm.toFixed(2))} onChange={e => setSize('width', Number(e.target.value))} /></label>
         <label className="min-w-0">{isFa ? 'ارتفاع (م‌م)' : 'Height (mm)'}
           <input data-shape-height type="number" min="0.5" step="0.1" className={input} value={Number(heightMm.toFixed(2))} onChange={e => setSize('height', Number(e.target.value))} /></label>
@@ -254,10 +267,10 @@ export function ShapeControlPanel() {
         <input data-shape-lock-aspect type="checkbox" checked={!!item.lockAspect} onChange={e => patch({ lockAspect: e.target.checked })} />
         {isFa ? 'قفل نسبت ابعاد' : 'Lock aspect ratio'} <span className="text-slate-500 dark:text-slate-400">({isFa ? 'Shift هنگام کشیدن' : 'Shift while dragging'})</span>
       </label>
-      <div className="flex gap-1">
-        <label className="flex-1">X (م‌م)
+      <div className="grid grid-cols-2 gap-2">
+        <label className="min-w-0">X (م‌م)
           <input data-shape-x type="number" step="0.1" className={input} value={Number((item.xPercent * box.width / 100).toFixed(2))} onChange={e => setPosition('x', Number(e.target.value))} /></label>
-        <label className="flex-1">Y (م‌م)
+        <label className="min-w-0">Y (م‌م)
           <input data-shape-y type="number" step="0.1" className={input} value={Number((item.yPercent * box.height / 100).toFixed(2))} onChange={e => setPosition('y', Number(e.target.value))} /></label>
       </div>
       <p className="text-[10px] leading-4 text-slate-500">
@@ -279,7 +292,7 @@ export function ShapeControlPanel() {
             {peers.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
           </select>
         )}
-        <div className="grid grid-cols-3 gap-1">
+        <div className="grid grid-cols-3 gap-1.5">
           {(['left', 'hcenter', 'right', 'top', 'vcenter', 'bottom'] as const).map(where => (
             <button key={where} type="button" data-shape-align={where}
               title={where}
@@ -291,6 +304,8 @@ export function ShapeControlPanel() {
           ))}
         </div>
       </div>
+
+      </section>
 
       {/* 7. where it is printed */}
       <section className="space-y-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">\n      <p className="font-semibold">{isFa ? 'محدوده چاپ و لایه' : 'Print scope & layers'}</p>\n      <label className="block">{isFa ? 'مبنا' : 'Attach to'}
@@ -308,7 +323,7 @@ export function ShapeControlPanel() {
         <>
           <label className="block">{item.target === 'page' ? (isFa ? 'شماره صفحات' : 'Chosen pages') : (isFa ? 'شماره برگه‌ها' : 'Chosen sheets')}
             <input data-shape-range dir="ltr" className={input} value={range} placeholder="1, 3-5" onChange={e => { setRange(e.target.value); setRangeError(false); }} /></label>
-          <button type="button" data-shape-range-apply onClick={applyRange} className={`${chip} border border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-700 dark:text-slate-100`}>{isFa ? 'اعمال بازه' : 'Apply range'}</button>
+          <button type="button" data-shape-range-apply onClick={applyRange} className={`${chip} border border-slate-200 bg-slate-50 text-slate-700 hover:border-sky-300 hover:bg-sky-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-sky-700`}>{isFa ? 'اعمال بازه' : 'Apply range'}</button>
           {rangeError && <p role="alert" className="text-rose-600 dark:text-rose-300">{isFa ? 'شماره یا بازه معتبر وارد کنید.' : 'Enter valid numbers or ranges.'}</p>}
         </>
       )}
@@ -336,7 +351,8 @@ export function ShapeControlPanel() {
           ? 'شکل روی همان صفحه یا برگه‌هایی که دامنه‌اش را تعیین می‌کنید چاپ می‌شود؛ خطوط ویرایشگر روی کاغذ نمی‌افتند.'
           : 'A shape prints on the pages or sheets its scope selects; the editor outlines never reach the paper.'}
       </p>
-      </section>\n      <button type="button" data-shape-delete onClick={() => removeOverlay(item.id)} className={`${chip} w-full bg-rose-600 text-white hover:bg-rose-500 dark:bg-rose-900 dark:text-rose-100 dark:hover:bg-rose-800`}>
+      </section>\n      </section>
+      <button type="button" data-shape-delete onClick={() => removeOverlay(item.id)} className={`${chip} w-full bg-rose-600 text-white hover:bg-rose-500 dark:bg-rose-900 dark:text-rose-100 dark:hover:bg-rose-800`}>
         {isFa ? 'حذف شکل' : 'Delete shape'}
       </button>
     </aside>
