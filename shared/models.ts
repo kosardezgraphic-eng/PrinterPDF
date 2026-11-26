@@ -1,0 +1,1527 @@
+/**
+ * PrintStudio Pro — Shared Data Models & Domain Contracts
+ * Used across Renderer (/app), Main Process (/electron), and C# Sidecar (/printer-service)
+ */
+
+export type AppLanguage = 'fa' | 'en';
+export type ThemeMode = 'dark' | 'light' | 'system';
+export type MeasurementUnit = 'mm' | 'cm' | 'inch';
+export type CalendarSystem = 'shamsi' | 'gregorian';
+
+export type PaperSizeId =
+  | 'A0'
+  | 'A1'
+  | 'A2'
+  | 'A3'
+  | 'A4'
+  | 'A5'
+  | 'A6'
+  | 'B4'
+  | 'B5'
+  | 'Letter'
+  | 'Legal'
+  | 'Custom';
+
+export type PageOrientation = 'portrait' | 'landscape';
+export type PageRotation = 0 | 90 | 180 | 270;
+
+export interface PaperDimensionsMm {
+  id: PaperSizeId;
+  label: string;
+  widthMm: number;
+  heightMm: number;
+}
+
+export const STANDARD_PAPER_SIZES: Record<Exclude<PaperSizeId, 'Custom'>, PaperDimensionsMm> = {
+  A0: { id: 'A0', label: 'ISO A0 (841 × 1189 mm)', widthMm: 841, heightMm: 1189 },
+  A1: { id: 'A1', label: 'ISO A1 (594 × 841 mm)', widthMm: 594, heightMm: 841 },
+  A2: { id: 'A2', label: 'ISO A2 (420 × 594 mm)', widthMm: 420, heightMm: 594 },
+  A3: { id: 'A3', label: 'ISO A3 (297 × 420 mm)', widthMm: 297, heightMm: 420 },
+  A4: { id: 'A4', label: 'ISO A4 (210 × 297 mm)', widthMm: 210, heightMm: 297 },
+  A5: { id: 'A5', label: 'ISO A5 (148 × 210 mm)', widthMm: 148, heightMm: 210 },
+  A6: { id: 'A6', label: 'ISO A6 (105 × 148 mm)', widthMm: 105, heightMm: 148 },
+  B4: { id: 'B4', label: 'JIS B4 (250 × 353 mm)', widthMm: 250, heightMm: 353 },
+  B5: { id: 'B5', label: 'JIS B5 (176 × 250 mm)', widthMm: 176, heightMm: 250 },
+  Letter: { id: 'Letter', label: 'US Letter (215.9 × 279.4 mm)', widthMm: 215.9, heightMm: 279.4 },
+  Legal: { id: 'Legal', label: 'US Legal (215.9 × 355.6 mm)', widthMm: 215.9, heightMm: 355.6 },
+};
+
+export type SupportedFileType = 'pdf' | 'image';
+
+export interface SourceDocument {
+  id: string;
+  name: string;
+  filePath: string;
+  fileSize: number;
+  fileType: SupportedFileType;
+  mimeType: string;
+  pageCount: number;
+  createdAt: string;
+  collapsed?: boolean;
+  /** Group key & title when multiple images are imported together as one visual box/bookmark. */
+  batchGroupId?: string;
+  batchGroupTitle?: string;
+  /** Raw bytes in memory or indexed cache key */
+  rawBytes?: Uint8Array;
+  /** Original raw bytes before auto-deskew straightening so deskew remains non-destructive and reversible. */
+  preDeskewRawBytes?: Uint8Array;
+  preDeskewMimeType?: string;
+}
+
+export interface PageTransform {
+  x: number; y: number; scaleX: number; scaleY: number;
+  /** Additional clockwise rotation of this occurrence around its center, in degrees. */
+  rotationDeg?: number;
+}
+export interface CellOverride { pageId: string; transform?: PageTransform; zIndex?: number; allowOverflow?: boolean }
+
+export interface PagePerspectiveSource {
+  documentId: string;
+  documentName: string;
+  sourcePageNumber: number;
+  widthMm: number;
+  heightMm: number;
+  rotation: PageRotation;
+  thumbnailDataUrl?: string;
+  quad: {
+    tl: { x: number; y: number };
+    tr: { x: number; y: number };
+    br: { x: number; y: number };
+    bl: { x: number; y: number };
+  };
+  aspectPreset?: string;
+  customRatioW?: number;
+  customRatioH?: number;
+  effectiveRotation?: PageRotation;
+}
+
+export interface DetectedDocumentQuad {
+  tl: { x: number; y: number };
+  tr: { x: number; y: number };
+  br: { x: number; y: number };
+  bl: { x: number; y: number };
+}
+
+export interface DetectedDocumentBoundaries {
+  /** Normalized [0..1] 4 corners in unrotated source image coordinates (tl, tr, br, bl). */
+  corners: DetectedDocumentQuad;
+  /** Axis-aligned normalized crop insets [0..0.98] derived from detected corners. */
+  bounds: { top: number; right: number; bottom: number; left: number };
+  /** Heuristic confidence score in [0..1]. */
+  confidence: number;
+  /** Offline CV strategy that succeeded ('contour' | 'gradient'). */
+  method: 'contour' | 'gradient';
+  /** True when the detected quadrilateral is noticeably skewed/perspective-distorted. */
+  isSkewed: boolean;
+}
+
+export interface ScanDeskewInfo {
+  applied: boolean;
+  /** Detected skew angle in degrees that was compensated (image rotated by -angleDeg). */
+  angleDeg: number;
+  confidence: number;
+  method: 'boundary' | 'projection';
+  originalWidthMm?: number;
+  originalHeightMm?: number;
+  originalWidthPx?: number;
+  originalHeightPx?: number;
+}
+
+export interface PagePerPageOverrides {
+  invert?: boolean;
+  grayscale?: boolean;
+  threshold?: boolean;
+  /** Keep an explicitly chosen page rotation from being overridden by auto-fit. */
+  manualRotation?: boolean;
+  /** Base rotation preserved across repeated Auto-Pack applications so Apply never double-rotates 90° -> 180°. */
+  autoPackBaseRotation?: PageRotation;
+  cropBoxMm?: { top: number; right: number; bottom: number; left: number };
+  /** Relative to the cell: offsets in cell fractions and independent size multipliers. */
+  transform?: PageTransform;
+  /** Non-destructive original uncropped source & last quad so re-entering perspective crop shows the full image before cropping. */
+  perspectiveSource?: PagePerspectiveSource;
+  /** Automatically detected offline 4-corner document boundaries for raw scanned images. */
+  detectedBoundaries?: DetectedDocumentBoundaries;
+  /** Metadata describing automatic or manual deskew straightening applied to the scan. */
+  deskewInfo?: ScanDeskewInfo;
+  /** Optional per-page opacity multiplier (0..1) for layered/ticket artwork. */
+  opacity?: number;
+}
+
+export interface PageItem {
+  id: string;
+  documentId: string;
+  documentName: string;
+  /** 1-based page index inside the source document */
+  sourcePageNumber: number;
+  /** Width in millimeters */
+  widthMm: number;
+  /** Height in millimeters */
+  heightMm: number;
+  /** Rotation in degrees (0, 90, 180, 270) */
+  rotation: PageRotation;
+  /** Selected for printing / merging */
+  selectedForPrint: boolean;
+  /** UI selection state for multi-select operations */
+  isHighlighted: boolean;
+  /** Blank page inserted by user */
+  isBlankPage: boolean;
+  /** Color analysis classification */
+  colorProfile: 'color' | 'grayscale' | 'blank';
+  /** Estimated ink coverage 0..100% */
+  inkCoveragePercent: number;
+  /** Data URL of rendered thumbnail or SVG preview */
+  thumbnailDataUrl?: string;
+  /** High-res preview or text lines for rich simulation */
+  previewLines?: string[];
+  previewAccentColor?: string;
+  /** Optional per-page overrides (e.g. single page invert) */
+  overrides?: PagePerPageOverrides;
+  /** Reversible brush and marquee marks applied to the page content itself. */
+  erase?: EraseShape[];
+}
+
+export interface BookmarkItem {
+  id: string;
+  title: string;
+  documentId: string;
+  targetPageId: string;
+  pageIndex: number;
+  level: number;
+  /** Member document IDs when a batch of images is grouped into a single bookmark. */
+  documentIds?: string[];
+  /** Member page IDs when a batch of images is grouped into a single bookmark. */
+  pageIds?: string[];
+  /** Total number of grouped images/pages inside this bookmark. */
+  itemCount?: number;
+}
+
+/**
+ * D) Page Layout / Imposition Models (D1 - D5)
+ */
+export type PlacementMode = 'sequential' | 'step-and-repeat';
+export type ScaleMode = 'fit' | 'fill' | 'original' | 'custom';
+export type DuplexMode = 'none' | 'long-edge' | 'short-edge';
+export type SheetOrderMode = 'ltr' | 'rtl' | 'column' | 'spiral';
+export type CellAlignment =
+  | 'center'
+  | 'top-left'
+  | 'top-center'
+  | 'top-right'
+  | 'bottom-left'
+  | 'bottom-center'
+  | 'bottom-right';
+
+export interface MarginsMm {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+/** Non-printing ruler guides measured from the left or top edge of the output sheet. */
+export interface RulerGuide { id: string; axis: 'x' | 'y'; positionMm: number }
+
+export interface BookletSettings {
+  enabled: boolean;
+  direction: 'ltr' | 'rtl';
+  /** 0 means one signature containing all pages; otherwise a fixed multiple of four. */
+  signatureSize: 0 | 4 | 8 | 12 | 16 | 24 | 32;
+  spineWidthMm: number;
+  creepMm: number;
+  duplexMode: 'long-edge' | 'short-edge';
+  outerMarginMm: number;
+  compensateCreep: boolean;
+}
+
+export interface LayoutSettings {
+  /** Optional for compatibility with older saved projects and profiles. */
+  booklet?: BookletSettings;
+  paperSize: PaperSizeId;
+  customWidthMm: number;
+  customHeightMm: number;
+  orientation: PageOrientation;
+  /** Grid rows (1..100) */
+  rows: number;
+  /** Grid columns (1..100) */
+  cols: number;
+  /** D2: 'sequential' = each page in a cell, 'step-and-repeat' = repeat each page across all cells on sheet */
+  placementMode: PlacementMode;
+  /** D2: Use identical minimum scale factor across all cells on a sheet */
+  uniqueScale: boolean;
+  /** D3: Outer sheet margins in mm */
+  marginsMm: MarginsMm;
+  /** Shared workspace guides; positions are in millimetres and never affect output. */
+  rulerGuides?: RulerGuide[];
+  /** Printer defaults follow the selected printer/paper; custom margins are preserved. */
+  marginMode?: 'printer' | 'custom';
+  /** D3: Horizontal spacing between cells in mm */
+  horizontalGutterMm: number;
+  /** D3: Vertical spacing between cells in mm */
+  verticalGutterMm: number;
+  /** Per-occurrence transforms and layer order, keyed by page and matrix occurrence. */
+  cellOverrides?: Record<string, CellOverride>;
+  /** D3: Scale mode */
+  scaleMode: ScaleMode;
+  /** Custom scale percentage (10..400) */
+  customScalePercent: number;
+  /** D3: Cell alignment */
+  alignment: CellAlignment;
+  /** D3: Automatically rotate page inside cell to maximize fit */
+  autoRotateToFit: boolean;
+  /** D5: Duplex mode */
+  duplexMode: DuplexMode;
+  /** D5: Reading / cell filling order */
+  sheetOrder: SheetOrderMode;
+  /** D5: Manual duplex (2-pass printing with 3D flip guide) */
+  manualDuplex: boolean;
+  /** D8 / Preview helper: Draw cell borders and crop marks */
+  showCellBorders: boolean;
+  showCropMarks: boolean;
+  /** Mixed-orientation guillotine cell slots generated by Auto-Pack when hybrid packing fits more items than a uniform grid. */
+  customCells?: CustomCellSlot[];
+}
+
+export interface CustomCellSlot {
+  cellIndex: number;
+  row: number;
+  col: number;
+  /** Offset from sheet left/top printable margin in mm */
+  xMm: number;
+  yMm: number;
+  widthMm: number;
+  heightMm: number;
+  /** Additional 90-degree clockwise rotation for this cell */
+  rotated90?: boolean;
+}
+
+export interface ComputedCellPlacement {
+  cellIndex: number;
+  row: number;
+  col: number;
+  page: PageItem | null;
+  globalPageNumber: number | null;
+  /** Cell bounding box on the sheet in mm */
+  cellXMm: number;
+  cellYMm: number;
+  cellWidthMm: number;
+  cellHeightMm: number;
+  /** Content bounding box inside the cell in mm */
+  contentXMm: number;
+  contentYMm: number;
+  contentWidthMm: number;
+  contentHeightMm: number;
+  scaleFactor: number;
+  effectiveRotation: PageRotation;
+  occurrenceKey?: string;
+  transform?: PageTransform;
+  zIndex?: number;
+  allowOverflow?: boolean;
+}
+
+export interface ComputedSheetSide {
+  sheetNumber: number;
+  side: 'front' | 'back';
+  sideIndex: number; // 1-based sheet side index
+  widthMm: number;
+  heightMm: number;
+  marginsMm?: MarginsMm;
+  cells: ComputedCellPlacement[];
+}
+
+/**
+ * E) Effects & Filters Pipeline Models (E1 - E2)
+ */
+export type EffectScope = 'all' | 'selected';
+
+export interface EffectsSettings {
+  enabled: boolean;
+  scope: EffectScope;
+  /** Pinned thumbnail page IDs captured when scope === 'selected' so scrolling preview never moves effects to other pages */
+  targetPageIds?: string[];
+  /** E1: Invert colors (Preview via GPU/CSS, Print via Raster, PDF via Vector BlendMode Difference or Raster) */
+  invert: boolean;
+  /** Vector vs Raster strategy for PDF Export when Invert is active */
+  invertPdfStrategy: 'vector-blend' | 'raster';
+  /** E2: Grayscale conversion */
+  grayscale: boolean;
+  /** E2: Black & White threshold (1-bit style) */
+  blackAndWhite: boolean;
+  /** Threshold 0..255 (default 128) */
+  threshold: number;
+  /** E2: Force dark gray text to pure 100% K black */
+  blackText: boolean;
+  /** E2: Brightness -100..+100 (default 0) */
+  brightness: number;
+  /** E2: Contrast -100..+100 (default 0) */
+  contrast: number;
+  /** E2: Gamma 0.2..3.0 (default 1.0) */
+  gamma: number;
+  /** E2: Sharpness 0..100 (default 0) */
+  sharpness: number;
+}
+
+/**
+ * F) Insert: Watermark & Page/Bates Numbering (F1 - F2)
+ */
+export interface WatermarkSettings {
+  enabled: boolean;
+  type: 'text' | 'image';
+  /** Supports macros: {page}, {pages}, {sheet}, {sheets}, {date}, {shamsi_date}, {file}, {user} */
+  text: string;
+  imageDataUrl?: string;
+  fontFamily: 'Vazirmatn' | 'Inter';
+  fontSizePt: number;
+  colorHex: string;
+  opacity: number; // 0.05 .. 1.0
+  rotationDeg: number; // -90 .. +90
+  tiled: boolean;
+  tileSpacingMm: number;
+}
+
+export type PageNumberFormat = 'persian' | 'english' | 'roman' | 'bates';
+export type PageNumberPosition =
+  | 'bottom-center'
+  | 'bottom-left'
+  | 'bottom-right'
+  | 'top-center'
+  | 'top-left'
+  | 'top-right';
+
+export interface PageNumberSettings {
+  enabled: boolean;
+  target: 'page' | 'sheet';
+  format: PageNumberFormat;
+  position: PageNumberPosition;
+  startNumber: number;
+  batesPrefix: string;
+  batesDigits: number;
+  fontSizePt: number;
+  marginMm: number;
+  headerText: string;
+  footerText: string;
+}
+
+/**
+ * B) Counter Summary Models (B1 - B2)
+ */
+export interface PaperBreakdownItem {
+  sizeLabel: string;
+  orientation: PageOrientation;
+  totalPages: number;
+  selectedPages: number;
+  colorPages: number;
+  bwPages: number;
+  blankPages: number;
+}
+
+export interface FileCountSummary {
+  documentId: string;
+  documentName: string;
+  fileSize: number;
+  totalPages: number;
+  selectedPages: number;
+  colorPages: number;
+  bwPages: number;
+  blankPages: number;
+}
+
+export interface CounterSummary {
+  totalFiles: number;
+  totalPages: number;
+  selectedPages: number;
+  highlightedPages: number;
+  colorPages: number;
+  bwPages: number;
+  blankPages: number;
+  /** Total sheet sides (impressions) after N-Up */
+  totalImpressions: number;
+  /** Total physical paper sheets after N-Up and Duplex */
+  totalPhysicalSheets: number;
+  cellsPerSheet: number;
+  isDuplex: boolean;
+  averageInkCoveragePercent: number;
+  estimatedCostRials: number;
+  byPaperSize: PaperBreakdownItem[];
+  byFile: FileCountSummary[];
+}
+
+/**
+ * I) Printer Management & Spooler Models (I1 - I3)
+ */
+export type PrinterStatus =
+  | 'Ready'
+  | 'Printing'
+  | 'Paused'
+  | 'Offline'
+  | 'PaperJam'
+  | 'OutOfPaper'
+  | 'LowToner'
+  | 'DoorOpen'
+  | 'Error';
+
+/** Printable-area query for the selected printer and oriented paper size. */
+export interface PrinterMarginRequest {
+  printerName: string; paperSize: PaperSizeId; orientation: PageOrientation;
+  widthMm: number; heightMm: number;
+}
+export type PrinterMarginResult =
+  | { status: 'available'; source: 'hardware' | 'virtual' | 'simulated-virtual'; marginsMm: MarginsMm }
+  | { status: 'unavailable'; reason: string };
+
+export interface PrinterPaperOption {
+  id: PaperSizeId;
+  /** Exact Windows driver paper name, e.g. "A4", "A3", "SRA3", "Letter" */
+  name: string;
+  widthMm: number;
+  heightMm: number;
+  rawKind?: number;
+}
+
+export interface PrinterCapabilities {
+  supportedPapers: PaperSizeId[];
+  /** Full driver-reported paper entries including exact driver names and mm dimensions. */
+  paperOptions?: PrinterPaperOption[];
+  supportedTrays: string[];
+  supportedMediaTypes: string[];
+  supportsDuplex: boolean;
+  supportsColor: boolean;
+  supportedDpi: number[];
+  maxCopies: number;
+  supportsCollate?: boolean;
+  supportsStaple?: boolean;
+  supportedStapleModes?: string[];
+  supportedHolePunchModes?: string[];
+  supportedFoldModes?: string[];
+  supportedOutputBins?: string[];
+  supportedQualities?: Array<'draft' | 'normal' | 'high'>;
+  supportsBorderless?: boolean;
+}
+
+export interface PrinterProfileSettings {
+  printerName: string;
+  paperSize: PaperSizeId;
+  /** Exact driver paper name when available (e.g. "A4", "SRA3", "Letter"). */
+  paperName?: string;
+  tray: string;
+  mediaType: string;
+  duplexMode: DuplexMode;
+  orientation: PageOrientation;
+  colorMode: 'color' | 'grayscale' | 'monochrome';
+  dpi: number;
+  quality: 'draft' | 'normal' | 'high';
+  /** Physical media dimensions reported by the selected Windows printer driver. */
+  paperWidthMm?: number;
+  paperHeightMm?: number;
+  collate?: boolean;
+  staple?: string;
+  outputBin?: string;
+  holePunch?: string;
+  fold?: string;
+  borderless?: boolean;
+}
+
+export interface PrinterInfo {
+  name: string;
+  driverName: string;
+  portName: string;
+  isDefault: boolean;
+  isNetwork: boolean;
+  isVirtual: boolean;
+  status: PrinterStatus;
+  jobsInQueue: number;
+  tonerLevelPercent?: number;
+  totalPageCounter?: number;
+  location?: string;
+  capabilities: PrinterCapabilities;
+  activeProfile: PrinterProfileSettings;
+}
+
+export type SpoolerJobStatus =
+  | 'Spooling'
+  | 'Printing'
+  | 'Paused'
+  | 'Completed'
+  | 'Error'
+  | 'Canceled';
+
+export interface SpoolerJobInfo {
+  jobId: number;
+  printerName: string;
+  documentTitle: string;
+  userName: string;
+  status: SpoolerJobStatus;
+  totalPages: number;
+  pagesPrinted: number;
+  sizeBytes: number;
+  priority: number; // 1 (lowest) .. 99 (highest)
+  submittedAt: string;
+}
+
+/**
+ * G) Print Dialog & Execution Request (G1 - G2)
+ */
+export interface PrintJobRequest {
+  printerName: string;
+  jobTitle: string;
+  copies: number;
+  collate: boolean;
+  pageRangeMode: 'all-selected' | 'current-page' | 'custom-range';
+  customRangeText: string; // e.g. "1-5, 8, 11-13"
+  oddEvenFilter: 'all' | 'odd' | 'even';
+  reverseOrder: boolean;
+  duplexMode: DuplexMode;
+  scaleMode: 'fit' | 'actual';
+  dpi: number;
+  colorMode: 'color' | 'bw';
+  tray: string;
+  silent: boolean;
+  paperSize?: PaperSizeId;
+  paperName?: string;
+  paperWidthMm?: number;
+  paperHeightMm?: number;
+  orientation?: PageOrientation;
+  mediaType?: string;
+  quality?: 'draft' | 'normal' | 'high';
+  staple?: string;
+  outputBin?: string;
+  holePunch?: string;
+  fold?: string;
+  borderless?: boolean;
+}
+
+/**
+ * H) Batch Print Queue Models (H1 - H2)
+ */
+export type BatchJobStatus =
+  | 'queued'
+  | 'processing'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'canceled';
+
+export type BatchPageRangeMode = 'all' | 'custom';
+export type BatchOddEvenFilter = 'all' | 'odd' | 'even';
+
+export interface BatchJobItem {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  pageCount: number;
+  printerName: string;
+  copies: number;
+  collate?: boolean;
+  pageRangeMode?: BatchPageRangeMode;
+  customRangeText?: string;
+  oddEvenFilter?: BatchOddEvenFilter;
+  reverseOrder?: boolean;
+  nUp: number; // e.g., 1, 2, 4, 6, 9
+  scaleMode?: 'fit' | 'actual';
+  paperSize?: PaperSizeId;
+  paperName?: string;
+  paperWidthMm?: number;
+  paperHeightMm?: number;
+  orientation?: PageOrientation;
+  tray?: string;
+  mediaType?: string;
+  dpi?: number;
+  quality?: 'draft' | 'normal' | 'high';
+  colorMode?: 'color' | 'bw';
+  duplexMode: DuplexMode;
+  staple?: string;
+  holePunch?: string;
+  fold?: string;
+  outputBin?: string;
+  borderless?: boolean;
+  invert: boolean;
+  /** When true, follows the active batch printer hardware profile dynamically; when false, keeps per-file overrides */
+  useGlobalPrinterSettings?: boolean;
+  /** Deep workspace/document snapshot so Batch Print executes independently from Studio */
+  snapshotDocuments?: SourceDocument[];
+  snapshotPages?: PageItem[];
+  snapshotLayout?: LayoutSettings;
+  snapshotEffects?: EffectsSettings;
+  snapshotWatermark?: WatermarkSettings;
+  snapshotPageNumbering?: PageNumberSettings;
+  snapshotOverlays?: PageOverlay[];
+  status: BatchJobStatus;
+  progressPercent: number;
+  retryCount: number;
+  spoolerJobId?: number;
+  errorMessage?: string;
+  addedAt: string;
+  completedAt?: string;
+}
+
+/**
+ * Windows Virtual Printer Models
+ */
+export const VIRTUAL_PRINTER_DEFAULT_NAME = 'PrintStudio Pro Virtual Printer';
+
+export interface VirtualPrinterConfig {
+  enabled: boolean;
+  printerName: string;
+  paperSize: PaperSizeId;
+  paperWidthMm: number;
+  paperHeightMm: number;
+  orientation: PageOrientation;
+  dpi: number;
+  autoImportToStudio: boolean;
+  switchToStudioOnReceive: boolean;
+}
+
+export interface VirtualPrinterCapturedJob {
+  id: string;
+  jobTitle: string;
+  fileName: string;
+  pageCount: number;
+  sizeBytes: number;
+  paperSize: PaperSizeId;
+  orientation: PageOrientation;
+  dpi: number;
+  receivedAt: string;
+  source: 'windows-spool' | 'in-app' | 'inbox-drop';
+}
+
+export interface VirtualPrinterStatus {
+  supportedOnOs: boolean;
+  installedInWindows: boolean;
+  driverName: string | null;
+  portName: string | null;
+  spoolDir: string;
+  watcherActive: boolean;
+  lastError: string | null;
+  config: VirtualPrinterConfig;
+  recentJobs: VirtualPrinterCapturedJob[];
+}
+
+export interface VirtualPrinterIncomingPayload {
+  job: VirtualPrinterCapturedJob;
+  fileName: string;
+  mimeType: string;
+  bytes: Uint8Array;
+}
+
+/**
+ * K) App Settings & .psp Project File (K1)
+ */
+export interface AppSettings {
+  language: AppLanguage;
+  theme: ThemeMode;
+  unit: MeasurementUnit;
+  calendar: CalendarSystem;
+  userName: string;
+  defaultOutputFolder: string;
+  maxCachePages: number;
+  bwPageTariffRials: number;
+  colorPageTariffRials: number;
+  duplexDiscountPercent: number;
+  autoSaveIntervalSec: number;
+  autoSelectPrinterByPaperAndColor: boolean;
+  /**
+   * How the sheet preview paints a page. `fast` reuses the bitmap made at import, which is cheap but
+   * blurry for vector artwork as soon as the operator zooms in; `crisp` re-renders the page from the
+   * file's own drawing instructions at the size it is displayed.
+   */
+  previewFidelity: PreviewFidelity;
+  /** Automatically straighten tilted document scans on image import using offline CV deskew. */
+  autoDeskewOnImport?: boolean;
+}
+
+/** `fast` = stored bitmap only, `crisp` = render the source page at display resolution. */
+export type PreviewFidelity = 'fast' | 'crisp';
+
+export type PdfImageHandling = 'preserve' | 'downsample-300' | 'downsample-150';
+export type PdfCompressionMode = 'lossless' | 'balanced' | 'compact';
+
+export interface PdfExportOptions {
+  imageHandling: PdfImageHandling;
+  compression: PdfCompressionMode;
+}
+
+/**
+ * A named, reusable snapshot of the **sheet** settings: what happens to the pages — imposition and
+ * placement, colour and effects, watermark, page numbering.
+ *
+ * The application's own settings (language, unit, calendar, operator name, tariffs, cache and preview
+ * fidelity) are deliberately *not* part of a profile. A profile is a press setup you hand to a
+ * colleague or switch to ten times a day; the machine's preferences are not, and folding them in made
+ * applying a profile change things the operator was not asking to change.
+ *
+ * `shortcut` is a canonical key chord (`Alt+F7`…`Alt+F12`, or `Ctrl+Alt` with one letter or digit —
+ * see `isAssignableShortcut` below), empty when the profile has none. `id` is stable across renames, and the reserved `SHEET_DEFAULT_PRESET_ID` below is a
+ * profile that is never stored: it *is* the reset-to-defaults action.
+ */
+export interface SettingsPreset {
+  id: string;
+  name: string;
+  shortcut: string;
+  createdAt: string;
+  updatedAt: string;
+  layout: LayoutSettings;
+  effects: EffectsSettings;
+  watermark: WatermarkSettings;
+  pageNumbering: PageNumberSettings;
+  numberingOverlays?: PageOverlayNumbering[];
+}
+
+/** The built-in "back to the shipped defaults" entry; applying it resets every section, sheet and app. */
+export const SHEET_DEFAULT_PRESET_ID = 'preset:defaults';
+/** The chord that entry answers to — fixed, and never assignable to a stored profile. */
+export const SHEET_DEFAULT_PRESET_SHORTCUT = 'Alt+F6';
+
+export interface PspProjectFile {
+  version: '1.0.0';
+  savedAt: string;
+  appSettings: AppSettings;
+  layout: LayoutSettings;
+  effects: EffectsSettings;
+  watermark: WatermarkSettings;
+  pageNumbering: PageNumberSettings;
+  /** Optional for backwards compatibility with older projects. */
+  overlays?: PageOverlay[];
+  documents: Omit<SourceDocument, 'rawBytes'>[];
+  pages: PageItem[];
+  bookmarks: BookmarkItem[];
+}
+
+/** Overlay coordinates are percentages of the output sheet, imposed cell, or source-page box. */
+export type OverlayScope = 'current' | 'all' | 'even' | 'odd' | 'first' | 'last' | 'selected' | 'document' | 'selected-documents';
+export type OverlayTarget = 'page' | 'cell' | 'sheet';
+/** `badge` is a ring: a circle with a reversed circle cut out of the middle. */
+export type ShapeType = 'rectangle' | 'square' | 'rounded-rect' | 'circle' | 'line' | 'arrow' | 'triangle' | 'polygon' | 'star' | 'diamond' | 'badge';
+export type NumberingNumberFormat = 'persian' | 'english' | 'roman' | 'abjad';
+
+/**
+ * What a numbering layer counts. A sheet of 2×2 cells printing pages 1–4 can be numbered by the document's own
+ * page number (`page`), by the order the cells are read off the printed sheet (`grid`), or once per output side
+ * (`sheet`) — the operator picks which of those is "the page number" without having to move the pages
+ * themselves. It is independent of the document's own page numbers: a booklet prints sheet 5 holding document
+ * pages 8 and 1, and both numbers may be wanted at once, which is why this lives on the numbering overlay and
+ * not on the document.
+ */
+export type NumberingSequenceBasis = 'page' | 'grid' | 'sheet' | 'cut-stack';
+/**
+ * The direction of the grid walk, and only the grid walk: `ltr`/`rtl` read each printed row in writing order,
+ * `ttb`/`btt` read each column top-to-bottom or bottom-to-top, and `zigzag` reverses every other row so the
+ * count snakes across the sheet instead of jumping back to the leading edge — the usual request for a
+ * numbered grid of tickets.
+ */
+export type NumberingSequenceDirection = 'ltr' | 'rtl' | 'ttb' | 'btt' | 'zigzag';
+export const NUMBERING_SEQUENCE_BASES: NumberingSequenceBasis[] = ['page', 'grid', 'sheet', 'cut-stack'];
+export const NUMBERING_SEQUENCE_DIRECTIONS: NumberingSequenceDirection[] = ['ltr', 'rtl', 'ttb', 'btt', 'zigzag'];
+
+export interface OverlayBase {
+  id: string;
+  target: OverlayTarget;
+  targetScope: OverlayScope;
+  /** Stable page ids captured when applying current/selected. */
+  targetPageIds: string[];
+  /** One-based side index captured for current sheet. */
+  targetSheetIndex: number;
+  xPercent: number; yPercent: number; widthPercent: number; heightPercent: number;
+  opacity: number; rotation: number;
+  /** Keeps the visual width/height ratio while resizing. Shift always locks temporarily. */
+  lockAspect?: boolean;
+  /** One-based output side indexes captured by a sheet-targeted `selected` scope. */
+  targetSheetIndices?: number[];
+}
+export interface TextScriptRange { start: number; end: number; script: 'super' | 'sub' }
+export interface PageOverlayText extends OverlayBase {
+  kind: 'text'; text: string; fontSize: number; fontFamily: string; color: string;
+  backgroundColor?: string; bold: boolean; italic: boolean; underline: boolean;
+  align: 'right' | 'center' | 'left' | 'justify'; syncGroupId?: string;
+  /** Numbering overlays use vertical centring and a small safe inset inside their box. */
+  verticalAlign?: 'top' | 'middle';
+  /** Document scopes use stable document IDs; ranges use UTF-16 offsets. */
+  targetDocumentIds?: string[];
+  /** Additional coverage is independent of the base scope and can be disabled. */
+  coverageMode?: 'all' | 'selected';
+  coveragePageIds?: string[];
+  /** One-based output side indices, for sheet-targeted text. */
+  coverageSheetIndices?: number[];
+  scriptRanges?: TextScriptRange[];
+  /** Line height multiplier and extra word/letter spacing in points. */
+  lineHeight?: number; wordSpacingPt?: number; letterSpacingPt?: number;
+}
+/** How the ends of an open stroke are cut; a filled outline ignores it. */
+export type ShapeLineCap = 'butt' | 'round' | 'square';
+/**
+ * A drawn outline — a box, a circle, a rule, an arrow. The geometry is derived from these numbers by
+ * `app/src/engine/shapes.ts`, which is the only place a shape's outline is described, so the preview,
+ * the rasteriser and the exported PDF cannot disagree about what the operator drew.
+ *
+ * Lengths are physical, not relative: `strokeWidth` in points and `borderRadius` in millimetres, so a
+ * 1 pt hairline stays a 1 pt hairline when the box is dragged bigger. Colours are `#rrggbb`, `#rgb` or
+ * `transparent` (nothing else is accepted, because the preview paints the shape as SVG).
+ */
+export interface PageOverlayShape extends OverlayBase {
+  kind: 'shape'; type: ShapeType; fillColor: string; strokeColor: string;
+  strokeWidth: number; strokeStyle: 'solid' | 'dashed' | 'dotted'; borderRadius: number;
+  /** Vertices of a `polygon`, points of a `star` (3–16); defaults 6 and 5. */
+  sides?: number;
+  /** How deep a `star`'s waist sits, as a percent of its radius (10–95). */
+  innerRadiusPercent?: number;
+  lineCap?: ShapeLineCap;
+  /** Direction for `line` shapes; defaults to horizontal so vertical cut/perforation guides never need 90-degree rotation. */
+  lineOrientation?: 'horizontal' | 'vertical';
+}
+export interface PageOverlayNumbering extends OverlayBase {
+  kind: 'numbering'; enabled: boolean; fontSize: number; fontFamily: string; color: string;
+  backgroundColor?: string; bold: boolean; italic: boolean;
+  format: NumberingNumberFormat; template: string; startOffset: number; padZeros: number; customScript: string;
+  align?: 'left' | 'center' | 'right' | 'justify';
+  /**
+   * The axis every placed occurrence walks along. `page` counts pages in workspace order (the classic
+   * "each page gets the next number, wherever the imposition puts it"); `row` and `column` count cells on
+   * the printed sheet — left to right, top to bottom for a row walk, and down a column before moving to the
+   * next one for a column walk; `sheet` counts output sides. Absent means `page`, so an old project keeps
+   * the numbers it was saved with.
+   */
+  sequenceBasis?: NumberingSequenceBasis;
+  /** Where the walk starts in the sheet's own cell order. `reverse-*` runs the same walk backwards. */
+  sequenceDirection?: NumberingSequenceDirection;
+}
+/**
+ * One gesture the eraser tool leaves on a picture, in **percent of the piece of the box the picture actually
+ * paints** (its fit rectangle) — the same space the preview masks and the exporter cuts, so a mark stays on
+ * the artwork when the box is moved, resized, letterboxed or mirrored.
+ *
+ * It is stored as geometry, not as a rasterised copy of the file: the original bytes stay intact, a picture
+ * can be worked on further and restored completely, and the project file stays small. A brush is a list of
+ * points with a physical radius (millimetres, so the brush feels the same size whatever the zoom); a region
+ * is the marquee rectangle itself.
+ */
+export interface EraseBrushStroke { mode: 'brush'; radiusMm: number; points: { x: number; y: number }[]; color?: string }
+export interface EraseRegion { mode: 'region'; x: number; y: number; width: number; height: number; color?: string }
+export type EraseShape = EraseBrushStroke | EraseRegion;
+
+/**
+ * The colour a gesture was drawn with, or `undefined` when it removes pixels instead of covering them.
+ *
+ * Only `#rgb`/`#rrggbb` survives — this string is written into a CSS mask, a canvas fill and a project file,
+ * so anything else (`url(#x)`, an expression) is not a colour the app is willing to paint. A gesture without
+ * a colour is the honest default: an eraser that quietly became a paintbrush is worse than one that only
+ * erases.
+ */
+export function sanitizeEraseColor(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const value = raw.trim().toLowerCase();
+  if (/^#[0-9a-f]{6}$/.test(value)) return value;
+  if (/^#[0-9a-f]{3}$/.test(value)) return `#${value[1]}${value[1]}${value[2]}${value[2]}${value[3]}${value[3]}`;
+  return undefined;
+}
+
+/** The most erase gestures one picture may carry, and the most points one brush stroke may carry. */
+export const ERASE_SHAPE_LIMIT = 240;
+export const ERASE_POINT_LIMIT = 900;
+
+export interface PageOverlayImage extends OverlayBase {
+  kind: 'image';
+  /** data: URL of the picture; kept inside the project file so the overlay survives reloading. */
+  src: string;
+  /** Original file name, shown in the layer list and aria label. */
+  name: string;
+  /** Natural pixel size; zero when it could not be measured. */
+  naturalWidth: number; naturalHeight: number;
+  /** 'fill' stretches into the box, 'contain' letterboxes it inside the box. */
+  fit?: 'fill' | 'contain';
+  /** Mirrors the picture without touching the box geometry. */
+  flipHorizontal?: boolean; flipVertical?: boolean;
+  /**
+   * Negates the picture's colours. A flag, never a rewrite of the pixels, so pressing the button again
+   * is the way back — an "invert" that baked the file would leave the operator holding a double inversion
+   * they cannot undo without reloading the artwork.
+   */
+  invert?: boolean;
+  /** Holes punched into the picture by the eraser. Empty or absent means nothing was erased. */
+  erase?: EraseShape[];
+  /**
+   * How a sheet-targeted picture fills the sheet. `whole` (the default) draws it once across the whole output
+   * side, so a logo dropped on a 2×2 sheet stays one logo instead of becoming four; `each-cell` repeats it
+   * inside every populated cell, sized from that cell — the old behaviour, kept as an explicit choice because
+   * a watermark per cell is a real job too.
+   *
+   * Only `target: 'sheet'` reads this: a picture dropped *into* a page keeps belonging to that page and is
+   * never echoed onto its neighbours, which is what made a stamp dropped on one cell appear on all of them.
+   */
+  sheetFill?: 'whole' | 'each-cell';
+}
+/**
+ * Erase gestures a renderer can be handed. Percentages are kept inside a generous band (a hole may start
+ * outside the box and cross it, but `-9000` is a corrupted file, not a stroke), the brush radius is a real
+ * millimetre size, and a stroke without points or a region without size is dropped rather than drawn.
+ */
+export function sanitizeEraseShapes(raw: unknown): EraseShape[] {
+  if (!Array.isArray(raw)) return [];
+  const within = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? Math.max(-200, Math.min(300, value)) : 0);
+  const out: EraseShape[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const source = entry as Record<string, unknown>;
+    if (source.mode === 'region') {
+      const rawWidth = typeof source.width === 'number' && Number.isFinite(source.width) ? source.width : 0;
+      const rawHeight = typeof source.height === 'number' && Number.isFinite(source.height) ? source.height : 0;
+      const width = Math.max(0, Math.min(500, rawWidth)), height = Math.max(0, Math.min(500, rawHeight));
+      if (width < 0.01 || height < 0.01) continue;
+      const regionColor = sanitizeEraseColor(source.color);
+      out.push({ mode: 'region', x: within(source.x), y: within(source.y), width, height, ...(regionColor ? { color: regionColor } : {}) });
+      continue;
+    }
+    if (source.mode === 'brush') {
+      const rawPoints = Array.isArray(source.points) ? source.points : [];
+      const radiusMm = typeof source.radiusMm === 'number' && Number.isFinite(source.radiusMm)
+        ? Math.max(0.05, Math.min(500, Math.abs(source.radiusMm))) : 2;
+      const points: { x: number; y: number }[] = [];
+      for (const point of rawPoints) {
+        if (!point || typeof point !== 'object') continue;
+        const p = point as Record<string, unknown>;
+        if (typeof p.x !== 'number' || typeof p.y !== 'number') continue;
+        if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+        points.push({ x: within(p.x), y: within(p.y) });
+        if (points.length >= ERASE_POINT_LIMIT) break;
+      }
+      if (!points.length) continue;
+      const brushColor = sanitizeEraseColor(source.color);
+      out.push({ mode: 'brush', radiusMm, points, ...(brushColor ? { color: brushColor } : {}) });
+    }
+    if (out.length >= ERASE_SHAPE_LIMIT) break;
+  }
+  return out;
+}
+
+export type PageOverlay = PageOverlayText | PageOverlayShape | PageOverlayNumbering | PageOverlayImage;
+
+/**
+ * Cleans Windows GDI / DEVMODE / WinSpool strings by truncating at the first
+ * embedded NUL character (where drivers leave uninitialized heap bytes) and
+ * stripping control characters, replacement glyphs, private-use glyphs, and
+ * unpaired UTF-16 surrogates.
+ */
+export function sanitizeDriverText(value?: string | null): string {
+  if (typeof value !== 'string' || value.length === 0) return '';
+  const nullIndex = value.indexOf('\u0000');
+  const beforeNull = nullIndex >= 0 ? value.slice(0, nullIndex) : value;
+  let cleaned = '';
+  for (let i = 0; i < beforeNull.length; i++) {
+    const code = beforeNull.charCodeAt(i);
+    if (
+      code <= 0x1f ||
+      (code >= 0x7f && code <= 0x9f) ||
+      code === 0xfffd ||
+      (code >= 0xe000 && code <= 0xf8ff)
+    ) {
+      continue;
+    }
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = i + 1 < beforeNull.length ? beforeNull.charCodeAt(i + 1) : 0;
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        cleaned += beforeNull[i] + beforeNull[i + 1];
+        i++;
+      }
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      continue;
+    }
+    cleaned += beforeNull[i];
+  }
+  return cleaned.replace(/\s+/g, ' ').trim();
+}
+
+export function sanitizePrinterInfo(printer: PrinterInfo): PrinterInfo {
+  const cleanList = (items: string[] | undefined, fallback: string[] = []): string[] => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of items ?? []) {
+      const text = sanitizeDriverText(raw);
+      if (!text) continue;
+      const key = text.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push(text);
+      }
+    }
+    return out.length > 0 ? out : fallback;
+  };
+
+  const paperOptions = printer.capabilities.paperOptions
+    ?.map((opt) => ({
+      ...opt,
+      name: sanitizeDriverText(opt.name) || opt.id,
+    }))
+    .filter((opt) => Boolean(opt.name));
+
+  const name = sanitizeDriverText(printer.name) || printer.name;
+  const supportedTrays = cleanList(printer.capabilities.supportedTrays, ['Auto Select']);
+  const supportedMediaTypes = cleanList(printer.capabilities.supportedMediaTypes, ['Plain Paper']);
+
+  const cleanTray = sanitizeDriverText(printer.activeProfile.tray);
+  const cleanMedia = sanitizeDriverText(printer.activeProfile.mediaType);
+  const cleanPaperName = sanitizeDriverText(printer.activeProfile.paperName);
+  const cleanStaple = sanitizeDriverText(printer.activeProfile.staple);
+  const cleanOutputBin = sanitizeDriverText(printer.activeProfile.outputBin);
+  const cleanHolePunch = sanitizeDriverText(printer.activeProfile.holePunch);
+  const cleanFold = sanitizeDriverText(printer.activeProfile.fold);
+
+  return {
+    ...printer,
+    name,
+    driverName: sanitizeDriverText(printer.driverName) || 'Windows Printer Driver',
+    portName: sanitizeDriverText(printer.portName) || 'LOCAL',
+    location: sanitizeDriverText(printer.location) || undefined,
+    capabilities: {
+      ...printer.capabilities,
+      ...(paperOptions ? { paperOptions } : {}),
+      supportedTrays,
+      supportedMediaTypes,
+      ...(printer.capabilities.supportedStapleModes
+        ? { supportedStapleModes: cleanList(printer.capabilities.supportedStapleModes) }
+        : {}),
+      ...(printer.capabilities.supportedHolePunchModes
+        ? { supportedHolePunchModes: cleanList(printer.capabilities.supportedHolePunchModes) }
+        : {}),
+      ...(printer.capabilities.supportedFoldModes
+        ? { supportedFoldModes: cleanList(printer.capabilities.supportedFoldModes) }
+        : {}),
+      ...(printer.capabilities.supportedOutputBins
+        ? { supportedOutputBins: cleanList(printer.capabilities.supportedOutputBins) }
+        : {}),
+    },
+    activeProfile: {
+      ...printer.activeProfile,
+      printerName: name,
+      paperName: cleanPaperName || printer.activeProfile.paperSize,
+      tray: cleanTray || supportedTrays[0] || 'Auto Select',
+      mediaType: cleanMedia || supportedMediaTypes[0] || 'Plain Paper',
+      ...(cleanStaple ? { staple: cleanStaple } : { staple: undefined }),
+      ...(cleanOutputBin ? { outputBin: cleanOutputBin } : { outputBin: undefined }),
+      ...(cleanHolePunch ? { holePunch: cleanHolePunch } : { holePunch: undefined }),
+      ...(cleanFold ? { fold: cleanFold } : { fold: undefined }),
+    },
+  };
+}
+
+/**
+ * Settings and presets come back from disk (`settings.json`, `presets.json`) or from localStorage,
+ * where a hand edit or an older version of the app can leave anything at all. These readers keep the
+ * keys whose value is actually possible, and drop the rest, so a corrupted file costs the operator one
+ * default value rather than a crash on the next render. The caller merges the result over its own
+ * defaults, which is why the return type is a `Partial`.
+ */
+export function sanitizeAppSettings(raw: unknown): Partial<AppSettings> {
+  if (!raw || typeof raw !== 'object') return {};
+  const source = raw as Record<string, unknown>;
+  const out: Partial<AppSettings> = {};
+  const oneOf = <T extends string>(value: unknown, allowed: readonly T[]): value is T =>
+    typeof value === 'string' && (allowed as readonly string[]).includes(value);
+  const num = (value: unknown, min: number, max: number): number | null =>
+    typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : null;
+  const text = (value: unknown, maxLength = 400): string | null =>
+    typeof value === 'string' ? sanitizeDriverText(value).slice(0, maxLength) : null;
+
+  if (oneOf(source.language, ['fa', 'en'] as const)) out.language = source.language;
+  if (oneOf(source.theme, ['dark', 'light', 'system'] as const)) out.theme = source.theme;
+  if (oneOf(source.unit, ['mm', 'cm', 'inch'] as const)) out.unit = source.unit;
+  if (oneOf(source.calendar, ['shamsi', 'gregorian'] as const)) out.calendar = source.calendar;
+  if (oneOf(source.previewFidelity, ['fast', 'crisp'] as const)) out.previewFidelity = source.previewFidelity;
+  const userName = text(source.userName, 120); if (userName !== null) out.userName = userName;
+  const folder = text(source.defaultOutputFolder); if (folder !== null) out.defaultOutputFolder = folder;
+  const cache = num(source.maxCachePages, 16, 20000); if (cache !== null) out.maxCachePages = cache;
+  const bw = num(source.bwPageTariffRials, 0, 100_000_000); if (bw !== null) out.bwPageTariffRials = bw;
+  const color = num(source.colorPageTariffRials, 0, 100_000_000); if (color !== null) out.colorPageTariffRials = color;
+  const discount = num(source.duplexDiscountPercent, 0, 95); if (discount !== null) out.duplexDiscountPercent = discount;
+  const autoSave = num(source.autoSaveIntervalSec, 0, 3600); if (autoSave !== null) out.autoSaveIntervalSec = autoSave;
+  if (typeof source.autoSelectPrinterByPaperAndColor === 'boolean') out.autoSelectPrinterByPaperAndColor = source.autoSelectPrinterByPaperAndColor;
+  return out;
+}
+
+/**
+ * Reads a persisted profile list back. Three things are enforced, because this file can be edited by
+ * hand and was written by an older build:
+ *
+ * - the built-in "defaults" row is never restorable from disk (the store synthesises it, and a file that
+ *   could define it could also point the reset chord at anything);
+ * - a `settings` block that profiles used to carry is dropped, since a profile is now sheet-only — old
+ *   files stay readable but can no longer change the application's own preferences;
+ * - the chord is normalised through `sanitizeSettingsShortcut`, so a hand-written or duplicated key
+ *   becomes "no shortcut" rather than a chord the app would never have offered.
+ */
+export function sanitizeSettingsPresetList(raw: unknown): SettingsPreset[] {
+  if (!Array.isArray(raw)) return [];
+  const out: SettingsPreset[] = [];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const source = entry as Record<string, unknown>;
+    if (typeof source.id !== 'string' || !source.id || seen.has(source.id)) continue;
+    if (typeof source.name !== 'string' || !source.name.trim()) continue;
+    seen.add(source.id);
+    const section = <T>(value: unknown): T => ((value && typeof value === 'object' ? value : {}) as T);
+    const stamp = (value: unknown): string => typeof value === 'string' ? value : '';
+    // The profile's own id is the one thing that must not be spoofable: the built-in defaults entry is
+    // synthesised by the store and would otherwise be replaceable by a file.
+    if (source.id === SHEET_DEFAULT_PRESET_ID) continue;
+    const numberingOverlays = Array.isArray(source.numberingOverlays)
+      ? source.numberingOverlays
+          .filter((item): item is PageOverlayNumbering =>
+            Boolean(item && typeof item === 'object' && (item as { kind?: unknown }).kind === 'numbering')
+          )
+          .slice(0, 24)
+      : undefined;
+    out.push({
+      id: source.id,
+      name: sanitizeDriverText(source.name).slice(0, 120) || source.name,
+      // Normalised through the same rules the recorder uses, so a hand-edited file cannot claim a chord
+      // the app would never accept (or one that belongs to the browser).
+      shortcut: sanitizeSettingsShortcut(source.shortcut),
+      createdAt: stamp(source.createdAt),
+      updatedAt: stamp(source.updatedAt),
+      layout: section<LayoutSettings>(source.layout),
+      effects: section<EffectsSettings>(source.effects),
+      watermark: section<WatermarkSettings>(source.watermark),
+      pageNumbering: section<PageNumberSettings>(source.pageNumbering),
+      ...(numberingOverlays ? { numberingOverlays } : {}),
+    });
+    if (out.length >= 100) break;                     // a preset list is a menu, not a database
+  }
+  return out;
+}
+
+/**
+ * Key chords for sheet profiles. The rules live here, next to the persisted type, because the same three
+ * questions have to be answered in three places — while recording, when a stored file is read back, and
+ * when a keypress is matched against the list — and a divergent answer in any of them is either a dead
+ * shortcut or a chord the operator did not intend.
+ *
+ * Only two families are assignable, and both are deliberate:
+ *
+ * - `Alt+F7` … `Alt+F12` — function keys are never text input, so the chord works with the caret in a
+ *   field, which is exactly what a print-shop operator needs. `F1`…`F6` stay out: help, refresh and the
+ *   reset chord live there, and the OS owns some of them.
+ * - `Ctrl+Alt+<letter or digit>` — a chord the browser does not already use (`Ctrl+1`…`Ctrl+9` switch
+ *   browser tabs, so a bare `Ctrl+digit` profile would be unreachable).
+ *
+ * Anything else is refused rather than accepted-and-ignored, because a shortcut that silently does
+ * nothing is worse than being told to pick another one.
+ */
+export type KeyEventLike = {
+  key: string;
+  ctrlKey: boolean;
+  altKey: boolean;
+  shiftKey: boolean;
+  metaKey: boolean;
+};
+
+/** The order the canonical string lists modifiers in, and the only one `formatShortcut` produces. */
+const SHORTCUT_MODIFIERS = ['Ctrl', 'Alt', 'Shift', 'Meta'] as const;
+const FUNCTION_KEYS = ['F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12'] as const;
+
+/** Turns a keypress into `Ctrl+Alt+A` / `Alt+F7`, or `null` when no modifier is involved at all. */
+export function formatShortcut(event: KeyEventLike): string | null {
+  const raw = event.key;
+  if (!raw || raw === 'Unidentified') return null;
+  if (raw === 'Control' || raw === 'Alt' || raw === 'Shift' || raw === 'Meta') return null;   // modifier alone
+  const mods: string[] = [];
+  if (event.ctrlKey) mods.push('Ctrl');
+  if (event.altKey) mods.push('Alt');
+  if (event.shiftKey) mods.push('Shift');
+  if (event.metaKey) mods.push('Meta');
+  if (mods.length === 0) return null;
+  const functionKey = FUNCTION_KEYS.find(name => name.toLowerCase() === raw.toLowerCase());
+  const key = functionKey ?? (raw.length === 1 ? raw.toUpperCase() : raw);
+  return `${[...SHORTCUT_MODIFIERS.filter(mod => mods.includes(mod)), key].join('+')}`;
+}
+
+/** True when the chord is one a profile may own. `''` and `null` are not chords; they are "no shortcut". */
+export function isAssignableShortcut(shortcut: unknown): shortcut is string {
+  if (typeof shortcut !== 'string') return false;
+  const text = shortcut.trim();
+  if (!text) return false;
+  const parts = text.split('+');
+  const key = parts.pop() ?? '';
+  const mods = new Set(parts);
+  if (mods.size === 0 || parts.length !== mods.size) return false;          // dupes or junk
+  for (const mod of mods) if (!SHORTCUT_MODIFIERS.includes(mod as typeof SHORTCUT_MODIFIERS[number])) return false;
+  const onlyAlt = mods.size === 1 && mods.has('Alt');
+  const onlyCtrlAlt = mods.size === 2 && mods.has('Ctrl') && mods.has('Alt');
+  if (onlyAlt) {
+    const index = FUNCTION_KEYS.indexOf(key as typeof FUNCTION_KEYS[number]);
+    return index >= 6 && index <= 11;                                        // F7…F12
+  }
+  if (onlyCtrlAlt) return key.length === 1 && /[a-z0-9]/i.test(key);
+  return false;
+}
+
+/** Normalises whatever a file or a recorder produced into the canonical form, or `''` when unusable. */
+export function sanitizeSettingsShortcut(shortcut: unknown): string {
+  if (typeof shortcut !== 'string') return '';
+  const parts = shortcut.trim().split('+').map(part => part.trim()).filter(Boolean);
+  const key = parts.pop();
+  if (!key) return '';
+  const mods = parts.map(mod => {
+    const lower = mod.toLowerCase();
+    if (lower === 'ctrl' || lower === 'control') return 'Ctrl';
+    if (lower === 'alt' || lower === 'option') return 'Alt';
+    if (lower === 'shift') return 'Shift';
+    if (lower === 'meta' || lower === 'cmd' || lower === 'command') return 'Meta';
+    return mod;
+  });
+  const functionKey = FUNCTION_KEYS.find(name => name.toLowerCase() === key.toLowerCase());
+  const normalized = [...SHORTCUT_MODIFIERS.filter(mod => mods.includes(mod)), functionKey ?? (key.length === 1 ? key.toUpperCase() : key)].join('+');
+  return isAssignableShortcut(normalized) ? normalized : '';
+}
+
+/** Does this keypress fire this chord? Exact on modifiers, so `Ctrl+Alt+A` is not `Ctrl+Alt+Shift+A`. */
+export function shortcutMatchesEvent(shortcut: string, event: KeyEventLike): boolean {
+  const fired = formatShortcut(event);
+  return !!fired && fired === shortcut;
+}
+
+/**
+ * L) Offset Prepress & Lithography Environment Models
+ */
+export type LithoIccProfileId = 'FOGRA39' | 'FOGRA51' | 'GRACoL' | 'SWOP' | 'custom';
+export type LithoRenderingIntent =
+  | 'perceptual'
+  | 'relative-colorimetric'
+  | 'saturation'
+  | 'absolute-colorimetric';
+export type LithoGcrLevel = 'none' | 'light' | 'medium' | 'heavy' | 'max-k';
+export type LithoOutputFormat = 'plate-pdf' | 'tiff-1bit' | 'pdf-x1a' | 'pdf-x4';
+export type LithoExportDpi = 300 | 600 | 1200 | 2400;
+export type LithoSpotHandling = 'keep-spot' | 'convert-cmyk';
+
+export interface LithoSpotChannel {
+  name: string;
+  alternateCmyk: [number, number, number, number];
+  previewHex: string;
+  handling: LithoSpotHandling;
+  maxCoveragePercent: number;
+}
+
+export interface LithoCustomIccProfile {
+  id: string;
+  name: string;
+  fileName: string;
+  colorSpace: 'CMYK' | 'RGB' | 'UNKNOWN';
+  pcs: string;
+  version: string;
+  description: string;
+  whitePoint?: [number, number, number];
+  tacDefault: number;
+  rawBytes: Uint8Array;
+}
+
+export interface LithoBlackRuleSettings {
+  blackTextMaxPtToKOnly: boolean;
+  blackTextPtThreshold: number;
+  preservePureBlack: boolean;
+  richBlackC: number;
+  richBlackM: number;
+  richBlackY: number;
+  richBlackK: number;
+}
+
+export interface LithoColorSettings {
+  iccProfile: LithoIccProfileId;
+  customProfileName?: string;
+  customIcc?: LithoCustomIccProfile | null;
+  renderingIntent: LithoRenderingIntent;
+  blackPointCompensation: boolean;
+  maxTacPercent: number;
+  gcrLevel: LithoGcrLevel;
+  ucrStrengthPercent: number;
+  blackRule: LithoBlackRuleSettings;
+  simulateOverprint: boolean;
+  spotChannels: Record<string, LithoSpotHandling>;
+}
+
+export type LithoPlateOrientation = 'auto' | 'portrait' | 'landscape';
+export type LithoPlateCategory = 'auto' | 'paper' | 'plate' | 'custom';
+
+export interface LithoPlateSizePreset {
+  id: string;
+  nameFa: string;
+  nameEn: string;
+  widthMm: number;
+  heightMm: number;
+  isBuiltIn?: boolean;
+  category?: LithoPlateCategory;
+}
+
+export interface LithoFormPlacement {
+  /** Horizontal center offset from form center in mm (+ = right) */
+  offsetXMm: number;
+  /** Vertical center offset from form center in mm (+ = down) */
+  offsetYMm: number;
+  /** Width scale percentage (5..500, default 100) */
+  scaleXPercent: number;
+  /** Height scale percentage (5..500, default 100) */
+  scaleYPercent: number;
+  /** Lock aspect ratio during resize */
+  lockAspect: boolean;
+  /** Clockwise rotation angle around artwork center in degrees (-180..180) */
+  rotationDeg: number;
+}
+
+export interface LithoExportSettings {
+  format: LithoOutputFormat;
+  dpi: LithoExportDpi;
+  includeCropMarks: boolean;
+  includeRegistrationMarks: boolean;
+  includeColorBar: boolean;
+  includeSlug: boolean;
+  jobNamePrefix: string;
+  outputFolder?: string;
+  plateSizeId?: string;
+  plateWidthMm?: number;
+  plateHeightMm?: number;
+  plateOrientation?: LithoPlateOrientation;
+  formPlacement?: LithoFormPlacement;
+}
+
+export type LithoPreflightSeverity = 'error' | 'warning' | 'pass';
+export type LithoPreflightCheckId =
+  | 'fonts-embedded'
+  | 'image-dpi'
+  | 'bleed'
+  | 'rgb-lab'
+  | 'tac-limit'
+  | 'hairline'
+  | 'transparency-overprint';
+
+export interface LithoPreflightItem {
+  id: LithoPreflightCheckId;
+  titleFa: string;
+  titleEn: string;
+  severity: LithoPreflightSeverity;
+  summaryFa: string;
+  summaryEn: string;
+  explanationFa: string;
+  explanationEn: string;
+  affectedPages: number[];
+  autoFixable: boolean;
+  detailMetrics?: string;
+}
+
+export interface LithoBoxMm {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface LithoPageInfo {
+  pageNumber: number;
+  widthMm: number;
+  heightMm: number;
+  mediaBoxMm: LithoBoxMm;
+  trimBoxMm: LithoBoxMm | null;
+  bleedBoxMm: LithoBoxMm | null;
+  hasExplicitTrimBox: boolean;
+  hasExplicitBleedBox: boolean;
+  hasMinBleed3Mm: boolean;
+  minBleedMm: number;
+  colorSpaces: string[];
+  imageCount: number;
+  minEffectiveDpi: number | null;
+  lowResImages: Array<{ name: string; dpi: number }>;
+  hairlineCount: number;
+  hasRgbOrLab: boolean;
+  hasTransparency: boolean;
+  hasSuspiciousOverprint: boolean;
+  estimatedMaxTacPercent: number;
+  tacExceedAreaPercent: number;
+  textColorSummary: string;
+}
+
+export interface LithoDocumentMetadata {
+  fileName: string;
+  fileSizeBytes: number;
+  pageCount: number;
+  pdfVersion: string;
+  colorSpaces: string[];
+  unembeddedFonts: string[];
+  embeddedFontsCount: number;
+  pages: LithoPageInfo[];
+  detectedSpots: LithoSpotChannel[];
+  hasAnyTransparency: boolean;
+  hasAnyOverprint: boolean;
+  overallColorMode: 'CMYK' | 'CMYK+Spot' | 'RGB/Mixed' | 'Grayscale';
+  sourceFormat?: string;
+}
+
+export interface LithoPreflightReport {
+  checkedAtIso: string;
+  shamsiDate: string;
+  tacThresholdPercent: number;
+  items: LithoPreflightItem[];
+  errorCount: number;
+  warningCount: number;
+  passCount: number;
+  isReadyForPress: boolean;
+  wasAutoFixed: boolean;
+}
+
+export interface LithoJobPreset {
+  id: string;
+  name: string;
+  createdAt: string;
+  color: Omit<LithoColorSettings, 'customIcc' | 'spotChannels'>;
+  exportSettings: LithoExportSettings;
+  tacThresholdPercent: number;
+  autoFixOnProcess: boolean;
+}
+
+export type LithoJobStatus = 'queued' | 'processing' | 'done' | 'error';
+
+export interface LithoQueueJob {
+  id: string;
+  fileName: string;
+  filePath?: string;
+  fileSizeBytes: number;
+  status: LithoJobStatus;
+  addedAt: string;
+  processedAt?: string;
+  sourceBytes?: Uint8Array;
+  fixedBytes?: Uint8Array;
+  metadata?: LithoDocumentMetadata;
+  preflight?: LithoPreflightReport;
+  presetId?: string;
+  outputFilesCount?: number;
+  outputFolder?: string;
+  errorMessage?: string;
+  fromHotFolder?: boolean;
+  sourceFormat?: string;
+}
+
+export interface LithoHotFolderStatus {
+  enabled: boolean;
+  folderPath: string;
+  presetId: string;
+  autoExportOnDrop: boolean;
+  watcherActive: boolean;
+  processedCount: number;
+  lastFileAt?: string;
+  lastError?: string | null;
+}
+
+export interface LithoHotFolderIncomingFile {
+  name: string;
+  path: string;
+  size: number;
+  bytes: Uint8Array;
+}
+
+export interface LithoWriteFileEntry {
+  fileName: string;
+  bytes: Uint8Array;
+}
+
+export interface LithoWriteFilesResult {
+  folderPath: string;
+  writtenFiles: string[];
+}
+

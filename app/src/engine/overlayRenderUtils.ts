@@ -1,0 +1,170 @@
+import type { PageOverlay, PageOverlayNumbering } from '@shared/models';
+import { MM_PER_PT, applyShapeCommands, sanitizeShapeColor, shapeColorComponents, shapeCommands, shapeDashPattern, shapeHasFill } from './shapes';
+
+export interface OverlayContext { pageIndex: number; total: number; pageId?: string; documentId?: string; sheetIndex: number; sheetPageIds: string[] }
+export interface OverlayRect { x: number; y: number; width: number; height: number; pixelsPerPoint: number }
+
+const selectedIdSets = new WeakMap<string[], Set<string>>();
+const selectedSheetSets = new WeakMap<number[], Set<number>>();
+function containsSheet(indices: number[], index: number): boolean {
+  let set = selectedSheetSets.get(indices);
+  if (!set) { set = new Set(indices); selectedSheetSets.set(indices, set); }
+  return set.has(index);
+}
+function containsTarget(ids: string[], id: string): boolean {
+  let set = selectedIdSets.get(ids);
+  if (!set) { set = new Set(ids); selectedIdSets.set(ids, set); }
+  return set.has(id);
+}
+/** Current and selected are captured by stable page ID at the time of applying the scope. */
+export function matchesOverlayScope(overlay: PageOverlay, context: OverlayContext): boolean {
+  if (overlay.kind === 'text') {
+    if (overlay.coverageMode === 'all') return true;
+    if (overlay.coverageMode === 'selected') {
+      if (overlay.target === 'sheet' && overlay.coverageSheetIndices && containsSheet(overlay.coverageSheetIndices,context.sheetIndex)) return true;
+      if (overlay.target === 'page' && context.pageId && overlay.coveragePageIds && containsTarget(overlay.coveragePageIds,context.pageId)) return true;
+    }
+  }
+  const n = overlay.target === 'sheet' ? context.sheetIndex : context.pageIndex;
+  switch (overlay.targetScope) {
+    case 'all': return true;
+    case 'document': case 'selected-documents': return overlay.kind === 'text' && !!context.documentId && !!overlay.targetDocumentIds?.includes(context.documentId);
+    case 'odd': return n % 2 === 1;
+    case 'even': return n % 2 === 0;
+    case 'first': return n === 1;
+    case 'last': return n === context.total;
+    case 'current': return overlay.target === 'sheet' ? n === overlay.targetSheetIndex : !!context.pageId && containsTarget(overlay.targetPageIds,context.pageId);
+    case 'selected': return overlay.target === 'sheet' ? (overlay.targetSheetIndices ? containsSheet(overlay.targetSheetIndices,context.sheetIndex) : context.sheetPageIds.some(id => containsTarget(overlay.targetPageIds,id))) : !!context.pageId && containsTarget(overlay.targetPageIds,context.pageId);
+  }
+}
+
+/** Small bounded arithmetic parser. No JavaScript evaluation, variables, property access or function calls. */
+export function evaluateNumberScript(script: string, page: number): number {
+  if (!script.trim()) return page;
+  if (script.length > 160) throw new Error('Formula is too long');
+  const tokens = script.match(/(?:\d+(?:\.\d+)?|page|[()+\-*/])/gi) ?? [];
+  if (tokens.join('').toLowerCase() !== script.replace(/\s+/g, '').toLowerCase() || tokens.length > 100) throw new Error('Invalid formula');
+  let index = 0, depth = 0;
+  const primary = (): number => {
+    if (++depth > 32) throw new Error('Formula is too deep');
+    const token = tokens[index++]; let value: number;
+    if (token === '+' || token === '-') value = (token === '-' ? -1 : 1) * primary();
+    else if (token === '(') { value = sum(); if (tokens[index++] !== ')') throw new Error('Missing parenthesis'); }
+    else if (token?.toLowerCase() === 'page') value = page;
+    else if (token && /^\d/.test(token)) value = Number(token);
+    else throw new Error('Invalid formula');
+    depth--; return value;
+  };
+  const product = (): number => { let value = primary(); while (tokens[index] === '*' || tokens[index] === '/') { const op=tokens[index++]; const other=primary(); value=op==='*' ? value*other : value/other; } return value; };
+  const sum = (): number => { let value = product(); while (tokens[index] === '+' || tokens[index] === '-') { const op=tokens[index++]; const other=product(); value=op==='+' ? value+other : value-other; } return value; };
+  const value = sum();
+  if (index !== tokens.length || !Number.isSafeInteger(value) || Math.abs(value) > 999999999) throw new Error('Formula must produce a safe integer');
+  return value;
+}
+
+const persianDigits = (value: string) => value.replace(/[0-9]/g, d => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]);
+function roman(value: number): string {
+  if (value < 1 || value > 3999 || !Number.isInteger(value)) throw new Error('Roman numbers require 1–3999');
+  let out=''; for (const [n,s] of [[1000,'M'],[900,'CM'],[500,'D'],[400,'CD'],[100,'C'],[90,'XC'],[50,'L'],[40,'XL'],[10,'X'],[9,'IX'],[5,'V'],[4,'IV'],[1,'I']] as const) while (value >= n) {out+=s;value-=n;} return out;
+}
+function abjad(value: number): string {
+  if (value < 1 || value > 1999 || !Number.isInteger(value)) throw new Error('Abjad numbers require 1–1999');
+  let out=''; for (const [n,s] of [[1000,'غ'],[900,'ظ'],[800,'ض'],[700,'ذ'],[600,'خ'],[500,'ث'],[400,'ت'],[300,'ش'],[200,'ر'],[100,'ق'],[90,'ص'],[80,'ف'],[70,'ع'],[60,'س'],[50,'ن'],[40,'م'],[30,'ل'],[20,'ک'],[10,'ی'],[9,'ط'],[8,'ح'],[7,'ز'],[6,'و'],[5,'ه'],[4,'د'],[3,'ج'],[2,'ب'],[1,'ا']] as const) while(value >= n){out+=s;value-=n;} return out;
+}
+export function formatOverlayNumber(settings: PageOverlayNumbering, index: number, total: number): string {
+  const script=settings.customScript.replace(/[۰-۹٠-٩]/g,d=>String(d.charCodeAt(0)-(d<='٩'?0x660:0x6f0)));
+  const serial = evaluateNumberScript(script, index) + settings.startOffset - 1;
+  if (!Number.isSafeInteger(serial) || Math.abs(serial)>999999999) throw new Error('Invalid serial number');
+  const convert = (n:number) => settings.format === 'roman' ? roman(n) : settings.format === 'abjad' ? abjad(n) : settings.format === 'persian' ? persianDigits(String(n)) : String(n);
+  const padded = (length:number) => { const v = (serial < 0 ? '-' : '') + String(Math.abs(serial)).padStart(length,'0'); return settings.format === 'persian' ? persianDigits(v) : v; };
+  return settings.template.replace(/\{(page|total|serial|pad(?:[3-9]|10))\}/gi, (_, tag:string) => {
+    const key=tag.toLowerCase(); return key === 'page' ? convert(serial) : key === 'serial' ? (settings.padZeros > 0 && (settings.format === 'english' || settings.format === 'persian') ? padded(Math.min(10, Math.max(3, settings.padZeros))) : convert(serial)) : key === 'total' ? convert(total) : padded(Number(key.slice(3)));
+  });
+}
+
+/** Canvas output uses the same renderer in preview and exported PDF. */
+export function renderOverlaysOnCanvas(ctx:CanvasRenderingContext2D, overlays:PageOverlay[], rect:OverlayRect, context:OverlayContext): void {
+  for (const item of [...overlays.filter(o=>o.kind==='shape'), ...overlays.filter(o=>o.kind==='text'), ...overlays.filter(o=>o.kind==='numbering')]) {
+    if (!matchesOverlayScope(item,context) || (item.kind==='numbering' && !item.enabled)) continue;
+    const x=rect.x+rect.width*item.xPercent/100,y=rect.y+rect.height*item.yPercent/100,w=rect.width*item.widthPercent/100,h=rect.height*item.heightPercent/100;
+    if (w<=0||h<=0) continue;
+    ctx.save();
+    try {
+    ctx.beginPath();ctx.rect(rect.x,rect.y,rect.width,rect.height);ctx.clip();
+    ctx.translate(x+w/2,y+h/2);ctx.rotate(item.rotation*Math.PI/180);ctx.translate(-w/2,-h/2);ctx.globalAlpha=Math.max(.1,Math.min(1,item.opacity));
+    if (item.kind==='shape') {
+      // The outline comes from `engine/shapes.ts` — the same command list the preview turns into an SVG
+      // path and the exporter into PDF path operators — so a raster of a page can never disagree with the
+      // vector sheet that is printed. Sizes are in millimetres, hence the px-per-mm conversion; a stroke
+      // width of 1 means one point, not one point times a fudge factor.
+      const pxPerMm = rect.pixelsPerPoint / MM_PER_PT;
+      const commands = shapeCommands(item, w, h, pxPerMm);
+      const lineWidth = Math.max(0, item.strokeWidth) * rect.pixelsPerPoint;
+      ctx.save();
+      ctx.translate(w / 2, h / 2);
+      applyShapeCommands(ctx, commands);
+      ctx.lineWidth = lineWidth;
+      ctx.setLineDash(shapeDashPattern(item.strokeStyle, lineWidth) ?? []);
+      ctx.lineCap = item.lineCap === 'round' ? 'round' : item.lineCap === 'square' ? 'square' : 'butt';
+      ctx.lineJoin = 'round';
+      if (shapeHasFill(item)) { ctx.fillStyle = sanitizeShapeColor(item.fillColor, 'transparent'); ctx.fill(); }
+      if (lineWidth > 0 && shapeColorComponents(item.strokeColor)) {
+        ctx.strokeStyle = sanitizeShapeColor(item.strokeColor);
+        ctx.stroke();
+      }
+      ctx.restore();
+    } else {
+      const content = item.kind==='text' ? item.text : formatOverlayNumber(item,item.target==='page'?context.pageIndex:context.sheetIndex,context.total);
+      if (item.backgroundColor && item.backgroundColor !== 'transparent'){ctx.fillStyle=item.backgroundColor;ctx.fillRect(0,0,w,h);}
+      const size=item.fontSize*rect.pixelsPerPoint;
+      ctx.font=`${item.italic?'italic ':''}${item.bold?'bold ':''}${size}px "${item.fontFamily.replace(/["\\]/g,'')}", sans-serif`;
+      const rawAlign=item.kind==='text'?item.align:'left';
+      const rtl=/[\u0590-\u08ff]/.test(content);
+      const effectiveAlign:'left'|'center'|'right'=rawAlign==='justify'?(rtl?'right':'left'):rawAlign;
+      ctx.fillStyle=item.color;ctx.textBaseline='top';ctx.textAlign=effectiveAlign;
+      const tx=effectiveAlign==='center'?w/2:effectiveAlign==='right'?w:0;
+      ctx.beginPath();ctx.rect(0,0,w,h);ctx.clip();
+      const paras=content.split('\n');
+      let lineIdx=0;
+      for(const para of paras){
+        const words=para.split(' ');
+        const lines:Array<{text:string;lastInPara:boolean}>=[];
+        if(words.length>1 && w>0){
+          let cur=words[0];
+          for(let wi=1;wi<words.length;wi++){
+            const test=`${cur} ${words[wi]}`;
+            if(ctx.measureText(test).width<=w)cur=test;
+            else{lines.push({text:cur,lastInPara:false});cur=words[wi];}
+          }
+          lines.push({text:cur,lastInPara:true});
+        }else lines.push({text:para,lastInPara:true});
+        for(const ln of lines){
+          const y=lineIdx*size*1.25;
+          if(rawAlign==='justify' && !ln.lastInPara){
+            const parts=ln.text.trim().split(/\s+/).filter(Boolean);
+            if(parts.length>1){
+              const totalWordsW=parts.reduce((acc,p)=>acc+ctx.measureText(p).width,0);
+              const gap=(w-totalWordsW)/(parts.length-1);
+              if(gap>0){
+                ctx.textAlign=rtl?'right':'left';
+                let cursor=rtl?w:0;
+                for(const p of parts){
+                  const pw=ctx.measureText(p).width;
+                  ctx.fillText(p,cursor,y);
+                  cursor+=rtl?-(pw+gap):pw+gap;
+                }
+                ctx.textAlign=effectiveAlign;
+                lineIdx++;
+                continue;
+              }
+            }
+          }
+          ctx.fillText(ln.text,tx,y,w);
+          if(item.kind==='text'&&item.underline){const tw=Math.min(w,ctx.measureText(ln.text).width);const left=tx-(effectiveAlign==='right'?tw:effectiveAlign==='center'?tw/2:0);ctx.fillRect(left,y+size,tw,Math.max(1,size*.06));}
+          lineIdx++;
+        }
+      }
+    }
+    } finally { ctx.restore(); }
+  }
+}

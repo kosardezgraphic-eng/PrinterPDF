@@ -1,0 +1,147 @@
+import { describe, expect, it } from 'vitest';
+import type { PageItem } from '@shared/models';
+import { DEFAULT_LAYOUT, useAppStore } from '../store/useAppStore';
+import { computeImpositionSheets, getDuplexFlipAxis, getEffectiveSideMarginsMm } from './layoutEngine';
+import { clampMarginsToMin, measurement, measureEndpoint, moveLayoutGuide, resolvePrinterMinMargins } from './sheetInteraction';
+
+const layout = { ...DEFAULT_LAYOUT, paperSize:'Custom' as const, customWidthMm:200, customHeightMm:300,
+  rows:3,cols:3,duplexMode:'none' as const, marginsMm:{left:10,right:10,top:10,bottom:10},horizontalGutterMm:6,verticalGutterMm:6 };
+const page: PageItem = {id:'p',documentId:'d',documentName:'d',sourcePageNumber:1,widthMm:100,heightMm:200,rotation:0,
+  selectedForPrint:true,isHighlighted:true,isBlankPage:false,colorProfile:'color',inkCoveragePercent:0};
+describe('sheet guides and ruler', () => {
+  it('changes each margin, clamps it and preserves the opposite margin', () => {
+    const sheet = {widthMm:200,heightMm:300};
+    const left = moveLayoutGuide(layout,sheet,{type:'margin',side:'left'},20,0);
+    expect(left.marginsMm).toEqual({left:30,right:10,top:10,bottom:10});
+    const right = moveLayoutGuide(layout,sheet,{type:'margin',side:'right'},20,0);
+    expect(right.marginsMm.right).toBe(0);
+    const top = moveLayoutGuide(layout,sheet,{type:'margin',side:'top'},0,999);
+    expect(top.marginsMm.top).toBe(263);
+    expect(top.marginsMm.bottom).toBe(10);
+  });
+  it('enforces printer hardware minimum margins outward while allowing inward resizing', () => {
+    const sheet = { widthMm: 200, heightMm: 300 };
+    const minMargins = { top: 4.5, right: 5, bottom: 6, left: 4 };
+    const outwardLeft = moveLayoutGuide(layout, sheet, { type: 'margin', side: 'left' }, -50, 0, minMargins);
+    expect(outwardLeft.marginsMm.left).toBe(4);
+    const outwardRight = moveLayoutGuide(layout, sheet, { type: 'margin', side: 'right' }, 50, 0, minMargins);
+    expect(outwardRight.marginsMm.right).toBe(5);
+    const inwardTop = moveLayoutGuide(layout, sheet, { type: 'margin', side: 'top' }, 0, 25, minMargins);
+    expect(inwardTop.marginsMm.top).toBe(35);
+
+    expect(resolvePrinterMinMargins({ status: 'unavailable', reason: 'none' })).toBeUndefined();
+    expect(
+      resolvePrinterMinMargins(
+        { status: 'available', source: 'hardware', marginsMm: minMargins },
+        { activeProfile: { borderless: true } as never, capabilities: { supportsBorderless: true } as never },
+      ),
+    ).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
+    expect(clampMarginsToMin({ top: 1, right: 12, bottom: 2, left: 0 }, minMargins)).toEqual({
+      top: 4.5,
+      right: 12,
+      bottom: 6,
+      left: 4,
+    });
+  });
+  it('moves leading, trailing, or center edges of any gutter symmetrically with a uniform gap', () => {
+    const sheet = {widthMm:200,heightMm:300};
+    const before = computeImpositionSheets([page],layout)[0];
+    for (const index of [0,1]) {
+      const updated = moveLayoutGuide(layout,sheet,{type:'gutter',axis:'horizontal',index},4,0);
+      const after = computeImpositionSheets([page],updated)[0];
+      const oldTrailing = before.cells.find(c => c.row === 0 && c.col === index+1)!.cellXMm;
+      const newTrailing = after.cells.find(c => c.row === 0 && c.col === index+1)!.cellXMm;
+      expect(newTrailing-oldTrailing).toBeCloseTo(4);
+      expect(updated.horizontalGutterMm).toBeGreaterThan(layout.horizontalGutterMm);
+
+      const updatedLeading = moveLayoutGuide(layout,sheet,{type:'gutter',axis:'horizontal',index,edge:'leading'},-4,0);
+      const afterLeading = computeImpositionSheets([page],updatedLeading)[0];
+      const oldLeadingCell = before.cells.find(c => c.row === 0 && c.col === index)!;
+      const newLeadingCell = afterLeading.cells.find(c => c.row === 0 && c.col === index)!;
+      expect((newLeadingCell.cellXMm + newLeadingCell.cellWidthMm) - (oldLeadingCell.cellXMm + oldLeadingCell.cellWidthMm)).toBeCloseTo(-4);
+      expect(updatedLeading.horizontalGutterMm).toBeGreaterThan(layout.horizontalGutterMm);
+
+      const updatedCenter = moveLayoutGuide(layout,sheet,{type:'gutter',axis:'horizontal',index,edge:'center'},4,0);
+      expect(updatedCenter.horizontalGutterMm).toBeCloseTo(layout.horizontalGutterMm + 8);
+    }
+    const updated = moveLayoutGuide(layout,sheet,{type:'gutter',axis:'vertical',index:0},0,10000);
+    const result = computeImpositionSheets([page],updated)[0];
+    expect(result.cells[0].cellHeightMm).toBeCloseTo(5);
+    expect(result.cells.every(c => c.cellYMm + c.cellHeightMm <= sheet.heightMm - layout.marginsMm.bottom + .0001)).toBe(true);
+  });
+  it('locks to the dominant axis when shift is held and measures in mm', () => {
+    const start = {x:10,y:20};
+    expect(measureEndpoint(start,{x:40,y:30},true)).toEqual({x:40,y:20});
+    expect(measureEndpoint(start,{x:15,y:40},true)).toEqual({x:10,y:40});
+    expect(measurement(start,measureEndpoint(start,{x:13,y:24},false)).distance).toBe(5);
+  });
+  it('commits guide changes as one undo step without navigating away', () => {
+    useAppStore.setState({pages:[page],layout,activeSheetIndex:2});
+    useAppStore.getState().commitLayoutGuides({horizontalGutterMm:12});
+    expect(useAppStore.getState().activeSheetIndex).toBe(2);
+    expect(useAppStore.getState().layout.horizontalGutterMm).toBe(12);
+    useAppStore.getState().undo();
+    expect(useAppStore.getState().layout.horizontalGutterMm).toBe(6);
+    useAppStore.getState().redo();
+    expect(useAppStore.getState().layout.horizontalGutterMm).toBe(12);
+  });
+  it('rotates from the displayed angle, without auto-fit undoing rotation or changing paper orientation', () => {
+    useAppStore.setState({pages:[{...page,widthMm:200,heightMm:100}],layout:{...layout,rows:1,cols:1,autoRotateToFit:true},activeSheetIndex:0});
+    const before = computeImpositionSheets(useAppStore.getState().pages,useAppStore.getState().layout)[0];
+    expect(before.cells[0].effectiveRotation).toBe(90);
+    useAppStore.getState().rotatePages(['p'],90);
+    const after = computeImpositionSheets(useAppStore.getState().pages,useAppStore.getState().layout)[0];
+    expect(after.cells[0].effectiveRotation).toBe(180);
+    expect([after.widthMm,after.heightMm]).toEqual([before.widthMm,before.heightMm]);
+    expect(useAppStore.getState().layout.orientation).toBe('portrait');
+    useAppStore.getState().undo();
+    expect(computeImpositionSheets(useAppStore.getState().pages,useAppStore.getState().layout)[0].cells[0].effectiveRotation).toBe(90);
+  });
+
+  it('mirrors asymmetric margins on Back (even) sheets according to duplex flip axis', () => {
+    const asymmetric = { top: 20, right: 15, bottom: 25, left: 30 };
+    const base = {
+      ...DEFAULT_LAYOUT,
+      paperSize: 'A4' as const,
+      rows: 1,
+      cols: 1,
+      marginsMm: asymmetric,
+    };
+    const pages2: PageItem[] = [
+      { ...page, id: 'p1', sourcePageNumber: 1 },
+      { ...page, id: 'p2', sourcePageNumber: 2 },
+    ];
+
+    // Simplex keeps all sides exact
+    expect(getDuplexFlipAxis({ ...base, duplexMode: 'none' })).toBe('none');
+    expect(getEffectiveSideMarginsMm({ ...base, duplexMode: 'none' }, 'back')).toEqual(asymmetric);
+
+    // Portrait + long-edge => horizontal flip (Left <-> Right swapped on Back)
+    const pLong = { ...base, orientation: 'portrait' as const, duplexMode: 'long-edge' as const };
+    expect(getDuplexFlipAxis(pLong)).toBe('horizontal');
+    const sheetsPLong = computeImpositionSheets(pages2, pLong);
+    expect(sheetsPLong).toHaveLength(2);
+    expect(sheetsPLong[0].side).toBe('front');
+    expect(sheetsPLong[0].marginsMm).toEqual(asymmetric);
+    expect(sheetsPLong[0].cells[0].cellXMm).toBe(30);
+    expect(sheetsPLong[1].side).toBe('back');
+    expect(sheetsPLong[1].marginsMm).toEqual({ top: 20, right: 30, bottom: 25, left: 15 });
+    expect(sheetsPLong[1].cells[0].cellXMm).toBe(15);
+
+    // Landscape + short-edge (including Booklet) => horizontal flip (Left <-> Right swapped on Back)
+    const lShort = { ...base, orientation: 'landscape' as const, duplexMode: 'short-edge' as const };
+    expect(getDuplexFlipAxis(lShort)).toBe('horizontal');
+    expect(getEffectiveSideMarginsMm(lShort, 'back')).toEqual({ top: 20, right: 30, bottom: 25, left: 15 });
+
+    // Portrait + short-edge and Landscape + long-edge => vertical flip (Top <-> Bottom swapped on Back)
+    const pShort = { ...base, orientation: 'portrait' as const, duplexMode: 'short-edge' as const };
+    expect(getDuplexFlipAxis(pShort)).toBe('vertical');
+    const sheetsPShort = computeImpositionSheets(pages2, pShort);
+    expect(sheetsPShort[1].marginsMm).toEqual({ top: 25, right: 15, bottom: 20, left: 30 });
+    expect(sheetsPShort[1].cells[0].cellYMm).toBe(25);
+
+    const lLong = { ...base, orientation: 'landscape' as const, duplexMode: 'long-edge' as const };
+    expect(getDuplexFlipAxis(lLong)).toBe('vertical');
+    expect(getEffectiveSideMarginsMm(lLong, 'back')).toEqual({ top: 25, right: 15, bottom: 20, left: 30 });
+  });
+});

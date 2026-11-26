@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-electron/
+release/
+build/
+out/
+.vite/
+*.log
+*.psp.bak
+*.tsbuildinfo
+printer-service/bin/
+printer-service/obj/

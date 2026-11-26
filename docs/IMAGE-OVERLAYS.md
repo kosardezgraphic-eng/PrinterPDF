@@ -1,0 +1,214 @@
+# Picture overlays
+
+A picture can be placed on top of the document without importing it as a page. Drag an image file from the desktop and release it **on a sheet in the preview**: it becomes an editable picture overlay on the page under the cursor. **Insert → Add picture** does the same thing from the file picker and centres the picture on the current page; several files at once create one overlay each and are undone as a single step.
+
+Where the file is dropped decides what it becomes:
+
+- On a populated page box of a sheet → a picture overlay attached to that page (`page` target, `Only this page` scope, so a dropped logo does not silently cover the whole document).
+- On the margins, gutter or an empty cell of a sheet → an overlay attached to the **output sheet** instead, limited to that sheet.
+- Anywhere else in the application, or on a sheet while a single page is open in the read-only temporary preview → the file is imported as a **document/page** exactly as before. A mixed drop is split: pictures land on the sheet, everything else goes to the importer, and a PDF dropped on a sheet is still imported once, not twice.
+- On a sheet that holds more than one cell (any matrix, grid or booklet) → the picture goes **across the whole side**, once, whatever cell it was dropped on. A logo on 2×4 tickets belongs to the printed side, not to one ticket, and it must not be echoed into its neighbours. The picture panel's **جای تصویر / Placement** control makes the repetition an explicit choice — `Across the whole sheet (once)` or `In every cell (repeat)` — and the repeat keeps a per-cell copy in each populated cell, sized from that cell, which is what a per-ticket watermark needs. A picture dropped *into* a page (a one-cell sheet) still belongs to that page and is never repeated.
+- Outside the sheet bounds → not an overlay; it is imported as a document.
+
+While a picture hovers over a sheet the sheet is tinted and a dashed box previews the size the picture will get. The hint only appears for files that look like images.
+
+## Editing on the sheet
+
+A selected picture shows the same eight resize handles, rotate knob and drag behaviour as text overlays (see [TEXT-OVERLAYS.md](TEXT-OVERLAYS.md)):
+
+- Drag the box to move it, `Escape` or pointer cancellation to abandon the gesture; every completed gesture is one undo step.
+- `Ctrl`/`Cmd`-drag makes an independent copy of the picture on the same target.
+- Arrow keys nudge by 1 mm, `Shift`+arrow by 5 mm, in the axes of the parent box.
+- The rotate knob turns the box around the centre of its parent; hold `Shift` to snap to 15° steps. The panel also offers 0/90/180/270° presets and a continuous slider.
+
+### How far a picture may be dragged
+
+The percentages a picture stores are measured against the box it is attached to — the page's **content box**
+for a page picture, the whole output sheet for a sheet picture. The area it is *clipped* by is not the same
+box: a page picture is cut at its **cell**, and a sheet picture at the sheet. `overlayLimitsForBox()` in
+`engine/overlayGeometry.ts` turns those two millimetre boxes into percent limits, and every place that moves
+a picture asks it the same question: the drag, the arrow-key nudge, the six align buttons and the X/Y fields
+of the panel. (Two rules would be how "align left" puts a logo against an edge the mouse cannot reach.)
+
+The rule is **the centre stays inside the printable area, the box may hang over any edge**. So a logo can be
+pushed into the margin, lined up with the trim line, or run half off the page for a bleed — and it can never
+disappear, because at least half of it is always on the sheet. An overlay wider than the area it may enter
+cannot satisfy both halves of that sentence, so it is centred instead of being shoved to one side. Resizing
+obeys the stricter rule (`boxWithinLimits`): a handle should not escape the printable area, because a handle
+the operator is holding has to stay under the cursor.
+
+`placeImageInBox()` still keeps a *newly dropped* picture fully inside its box — the drop point is inside the
+box by definition, and a picture that arrives half off the page looks like a bug. Widening its reach is what
+the drag, the arrow keys or `-20` in the X field are for.
+
+The panel's **X (mm) / Y (mm)** fields accept anything finite, including negatives and values past the page
+size: a typed number is an explicit decision and is not argued with, while the drag keeps the centre rule.
+
+### Shift and the aspect ratio
+
+**Shift inverts the aspect-ratio lock for the drag you are doing.** The lock itself is a property of the overlay, shown as **Lock aspect ratio** in the picture and numbering panels, and that checkbox is the source of truth:
+
+| Overlay | Default while dragging | Default with `Shift` |
+| --- | --- | --- |
+| Text | free (either axis alone) | ratio kept |
+| Picture | free | ratio kept |
+| Newly dropped picture | **ratio kept** | free |
+| Page number | **ratio kept** | free |
+
+A freshly dropped picture and a page number are created with `lockAspect: true`, so a natural corner drag scales them proportionally and `Shift` is what frees one axis. A picture whose lock was turned off in the panel behaves like text: free by default, `Shift` to keep the ratio. Locked resizing keeps the millimetre ratio of the **box**, not of the image file, so letterboxing (`contain`) is the setting to use when the file itself must not be stretched.
+
+## Picture panel
+
+With a picture selected (click it in move mode, or double-click it) the panel offers:
+
+- **Replace picture** — swap the file behind the overlay while keeping position, size and scope. The overlay's own `Copy` button duplicates it with a new id.
+- **Width / Height (mm)** — the box size in millimetres, converted to the percentages the engine stores; with the ratio locked, changing one axis follows the other.
+- **Fit** — *Stretch to the box* fills the box, *Contain (letterbox)* keeps the file's ratio inside the box; the preview and the exporter use the same fit rectangle.
+- **Flip H / Flip V** — mirrored output.
+- **Rotation** and **Opacity**.
+- **Attach to** (document page or output sheet) and **Scope** (all / odd / even / first / last / current / custom selection). The custom range accepts one-based page or sheet numbers and ranges such as `1, 3-5` (Persian and Arabic digits included) and is validated before it is applied.
+- **Delete picture**.
+
+Pictures, their geometry and their scope live in the same overlay list as texts and page numbers, so z-order is shared: overlays are drawn in list order, and moving a picture forward or backward also moves text and numbers. The picture bytes are stored inside the project file as a data URL, which keeps projects self-contained but makes them heavier — downscale large artwork before shipping a project.
+
+## Preview and PDF
+
+Preview and export share one geometry engine (`overlayPlacements`), so the box, its rotation, the parent box's rotation, the cell clip and the fit rectangle are computed identically in both. The exporter:
+
+- stores the file's bytes as they are when the header says a PDF can hold them — **the header, not the `data:image/...` prefix**: a JPEG saved with a PNG label is embedded as a DCT stream, which also means the preview and the PDF never disagree about the route;
+- rasterizes everything else (flips, animated PNGs, exotic colour types, rotated phone JPEGs) through Canvas 2D at up to 300 dpi with a 4096-pixel cap per side, because `pdf-lib` has no negative scale; exporting such a picture without Canvas 2D support fails with an explicit error instead of silently dropping the picture;
+- embeds each distinct picture once and reuses it on every sheet where the scope matches — the cache key is the picture data itself, so the same logo at three sizes is still one image object — and clips page-targeted pictures to their cell;
+- honours the same scopes as the preview, so an `odd` picture appears on odd output sides only;
+- writes the overlay opacity straight into the page's transparency state. It used to be floored at 0.1 while the preview showed the real value; now 4 % in the panel means 4 % on paper (the panel sliders still stop at 10 %).
+
+`app/src/engine/imageFormat.ts` reads the PNG and JPEG headers of the stored data URL — 64 KB of it, never the pixels — and returns one `PicturePlan` that both the panel note and the exporter follow.
+
+## Colour, transparency and rotation
+
+| What the file is | What the PDF gets |
+| --- | --- |
+| PNG grey / RGB / palette / grey+alpha / RGBA | the file's own bytes; alpha becomes a soft mask, palette and 16-bit samples are normalised to 8-bit by the same decoder the preview path would use |
+| PNG with `tRNS` | treated as transparent, kept as is |
+| animated PNG (`acTL`) | flattened to its first frame through Canvas |
+| interlaced PNG | stored as is (Adam7 is decoded by the same reader) |
+| JPEG grey or YCbCr, baseline or progressive | the file's own bytes |
+| JPEG with an EXIF orientation | baked into a raster first, because the browser rotates the preview and `pdf-lib` ignores the tag completely |
+| CMYK JPEG marked Adobe (transform 2) | the bytes plus `pdf-lib`'s complementing `Decode`, which is what that convention needs |
+| CMYK JPEG without an Adobe marker | the bytes with an **identity `Decode`**; `pdf-lib` complements every CMYK stream it writes, which prints an unmarked file as a colour negative |
+| CMYK JPEG with an APP14 we cannot parse | left exactly as `pdf-lib` writes it — an unreadable marker is never guessed at |
+| anything else (WebP, GIF, BMP, TIFF, SVG) | Canvas raster, so what you see is what is stored |
+
+`describePictureFormat()` turns the same header into one line for the panel (`JPEG 100×50, CMYK (Adobe inverted), progressive`), and `pictureEmbeddingNote()` returns the consequence the exporter will apply. Colour values are still converted by the PDF viewer's own CMYK settings: the app stores no ICC profile, so a CMYK proof on the target device remains the only colour authority.
+
+## Memory with many pictures
+
+`npx vite-node scripts/picture-memory-benchmark.ts [count] [width] [height]` measures this on Node, no browser needed. Twelve 2400×1600 photographs (584 KB of data URL each, 6.84 MB of project state) on a 210×297 mm sheet:
+
+| Case | Wall time | PDF | Image objects stored |
+| --- | --- | --- | --- |
+| each picture once | 2.4 s | 3.58 MB | 12 (3.55 MB) |
+| the same pictures at three sizes (36 placements) | 3.9 s | 3.58 MB | 12 (3.55 MB) |
+| two pictures × 20 sheets (800 placements) | 1.8 s | 0.16 MB | 2 (0.13 MB) |
+
+So placement count is nearly free, and only *distinct* pictures are paid for; RSS rose about 170 MB during the first export and fell back afterwards. What is genuinely heavy is the state itself: a `PageOverlayImage.src` is a base64 data URL, so every picture costs ~1.37× its file size in memory, again for each undo snapshot, and once more in the `.psp` file. Downscale artwork before building a project that has to stay open all day.
+
+## Erasing part of a picture, and inverting its colours
+
+**Insert → Eraser** has three tools, and the two painting ones work on whichever picture the pointer lands on
+(which becomes the selected layer as the gesture starts, so the panel below is the panel for what you are
+working on). While a marquee waits for `Delete`, that key belongs to the eraser rather than to the app: the
+selected layer is not removed and the highlighted pages survive the press.
+
+- **Brush** — the arrow is replaced by the brush itself: a ring at the diameter the field says, in
+  millimetres, following the pointer (`data-brush-cursor`). Whatever the button is *held down* over is worked
+  on, so a stroke may leave the picture, cross the sheet and come back — points outside the picture are
+  clamped by `sanitizeEraseShapes()` rather than dropped, so the line keeps going to the edge it left.
+- **Region** — drag a rectangle and it is *selected*, not applied: a marching outline waits, and `Delete`
+  spends it on the picture (`Esc`, a second marquee, or switching tools throws it away). The panel shows the
+  same commit as an **Apply** button, for a hand that stays on the mouse. Dragging back across the point where
+  the press started flips the rectangle to the other side, like every other marquee in the app.
+- **Eyedropper** — click on a picture and the colour around that point becomes the brush colour, and the
+  brush is armed for the next stroke. It reads the artwork's own pixels (`colorFromPixels()` on a canvas the
+  size of the decoded file) over **the brush's own footprint** — a square of `2·Ø·(file px / box mm)` pixels,
+  clamped to 33 — and averages it, skipping transparent pixels. That is what "the colour of this area" means
+  in practice: a click on a JPEG logo or an anti-aliased edge picks a stable patch colour instead of one noise
+  pixel, and a hairline brush narrows the window to a single pixel. A picture displayed inverted hands back the
+  colour you *see* (the negation is applied to the average, which is the same number because both are linear).
+  A spot with no alpha has no colour: the tool says so instead of quietly picking white.
+
+**A stroke is a line, not a row of dots.** The preview and the exported raster draw a brush gesture as its
+per-point ellipses *plus* a round-capped polyline through the same centres (`EraseParts.strokes`), and
+`growEraseShape()` fills in the samples the pointer skipped whenever two consecutive points are further apart
+than the brush's own diameter. Keeping only every sample above a fixed distance — which is what the eraser did
+first — left visible notches wherever the hand moved faster than one dot; the stored gesture is compact
+(`ERASE_SAMPLE_PERCENT` still drops pointer jitter) but the stroke it describes is continuous at any speed.
+
+**A colour turns the brush from a hole into a patch of paint.** `eraseColor` in the store is either `null`
+(remove the pixels, show the page through the picture) or a `#rrggbb` (lay that colour down), and both the
+Insert tab and the picture panel expose the picker and a **No colour / Hole** button. The colour is stored on
+the gesture itself (`EraseShape.color`), so a picture can carry a hole here and a patch of grey there, and a
+project file that arrives from elsewhere has every colour run through `sanitizeEraseColor()` — anything that
+is not `#rgb`/`#rrggbb` loses its colour and stays an erase.
+
+Pressing the lit tool button again turns the eraser off and hands the pointer back to moving the picture;
+`Escape` mid-drag abandons the stroke. Arming any tool also switches the sheet itself to **Select / move /
+resize**, because the overlay layer only accepts the pointer in that tool — a brush that painted nothing while
+the sheet was in crop mode would read as a dead button. The panel also offers **Undo one stroke** and
+**Restore picture**, so the eraser can be walked back gesture by gesture without reaching for `Ctrl+Z`.
+
+What is stored is the gesture, never new pixels. `PageOverlayImage.erase` is a list of `EraseShape`s —
+percentages of the rectangle the picture paints, plus a millimetre radius and an optional colour for a brush —
+and the original `src` is untouched. Three renderers derive pixels from that list, all of them through the same
+`eraseShapeParts()`:
+
+| Where | What happens |
+| --- | --- |
+| Preview (`TextOverlayLayer.tsx`) | two layers on the fit rectangle: a CSS luminance **mask** for the holes (`eraseMaskCss()`) and, above the picture, an SVG **paint** layer for the coloured gestures (`erasePaintCss()`), each stroke masked by the holes drawn after it |
+| Export raster (`rasterizeOverlayImage()`) | the list is walked in order on the same rectangle — `source-over` for a colour, `destination-out` for a hole — so the history decides what covers what |
+| Exported PDF (`pdfService.ts`) | an erased, painted or inverted picture cannot be a raw byte embed, so it takes the Canvas route a mirror already takes, and the erase list *including its colours* is part of the bitmap cache key |
+
+Because the mask is cut on the *fit* rectangle, a hole stays on the artwork when the box is resized, when
+`contain` letterboxes it, or when the picture is mirrored (the pointer position is un-mirrored on the way in,
+so the hole lands under the cursor and then follows the flip). The paint layer is placed on that same rectangle
+and inside the same `transform`, so a coloured patch follows the artwork exactly where a hole would.
+
+Coloured gestures are ordered, not merged: the preview lays them above the picture in the order they were made,
+each one masked by the holes drawn after it, and `applyEraseToContext()` walks the same list with
+`source-over` for a colour and `destination-out` for a hole. Both renderers therefore agree that a hole after a
+patch removes it and a patch after a hole closes it — which is why the export bitmap cache key
+(`eraseSignature()`) carries the colour: two pictures that differ only in what they were painted with must not
+share one raster.
+
+The brush cursor and the eyedropper are the two pieces of this a browser has to do rather than the model: while
+the brush is armed the frame is drawn with `cursor: none` and a ring (`data-brush-cursor`) is moved to the
+pointer at `Ø × pxPerMm`, so the ring and the tip are the same number by construction. The eyedropper copies
+the `<img>` into a canvas the natural size of the file, takes the box the brush will cover around the point the
+pointer sits at, and averages it; where no `CanvasRenderingContext2D` exists (a hardened WebView, or `jsdom` in
+the test runner) it says so in a toast and leaves the colour alone instead of inventing white.
+
+**Invert picture colours** (`PageOverlayImage.invert`) is a flag rendered as `filter: invert(1)` in the preview
+and as a pixel negation of the drawn rectangle in the export raster — alpha is preserved, so an erased corner
+stays a hole instead of becoming a black square. It is deliberately not a rewrite of the file: pressing the
+button again is the way back, and a picture that was inverted twice does not exist in this model.
+
+Both fields travel in the project file (`overlays` is saved as it is) and in every undo snapshot. A file that
+arrives from elsewhere is passed through `sanitizeEraseShapes()`: percentages are clamped to a sane band, a
+brush keeps at most `ERASE_POINT_LIMIT` points, there are at most `ERASE_SHAPE_LIMIT` gestures, and an entry
+no renderer could draw is dropped rather than guessed at.
+
+## Files that arrive from the desktop
+
+Dropping a file on a sheet is a browser drag in both shells: the `File` objects a drop provides are read directly, and that path is unchanged in Electron.
+
+What Electron 32 took away was `File.path`, which is how a file *not* dragged arrives: double-clicking a document in Explorer, `PrintStudio Pro scan.png` from `start`/`Run`, or a second instance launched while the app is already open. `electron/main.ts` filters those arguments down to absolute paths with a document extension and sends them over `cli:open-files`; the preload bridge adds `readLocalFile(path)` and `onCliOpenFiles(cb)`, and the main process refuses anything that is not an existing file up to 128 MB. The renderer receives real `File` objects and routes them exactly like a drop outside a sheet — as documents, never as an overlay — with a toast naming any file it could not read. In a browser there is no bridge, the subscription is a no-op, and nothing else changes.
+
+The same handler now deletes the temporary PDF it writes for a print job after the sidecar answers; before that, every print left a `printstudio-job-<timestamp>.pdf` in the system temp directory.
+
+## Not verified here
+
+- **Pixel-level agreement between the preview and the exported PDF.** The exported side is verified structurally (the picture XObject's dict, its stored bytes, the content-stream `cm`/`Do` operators, the transparency state) and geometrically through the shared placement engine, but no rasterizer compares the browser's composited pixels with a viewer's rendering here.
+- **Printer-driver behaviour.** The store deliberately refuses to claim a job was sent (*Direct printing is not available yet*), because `printer-service/Program.cs` dispatches list, margins, profile, default, queue control and purge but has no `printer:print-job` case, and `PrintJobRpcParams` carries only printer, title, path, copies, duplex, dpi, colour mode and tray — page range, odd/even, collation, reverse order and scaling never reach the service. The temporary job PDF is now deleted after the sidecar answers (it used to accumulate one per print), but neither the C# service nor a real driver was built or run here, so what a driver would do with those bytes is still unknown.
+- **The Electron GUI itself.** The native-file plumbing is covered by unit tests against a faked bridge plus source-contract tests, not by a launched window.
+- **Colour management.** CMYK handling is a header decision, not an ICC conversion; proofs on the target device are still required.
+
+Browser image decoding decides which formats are accepted beyond PNG/JPEG/WebP/GIF/BMP/TIFF; a file that cannot be decoded falls back to a 1×1 measurement, which keeps the drop working but makes the first ratio neutral.

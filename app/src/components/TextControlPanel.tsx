@@ -1,0 +1,139 @@
+import React, {useMemo, useState} from 'react';
+import type {OverlayScope,OverlayTarget,PageOverlayText} from '@shared/models';
+import {computeImpositionSheets} from '../engine/layoutEngine';
+import {useSystemFonts} from '../engine/systemFonts';
+import {useAppStore} from '../store/useAppStore';
+import {TextCoverageControls} from './TextCoverageControls';
+import {
+  collectStudioSheetPeers,
+  resolveStudioOverlayAlignPercent,
+  type AlignDirection,
+  type AlignReferenceMode,
+} from '../engine/alignEngine';
+import { boxWithinLimits, overlayPanelFrame } from '../engine/overlayGeometry';
+const input='w-full rounded border border-slate-300 bg-white p-1 text-xs text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white';
+
+export function TextControlPanel(){
+ const {settings,pages,layout,overlays,selectedOverlayId,activeSheetIndex,activePageId,textEdit,addTextOverlay,updateOverlay,removeOverlay,selectOverlay,styleTextSelection,insertTextToken}=useAppStore();
+ const lang=settings.language,fa=lang==='fa';
+ const [formula,setFormula]=useState('page+1000');
+ const [customFont,setCustomFont]=useState('');
+ const [alignRef,setAlignRef]=useState<AlignReferenceMode>('sheet');
+ const [alignPeerId,setAlignPeerId]=useState<string>('all');
+ const texts=overlays.filter((o):o is PageOverlayText=>o.kind==='text');
+ const selected=texts.find(t=>t.id===selectedOverlayId);
+ const {bundledFonts,systemFonts,isLoading:fontsLoading,refreshSystemFonts}=useSystemFonts(selected?.fontFamily);
+ const sheets=useMemo(()=>computeImpositionSheets(pages,layout),[pages,layout]);
+ const sheet=sheets[Math.min(activeSheetIndex,Math.max(0,sheets.length-1))];
+ const current=pages.find(p=>p.id===activePageId) ?? sheet?.cells.find(c=>c.page?.isHighlighted)?.page ?? sheet?.cells.find(c=>c.page)?.page ?? pages.find(p=>p.isHighlighted);
+ const selectedDocuments=[...new Set(pages.filter(p=>p.isHighlighted).map(p=>p.documentId))];
+ const scopePatch=(scope:OverlayScope,target:OverlayTarget)=>({targetScope:scope,target:(scope==='document'||scope==='selected-documents'?'page':target) as OverlayTarget,targetSheetIndex:(sheet?.sideIndex ?? 1),
+   targetPageIds:scope==='current' ? (current?[current.id]:[]) : scope==='selected'?pages.filter(p=>p.selectedForPrint).map(p=>p.id):[],
+   targetDocumentIds:scope==='document' ? (current?[current.documentId]:[]) : scope==='selected-documents'?selectedDocuments:[]});
+ const editorFocus=()=>requestAnimationFrame(()=>{const el=document.querySelector<HTMLTextAreaElement>('[data-inline-overlay-editor]');const edit=useAppStore.getState().textEdit;if(el&&edit){el.focus();el.setSelectionRange(edit.selectionStart,edit.selectionEnd);}});
+ const editing=!!selected && textEdit?.overlayId===selected.id;
+ const patch=(value:Partial<PageOverlayText>)=>{if(selected)updateOverlay(selected.id,value);};
+ const pageIndices=useMemo(()=>new Map(pages.map((p,i)=>[p.id,i])),[pages]);
+ const peers=selected&&sheet?collectStudioSheetPeers(sheet,sheets.length,pages,overlays,pageIndices,`overlay:${selected.id}`,lang):[];
+ const effAlignRef:AlignReferenceMode=alignRef==='others'&&peers.length===0?(selected?.target==='page'?'cell':'sheet'):alignRef;
+ const selectedPeer=alignPeerId!=='all'?peers.find(p=>p.id===alignPeerId)??null:null;
+ const otherBoxes=selectedPeer?[selectedPeer.box]:peers.map(p=>p.box);
+ const handleBoxAlign=(dir:AlignDirection)=>{
+   if(!selected||!sheet)return;
+   const moved=resolveStudioOverlayAlignPercent(sheet,selected,dir,effAlignRef,otherBoxes);
+   if(moved)patch({xPercent:moved.xPercent,yPercent:moved.yPercent});
+ };
+  const boxFrame=selected?overlayPanelFrame(sheet,selected):null;
+  const boxWidthMm=selected&&boxFrame?Math.round((selected.widthPercent/100)*boxFrame.boxWidthMm*10)/10:0;
+  const boxHeightMm=selected&&boxFrame?Math.round((selected.heightPercent/100)*boxFrame.boxHeightMm*10)/10:0;
+  const updateBoxSizeMm=(axis:'w'|'h',mmValue:number)=>{
+    if(!selected||!boxFrame||!Number.isFinite(mmValue))return;
+    const clampedMm=Math.max(5,mmValue);
+    const nextWidthPct=axis==='w'&&boxFrame.boxWidthMm>0?(clampedMm/boxFrame.boxWidthMm)*100:selected.widthPercent;
+    const nextHeightPct=axis==='h'&&boxFrame.boxHeightMm>0?(clampedMm/boxFrame.boxHeightMm)*100:selected.heightPercent;
+    const bounded=boxWithinLimits({...selected,widthPercent:Math.max(1,nextWidthPct),heightPercent:Math.max(1,nextHeightPct)},boxFrame.limits);
+    patch({xPercent:bounded.xPercent,yPercent:bounded.yPercent,widthPercent:bounded.widthPercent,heightPercent:bounded.heightPercent});
+  };
+ const scopes:OverlayScope[]=['current','all','even','odd','first','last','selected','document','selected-documents'];
+ const scopeLabels=fa?['صفحه / برگه جاری','همه','زوج','فرد','اول','آخر','صفحات تیک‌خورده','سند فعال','سندهای صفحات انتخاب‌شده']:['Current','All','Even','Odd','First','Last','Checked pages','Active document','Documents of highlighted pages'];
+ return <aside data-text-control-panel onBlur={e=>{const target=e.relatedTarget instanceof Element?e.relatedTarget:null;if(!target?.closest('[data-text-control-panel],[data-inline-overlay-editor]'))useAppStore.getState().finishTextEdit();}} className="w-full bg-white p-3 text-xs text-slate-800 dark:bg-slate-900 dark:text-slate-200" aria-label={fa?'تنظیمات متن':'Text controls'}>
+  <div className="mb-2 flex items-center justify-between"><strong>{fa?'درج نوشته':'Text overlays'}</strong><button type="button" disabled={!pages.length} onClick={addTextOverlay} className="rounded bg-sky-600 px-2 py-1 text-white hover:bg-sky-500 disabled:opacity-40 cursor-pointer">{fa?'+ متن':'+ Text'}</button></div>
+  <div role="tablist" className="mb-2 flex gap-1 overflow-x-auto">{texts.map((t,i)=><button role="tab" aria-selected={selected?.id===t.id} key={t.id} onClick={()=>selectOverlay(t.id)} className={`shrink-0 rounded px-2 py-1 cursor-pointer ${selected?.id===t.id?'bg-sky-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{fa?'متن':'Text'} {i+1}</button>)}</div>
+  {selected ? <div className="space-y-2">
+    <p className="text-slate-500 dark:text-slate-400">{editing?(fa?'متن را روی صفحه ویرایش کنید.':'Edit directly on the page.'):(fa?'برای ویرایش متن، روی آن دوبار کلیک کنید.':'Double-click the text to edit on the page.')}</p>
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-1">
+        <span>{fa?'فونت':'Font'}</span>
+        <button type="button" data-refresh-system-fonts onClick={()=>{void refreshSystemFonts();}} disabled={fontsLoading} className="rounded border border-slate-300 bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-700 hover:bg-slate-200 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 cursor-pointer">
+          {fontsLoading ? (fa?'در حال خواندن...':'Scanning...') : (fa?`فونت‌های سیستم (${systemFonts.length})`:`System fonts (${systemFonts.length})`)}
+        </button>
+      </div>
+      <select aria-label={fa?'فونت نوشته':'Text font'} value={selected.fontFamily} onChange={e=>patch({fontFamily:e.target.value})} className={input} style={{fontFamily:`"${selected.fontFamily}", sans-serif`}}>
+        <optgroup label={fa?'فونت‌های همراه برنامه':'Bundled fonts'}>
+          {bundledFonts.map(font=><option key={`b:${font}`} value={font} style={{fontFamily:`"${font}", sans-serif`}}>{font}</option>)}
+        </optgroup>
+        {systemFonts.length > 0 && (
+          <optgroup label={fa?'فونت‌های نصب‌شده سیستم':'Installed system fonts'}>
+            {systemFonts.map(font=><option key={`s:${font}`} value={font} style={{fontFamily:`"${font}", sans-serif`}}>{font}</option>)}
+          </optgroup>
+        )}
+      </select>
+      <div className="flex items-center gap-1">
+        <input type="text" dir="ltr" aria-label={fa?'نام دلخواه فونت سیستم':'Custom system font name'} value={customFont} onChange={e=>setCustomFont(e.target.value)} placeholder={fa?'مثلاً B Nazanin یا Tahoma':'e.g. B Nazanin or Segoe UI'} className={input}/>
+        <button type="button" disabled={!customFont.trim()} onClick={()=>{const f=customFont.trim();if(f){patch({fontFamily:f});setCustomFont('');}}} className="shrink-0 rounded border border-slate-300 bg-slate-100 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-200 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 cursor-pointer">{fa?'اعمال':'Use'}</button>
+      </div>
+    </div>
+    <label className="block">{fa?'اندازه':'Size'} {selected.fontSize} pt<input aria-label={fa?'اندازه فونت':'Font size'} type="range" min="8" max="80" value={selected.fontSize} onChange={e=>patch({fontSize:+e.target.value})} className="w-full"/></label>
+    <label className="block">{fa?'رنگ متن':'Text color'} <input aria-label={fa?'انتخاب رنگ متن':'Pick text color'} type="color" value={/^#[0-9a-f]{6}$/i.test(selected.color)?selected.color:'#000000'} onChange={e=>patch({color:e.target.value})}/><input aria-label={fa?'مقدار رنگ متن':'Text color value'} className={input} value={selected.color} onChange={e=>patch({color:e.target.value})} /></label>
+    <label className="block">{fa?'رنگ پس‌زمینه (اختیاری)':'Background (optional)'} <input type="color" aria-label={fa?'انتخاب رنگ پس‌زمینه':'Pick background color'} value={/^#[0-9a-f]{6}$/i.test(selected.backgroundColor??'')?selected.backgroundColor:'#ffffff'} onChange={e=>patch({backgroundColor:e.target.value})}/><input aria-label={fa?'مقدار رنگ پس‌زمینه':'Background color value'} className={input} placeholder="transparent" value={selected.backgroundColor??''} onChange={e=>patch({backgroundColor:e.target.value||undefined})}/></label>
+    <div className="grid grid-cols-2 gap-1.5">
+      <label className="block">{fa?'عرض باکس (mm)':'Box width (mm)'}<input aria-label={fa?'عرض باکس متن (mm)':'Text box width (mm)'} type="number" dir="ltr" min="5" step="0.5" value={boxWidthMm} onChange={e=>updateBoxSizeMm('w',+e.target.value)} className={input}/></label>
+      <label className="block">{fa?'ارتفاع باکس (mm)':'Box height (mm)'}<input aria-label={fa?'ارتفاع باکس متن (mm)':'Text box height (mm)'} type="number" dir="ltr" min="5" step="0.5" value={boxHeightMm} onChange={e=>updateBoxSizeMm('h',+e.target.value)} className={input}/></label>
+    </div>
+    <div className="flex flex-wrap gap-1">{(['bold','italic','underline'] as const).map((key,i)=><button type="button" key={key} aria-label={(fa?['درشت','کج','زیرخط']:['Bold','Italic','Underline'])[i]} aria-pressed={selected[key]} onClick={()=>patch({[key]:!selected[key]})} className={`rounded px-2 py-1 cursor-pointer ${selected[key]?'bg-sky-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{['B','I','U'][i]}</button>)}
+    {(['left','center','right','justify'] as const).map(a=>{const label=fa?{left:'چپ',center:'وسط',right:'راست',justify:'جاستیفای'}[a]:{left:'Left',center:'Center',right:'Right',justify:'Justify'}[a];return <button type="button" key={a} title={label} aria-label={`${fa?'چینش':'Align'} ${label}`} aria-pressed={selected.align===a} onClick={()=>patch({align:a})} className={`rounded px-2 py-1 cursor-pointer ${selected.align===a?'bg-sky-600 text-white':'border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{fa?label:label[0]}</button>;})}</div>
+    {(typeof CanvasRenderingContext2D !== 'undefined' && !('wordSpacing' in CanvasRenderingContext2D.prototype) && (selected.wordSpacingPt??0)!==0 || typeof CanvasRenderingContext2D !== 'undefined' && !('letterSpacing' in CanvasRenderingContext2D.prototype) && (selected.letterSpacingPt??0)!==0) && <p role="alert" className="text-amber-600 dark:text-amber-300">{fa?'این محیط فاصله حروف یا کلمات را در خروجی پشتیبانی نمی‌کند.':'This environment cannot export the requested text spacing.'}</p>}
+    <label className="block">{fa?'فاصله خطوط':'Line spacing'} {selected.lineHeight??1.25}<input aria-label={fa?'فاصله خطوط':'Line spacing'} type="range" min="0.8" max="3" step="0.05" value={selected.lineHeight??1.25} onChange={e=>patch({lineHeight:+e.target.value})} className="w-full"/></label>
+    <label className="block">{fa?'فاصله کلمات':'Word spacing'} {selected.wordSpacingPt??0} pt<input aria-label={fa?'فاصله کلمات':'Word spacing'} type="range" min="0" max="20" step="0.5" value={selected.wordSpacingPt??0} onChange={e=>patch({wordSpacingPt:+e.target.value})} className="w-full"/></label>
+    <label className="block">{fa?'فاصله حروف':'Letter spacing'} {selected.letterSpacingPt??0} pt<input aria-label={fa?'فاصله حروف':'Letter spacing'} type="range" min="0" max="10" step="0.5" value={selected.letterSpacingPt??0} onChange={e=>patch({letterSpacingPt:+e.target.value})} className="w-full"/></label>
+    <p className="text-slate-500 dark:text-slate-400">{fa?'بالانویس و زیرنویس پس از پایان ویرایش روی صفحه رندر می‌شوند.':'Superscripts and subscripts render after editing ends.'}</p>
+    <div className="flex gap-1"><button type="button" disabled={!editing || textEdit.selectionStart===textEdit.selectionEnd} onMouseDown={e=>e.preventDefault()} onClick={()=>{styleTextSelection('super');editorFocus();}} aria-label={fa?'بالانویس':'Superscript'} className="rounded border border-slate-300 bg-slate-100 px-2 py-1 text-slate-700 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 cursor-pointer">x²</button>
+      <button type="button" disabled={!editing || textEdit.selectionStart===textEdit.selectionEnd} onMouseDown={e=>e.preventDefault()} onClick={()=>{styleTextSelection('sub');editorFocus();}} aria-label={fa?'زیرنویس':'Subscript'} className="rounded border border-slate-300 bg-slate-100 px-2 py-1 text-slate-700 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 cursor-pointer">x₂</button></div>
+    <div className="space-y-1"><div>{fa?'متغیر و فرمول امن':'Variables and safe formula'}</div><div className="flex flex-wrap gap-1">{['{page}','{total}','{sheet}','{file}','{docPage}','{page+1000}','{=page * 2}'].map(token=><button type="button" key={token} disabled={!editing} onMouseDown={e=>e.preventDefault()} onClick={()=>{insertTextToken(token);editorFocus();}} className="rounded border border-slate-300 bg-slate-100 px-1 py-1 font-mono text-slate-700 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 cursor-pointer">{token}</button>)}</div>
+      <label className="block">{fa?'فرمول قابل ویرایش':'Editable formula'}<input aria-label={fa?'فرمول قابل ویرایش':'Editable formula'} dir="ltr" value={formula} maxLength={160} onChange={e=>setFormula(e.target.value)} placeholder="page+1000" className={input}/></label>
+      <button type="button" disabled={!editing || !formula.trim() || /[{}]/.test(formula)} onMouseDown={e=>e.preventDefault()} onClick={()=>{const value=formula.trim();insertTextToken(/^page\b/i.test(value)?`{${value}}`:`{=${value.replace(/^=/,'')}}`);editorFocus();}} className="rounded border border-slate-300 bg-slate-100 px-2 py-1 text-slate-700 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 cursor-pointer">{fa?'درج فرمول':'Insert formula'}</button>
+      <p className="text-slate-500 dark:text-slate-400">{fa?'فرمول را اینجا یا مستقیماً در متن ویرایش کنید؛ مانند {page+1000} یا {page-1000}. فقط عدد، page، پرانتز و + - * / پشتیبانی می‌شود.':'Edit here or directly in the text, e.g. {page+1000} or {page-1000}. Only numbers, page, parentheses and + - * / are supported.'}</p></div>
+    <div className="space-y-1 border-t border-slate-200 pt-2 dark:border-slate-700">
+      <label className="block">{fa?'تراز باکس متن':'Align text box'}
+        <select data-text-align-reference aria-label={fa?'مبنای تراز باکس متن':'Text box align reference'} className={input} value={effAlignRef} onChange={e=>setAlignRef(e.target.value as AlignReferenceMode)}>
+          <option value="sheet">{fa?'نسبت به کل شیت':'To whole sheet'}</option>
+          <option value="margins">{fa?'نسبت به حاشیه چاپ':'To margins'}</option>
+          <option value="cell">{fa?'نسبت به خانه':'To cell'}</option>
+          <option value="others" disabled={peers.length===0}>{fa?`نسبت به دیگر تصاویر (${peers.length})`:`To other items (${peers.length})`}</option>
+        </select>
+      </label>
+      {effAlignRef==='others' && peers.length>1 && (
+        <select data-text-align-peer aria-label={fa?'تصویر مرجع':'Reference item'} className={input} value={selectedPeer?selectedPeer.id:'all'} onChange={e=>setAlignPeerId(e.target.value)}>
+          <option value="all">{fa?'مجموعه دیگر تصاویر شیت':'All other items on sheet'}</option>
+          {peers.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}
+        </select>
+      )}
+      <div className="grid grid-cols-3 gap-1">
+        {(['left','hcenter','right','top','vcenter','bottom'] as const).map(where=>
+          <button key={where} type="button" data-text-box-align={where} onClick={()=>handleBoxAlign(where)}
+            className="rounded border border-slate-300 bg-slate-100 px-1 py-1 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600 cursor-pointer">
+            {where==='left'?(fa?'چپ':'Left'):where==='hcenter'?(fa?'وسط':'Centre'):where==='right'?(fa?'راست':'Right'):where==='top'?(fa?'بالا':'Top'):where==='vcenter'?(fa?'میانه':'Middle'):(fa?'پایین':'Bottom')}
+          </button>)}
+      </div>
+    </div>
+    <label className="block">{fa?'شفافیت':'Opacity'} {Math.round(selected.opacity*100)}%<input aria-label={fa?'شفافیت':'Opacity'} type="range" min="10" max="100" value={selected.opacity*100} onChange={e=>patch({opacity:+e.target.value/100})} className="w-full"/></label>
+    <label className="block">{fa?'چرخش':'Rotation'} {selected.rotation}°<input aria-label={fa?'چرخش متن':'Text rotation'} type="range" min="0" max="360" value={selected.rotation} onChange={e=>patch({rotation:+e.target.value})} className="w-full"/></label>
+    <label className="block">{fa?'مبنای مختصات':'Attach to'}<select aria-label={fa?'مبنای متن':'Text target'} value={selected.target} onChange={e=>{const target=e.target.value as OverlayTarget;patch(scopePatch(target==='sheet' && (selected.targetScope==='document'||selected.targetScope==='selected-documents')?'current':selected.targetScope,target));}} className={input}><option value="sheet">{fa?'برگه خروجی':'Output sheet'}</option><option value="page">{fa?'صفحه سند':'Document page'}</option></select></label>
+    <label className="block">{fa?'دامنه اصلی':'Base scope'}<select aria-label={fa?'دامنه متن':'Text scope'} value={selected.targetScope} onChange={e=>patch(scopePatch(e.target.value as OverlayScope,selected.target))} className={input}>{scopes.map((s,i)=><option key={s} value={s}>{scopeLabels[i]}</option>)}</select></label>
+    <TextCoverageControls key={selected.id} text={selected} pages={pages} sheetCount={sheets.length} fa={fa} update={patch}/>
+    <div className="flex flex-wrap gap-1"><button type="button" className="rounded border border-slate-300 bg-slate-100 px-2 py-1 text-slate-700 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 cursor-pointer" disabled={!current} onClick={()=>patch({...scopePatch('current','page'),coverageMode:undefined})}>{fa?'فقط این صفحه':'Only this page'}</button><button type="button" className="rounded border border-slate-300 bg-slate-100 px-2 py-1 text-slate-700 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 cursor-pointer" disabled={!current} onClick={()=>patch(scopePatch('document','page'))}>{fa?'سند فعال':'Active document'}</button><button type="button" className="rounded border border-slate-300 bg-slate-100 px-2 py-1 text-slate-700 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 cursor-pointer" disabled={!selectedDocuments.length} onClick={()=>patch(scopePatch('selected-documents','page'))}>{fa?'سندهای انتخاب‌شده':'Selected documents'}</button></div>
+    <p className="text-slate-500 dark:text-slate-400">{fa?'سندهای انتخاب‌شده از صفحات هایلایت‌شده تعیین می‌شوند؛ قلم‌های خارج از بسته باید نصب باشند.':'Selected documents are taken from highlighted pages; other fonts must be installed locally.'}</p>
+    <button type="button" onClick={()=>removeOverlay(selected.id)} className="rounded border border-rose-300 bg-rose-50 px-2 py-1 text-rose-700 hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-900 dark:text-rose-100 cursor-pointer">{fa?'حذف متن':'Delete text'}</button>
+   </div> : <p className="text-slate-500 dark:text-slate-400">{fa?'متنی اضافه یا انتخاب کنید.':'Add or select a text.'}</p>}
+ </aside>;
+}

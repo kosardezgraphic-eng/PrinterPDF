@@ -1,0 +1,37 @@
+# Interactive editing: partial implementation
+
+The preview has a combined select/move/resize tool and a separate crop tool. Click or tap an image to show its move/resize handles; click elsewhere to hide them. The existing sidebar remains the source for multi-page selection. The scope selector targets the manipulated page, highlighted thumbnails, or all source pages. Edits commit as a single undo step; crop refits the remaining content and resets the previous move/resize. Reset uses the last manipulated highlighted page for the current-page scope (or the first highlighted page if none has been manipulated).
+
+Crop remains **per source page**. Move/resize and layer ordering now support independent occurrences, including step-and-repeat copies; see `docs/MATRIX-LAYERS.md` for scope, clipping and persistence details. Current crop preview uses the existing raster thumbnail and is therefore not a full-resolution preview. Handles can be partially clipped at sheet boundaries. A graphical drag, touch behavior, intrinsic PDF rotation, and image pixel rendering have not been verified in a real browser or Electron here. PDF raster tests cover the added crop and transform cases including a nonzero source CropBox, but do not establish complete WYSIWYG for all inputs.
+
+Editable text with system-font embedding and customizable script-like page numbering are implemented (see [TEXT-OVERLAYS.md](TEXT-OVERLAYS.md) and [PAGE-NUMBERING.md](PAGE-NUMBERING.md)); geometric shapes remain groundwork only. No arbitrary user scripts are executed: numbering supports only a bounded arithmetic expression over `page`. The legacy numbering and watermark controls remain separate and retain their prior limitations. Nor have 60 fps or 10,000-page performance been measured for these additions. Native Windows printing remains unavailable as recorded in the existing status document.
+
+Thumbnail clicks now navigate the preview without changing print selection; excluded pages open a labelled read-only temporary preview. Clicking a sheet in the default combined tool reveals global margin and uniform gutter handles on that sheet; the handles disappear on outside interaction. Matrix dimensions are direct row/column inputs. These new navigation and guide interactions have automated jsdom coverage; real browser, touchscreen, Electron GUI, 60 fps and 10,000-page verification remain outstanding.
+
+The crop tool offers an explicit centered aspect-ratio crop inside the existing crop. Its width:height refers to the unrotated source; automatic or manual rotation may change the ratio as displayed on the sheet. It applies per source page to the current/selected/all scope, resets the targeted pages' transforms like other crops, is undoable, and does not lock subsequent freehand drags. Ratios that would leave less than the engine's minimum 2% of either source dimension are rejected without partial changes.
+
+The sheet's grey tint denotes **configured layout margins**, not verified physical printer limits, and does not affect the PDF. On selecting a sheet, margin and uniform gutter values appear in the selected measurement unit and update during dragging. Reset margins restores the application's four 10 mm defaults, with undo; it does not reset gutters. The existing printer capability API does not report device hard margins for the selected paper/orientation, so neither the shading nor this reset can represent the real printer's printable area. Light mode counteracts the UI-wide inversion on complete sheet and thumbnail surfaces, retaining image effects; this has jsdom coverage but has not been visually checked in a real browser or Electron.
+
+Pictures can be dropped on a sheet to become page overlays with move, resize, rotate, flip and opacity editing, and they share the preview/PDF geometry engine; anything dropped elsewhere in the app is still imported as a document/page. `Shift` inverts the aspect-ratio lock for a drag, and newly dropped pictures and page numbers start with that lock on. The exporter now decides from the file's own PNG/JPEG header whether the bytes can be stored as they are — keeping transparency as a soft mask, correcting the colour Decode for unmarked CMYK, baking EXIF rotation in, flattening animated PNGs — and it writes the overlay's real opacity instead of a 0.1 floor; the picture panel shows the detected format and the consequence. Files handed to the desktop app by Explorer or the command line (`cli:open-files`) are read through a new path-based IPC call, and the temporary print-job PDF is deleted after the job is sent. See [IMAGE-OVERLAYS.md](IMAGE-OVERLAYS.md) for the format table, the measured memory cost of many large pictures, and what stays unverified: pixel-level browser-versus-PDF parity, real driver behaviour (the sidecar has no print-job method), and a launched Electron window; jsdom and Node tests cover the routing, the gestures, the panel, the header parser against real encoder output, the exported PDF objects and the native-file bridge. A picture can now also be **partly removed**: **Insert → Eraser** offers a millimetre brush and a marquee
+region, both stored as gestures on the overlay (`PageOverlayImage.erase`, percentages of the fit rectangle) and
+rendered as a CSS luminance mask on the sheet, as `destination-out` in the export raster and as a Canvas-routed
+picture in the exported PDF, so the file's own bytes are never rewritten and every stroke is one undo step.
+**Invert picture colours** is a flag on the overlay for the same reason. The page- and document-level colour
+invert is now a round trip at every level: the page toggle answers to what the operator sees
+(`effectiveInvert`) and hands inheritance back on the second press, and the document switch says in its toast
+how many pages are holding their own override. What stays unverified is the browser side — brush feel on
+Windows Chromium, `mask-image` behaviour across renderers, and pixel-level parity between the CSS mask and the
+exported raster.
+
+The round after that gave the same three tools hands: the brush replaces the arrow with a ring of its own
+diameter and paints wherever the button is held (points outside the picture are clamped, so a stroke may leave
+the artwork and come back), a colour on the brush turns a hole into a patch of that colour, an eyedropper
+samples the artwork's own pixel for it, and the region tool stops at *selection* — the marquee waits in the
+store (`erasePending`) until `Delete` spends it, which the app-level key handler is asked about first via
+`spendEraseKey()` so a waiting marquee is never confused with removing a layer or the highlighted pages. Colour
+is part of the gesture (`EraseShape.color`, sanitised to `#rrggbb`), of the paint layer above the preview
+(`erasePaintCss()`, each stroke masked by the holes drawn after it), of the ordered canvas walk
+(`source-over` for paint, `destination-out` for holes) and of the export bitmap cache key. What still needs a
+real browser: the ring's size under `cursor: none`, reading pixels out of a same-origin `<img>` in Chromium,
+and whether the two preview layers and the raster agree to the pixel on a rotated, mirrored, letterboxed
+picture — the tests pin the geometry, the ordering and the compositing, not the compositor.

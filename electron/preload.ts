@@ -1,0 +1,152 @@
+import { contextBridge, ipcRenderer } from 'electron';
+import {
+  IPC_CHANNELS,
+  type PrintStudioElectronAPI,
+} from '../shared/ipc-channels';
+import type {
+  AppSettings,
+  LithoHotFolderIncomingFile,
+  LithoJobPreset,
+  LithoPlateSizePreset,
+  LithoWriteFileEntry,
+  PrinterProfileSettings,
+  PrinterMarginRequest,
+  PrintJobRequest,
+  PspProjectFile,
+  SettingsPreset,
+  VirtualPrinterConfig,
+  VirtualPrinterIncomingPayload,
+} from '../shared/models';
+
+/**
+ * Secure Preload Bridge with contextIsolation: true and nodeIntegration: false.
+ * Exposes only strictly typed IPC channels under window.printStudioAPI.
+ */
+const api: PrintStudioElectronAPI = {
+  isElectron: true,
+
+  listPrinters: () => ipcRenderer.invoke(IPC_CHANNELS.PRINTER_LIST),
+  getPrinterStatusNote: () => ipcRenderer.invoke(IPC_CHANNELS.PRINTER_STATUS_NOTE),
+  getPrinterMargins: (request: PrinterMarginRequest) => ipcRenderer.invoke(IPC_CHANNELS.PRINTER_GET_MARGINS, request),
+
+  updatePrinterProfile: (printerName: string, profile: PrinterProfileSettings) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PRINTER_UPDATE_PROFILE, { printerName, profile }),
+
+  setDefaultPrinter: (printerName: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PRINTER_SET_DEFAULT, printerName),
+
+  openPrinterPreferences: (printerName: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PRINTER_OPEN_PREFERENCES, printerName),
+
+  submitPrintJob: (
+    request: PrintJobRequest,
+    pdfBytes?: Uint8Array,
+    pageImages?: Uint8Array[]
+  ) => ipcRenderer.invoke(IPC_CHANNELS.PRINTER_PRINT_JOB, { request, pdfBytes, pageImages }),
+
+  listSpoolerJobs: (printerName?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SPOOLER_LIST_JOBS, printerName),
+
+  controlSpoolerJob: (
+    printerName: string,
+    jobId: number,
+    action: 'pause' | 'resume' | 'restart' | 'cancel',
+    priority?: number
+  ) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SPOOLER_PAUSE_JOB, {
+      printerName,
+      jobId,
+      action,
+      priority,
+    }),
+
+  purgePrinterQueue: (printerName: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SPOOLER_PURGE_QUEUE, printerName),
+
+  getVirtualPrinterStatus: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.VIRTUAL_PRINTER_GET_STATUS),
+
+  updateVirtualPrinterConfig: (patch: Partial<VirtualPrinterConfig>) =>
+    ipcRenderer.invoke(IPC_CHANNELS.VIRTUAL_PRINTER_UPDATE_CONFIG, patch),
+
+  installVirtualPrinter: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.VIRTUAL_PRINTER_INSTALL),
+
+  uninstallVirtualPrinter: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.VIRTUAL_PRINTER_UNINSTALL),
+
+  onVirtualPrinterJob: (callback: (payload: VirtualPrinterIncomingPayload) => void) => {
+    const listener = (_event: unknown, payload: VirtualPrinterIncomingPayload) => {
+      if (payload) callback(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.VIRTUAL_PRINTER_JOB_RECEIVED, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.VIRTUAL_PRINTER_JOB_RECEIVED, listener);
+    };
+  },
+
+  saveAutoSaveSession: (project: PspProjectFile) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PROJECT_WRITE_AUTOSAVE, project),
+
+  loadAutoSaveSession: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.PROJECT_LOAD_AUTOSAVE),
+
+  saveSettings: (settings: AppSettings) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SAVE, settings),
+
+  loadSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_LOAD),
+
+  saveSettingsPresets: (presets: SettingsPreset[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_PRESETS_SAVE, presets),
+
+  loadSettingsPresets: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_PRESETS_LOAD),
+
+  listSystemFonts: (forceRefresh?: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_LIST_FONTS, forceRefresh),
+
+  clearCache: () => ipcRenderer.invoke(IPC_CHANNELS.CACHE_CLEAR),
+
+  readLocalFile: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.FILE_READ_LOCAL, path),
+
+  readClipboardImage: () => ipcRenderer.invoke(IPC_CHANNELS.CLIPBOARD_READ_IMAGE),
+
+  onCliOpenFiles: (callback: (paths: string[]) => void) => {
+    const listener = (_event: unknown, paths: string[]) => callback(Array.isArray(paths) ? paths : []);
+    ipcRenderer.on(IPC_CHANNELS.CLI_OPEN_FILES, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.CLI_OPEN_FILES, listener);
+    };
+  },
+
+  selectLithoFolder: () => ipcRenderer.invoke(IPC_CHANNELS.LITHO_SELECT_FOLDER),
+
+  writeLithoFiles: (folderPath: string, files: LithoWriteFileEntry[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LITHO_WRITE_FILES, { folderPath, files }),
+
+  saveLithoPresets: (presets: LithoJobPreset[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LITHO_PRESETS_SAVE, presets),
+
+  loadLithoPresets: () => ipcRenderer.invoke(IPC_CHANNELS.LITHO_PRESETS_LOAD),
+
+  saveLithoPlateSizes: (sizes: LithoPlateSizePreset[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LITHO_PLATE_SIZES_SAVE, sizes),
+
+  loadLithoPlateSizes: () => ipcRenderer.invoke(IPC_CHANNELS.LITHO_PLATE_SIZES_LOAD),
+
+  startLithoHotFolder: (folderPath: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LITHO_HOT_FOLDER_START, folderPath),
+
+  stopLithoHotFolder: () => ipcRenderer.invoke(IPC_CHANNELS.LITHO_HOT_FOLDER_STOP),
+
+  onLithoHotFolderFile: (callback: (payload: LithoHotFolderIncomingFile) => void) => {
+    const listener = (_event: unknown, payload: LithoHotFolderIncomingFile) => {
+      if (payload) callback(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.LITHO_HOT_FOLDER_FILE, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.LITHO_HOT_FOLDER_FILE, listener);
+    };
+  },
+};
+
+contextBridge.exposeInMainWorld('printStudioAPI', api);

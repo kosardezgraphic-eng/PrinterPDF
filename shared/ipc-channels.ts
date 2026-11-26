@@ -1,0 +1,183 @@
+/**
+ * PrintStudio Pro — Typed IPC Channels & RPC Contract Definitions
+ * Shared between Electron Main, Preload (contextBridge), Renderer, and C# Sidecar.
+ */
+
+import type {
+  AppSettings,
+  BatchJobItem,
+  LithoHotFolderIncomingFile,
+  LithoJobPreset,
+  LithoPlateSizePreset,
+  LithoWriteFileEntry,
+  LithoWriteFilesResult,
+  PrinterInfo,
+  PrinterMarginRequest,
+  PrinterMarginResult,
+  PrinterProfileSettings,
+  PrintJobRequest,
+  PspProjectFile,
+  SettingsPreset,
+  SpoolerJobInfo,
+  VirtualPrinterConfig,
+  VirtualPrinterIncomingPayload,
+  VirtualPrinterStatus,
+} from './models';
+
+export const IPC_CHANNELS = {
+  // File & Project Operations
+  FILE_OPEN_DIALOG: 'file:open-dialog',
+  FILE_SAVE_PDF_DIALOG: 'file:save-pdf-dialog',
+  PROJECT_SAVE_PSP: 'project:save-psp',
+  PROJECT_OPEN_PSP: 'project:open-psp',
+  PROJECT_LOAD_AUTOSAVE: 'project:load-autosave',
+  PROJECT_WRITE_AUTOSAVE: 'project:write-autosave',
+  /** Reads a file the OS handed to the renderer (native drop / "Open with" / CLI arguments). */
+  FILE_READ_LOCAL: 'file:read-local',
+  /** Main → renderer notification for files passed on the command line by a second instance. */
+  CLI_OPEN_FILES: 'cli:open-files',
+  /** Reads an image directly from the OS clipboard (native desktop paste button). */
+  CLIPBOARD_READ_IMAGE: 'clipboard:read-image',
+
+  // Printer Service Sidecar (Win32 Spooler / System.Printing via Named Pipe JSON-RPC)
+  PRINTER_LIST: 'printer:list',
+  PRINTER_GET_CAPABILITIES: 'printer:get-capabilities',
+  PRINTER_GET_MARGINS: 'printer:get-margins',
+  /** Why the print sidecar cannot answer, or null when it is healthy. */
+  PRINTER_STATUS_NOTE: 'printer:status-note',
+  PRINTER_UPDATE_PROFILE: 'printer:update-profile',
+  PRINTER_SET_DEFAULT: 'printer:set-default',
+  /** Opens the native Windows driver preferences dialog for a queue. */
+  PRINTER_OPEN_PREFERENCES: 'printer:open-preferences',
+  PRINTER_PRINT_JOB: 'printer:print-job',
+  PRINTER_SILENT_PRINT: 'printer:silent-print',
+
+  // Windows Virtual Printer
+  VIRTUAL_PRINTER_GET_STATUS: 'virtual-printer:get-status',
+  VIRTUAL_PRINTER_UPDATE_CONFIG: 'virtual-printer:update-config',
+  VIRTUAL_PRINTER_INSTALL: 'virtual-printer:install',
+  VIRTUAL_PRINTER_UNINSTALL: 'virtual-printer:uninstall',
+  VIRTUAL_PRINTER_JOB_RECEIVED: 'virtual-printer:job-received',
+
+  // Spooler Queue Manager (I3)
+  SPOOLER_LIST_JOBS: 'spooler:list-jobs',
+  SPOOLER_PAUSE_JOB: 'spooler:pause-job',
+  SPOOLER_RESUME_JOB: 'spooler:resume-job',
+  SPOOLER_RESTART_JOB: 'spooler:restart-job',
+  SPOOLER_CANCEL_JOB: 'spooler:cancel-job',
+  SPOOLER_PURGE_QUEUE: 'spooler:purge-queue',
+  SPOOLER_SET_JOB_PRIORITY: 'spooler:set-job-priority',
+
+  // Settings & System
+  SETTINGS_LOAD: 'settings:load',
+  SETTINGS_SAVE: 'settings:save',
+  SETTINGS_PRESETS_LOAD: 'settings:presets-load',
+  SETTINGS_PRESETS_SAVE: 'settings:presets-save',
+  SYSTEM_LIST_FONTS: 'system:list-fonts',
+  CACHE_CLEAR: 'cache:clear',
+
+  // Lithography & Offset Prepress
+  LITHO_SELECT_FOLDER: 'litho:select-folder',
+  LITHO_WRITE_FILES: 'litho:write-files',
+  LITHO_PRESETS_LOAD: 'litho:presets-load',
+  LITHO_PRESETS_SAVE: 'litho:presets-save',
+  LITHO_PLATE_SIZES_LOAD: 'litho:plate-sizes-load',
+  LITHO_PLATE_SIZES_SAVE: 'litho:plate-sizes-save',
+  LITHO_HOT_FOLDER_START: 'litho:hot-folder-start',
+  LITHO_HOT_FOLDER_STOP: 'litho:hot-folder-stop',
+  LITHO_HOT_FOLDER_FILE: 'litho:hot-folder-file',
+} as const;
+
+export interface JsonRpcRequest<TParams = unknown> {
+  jsonrpc: '2.0';
+  id: string | number;
+  method: string;
+  params: TParams;
+}
+
+export interface JsonRpcResponse<TResult = unknown> {
+  jsonrpc: '2.0';
+  id: string | number;
+  result?: TResult;
+  error?: {
+    code: number;
+    message: string;
+    data?: unknown;
+  };
+}
+
+/** A file read in the main process and handed back to the renderer as bytes. */
+export interface LocalFilePayload {
+  name: string;
+  path: string;
+  size: number;
+  mimeType: string;
+  bytes: Uint8Array;
+}
+
+/** An image read directly from the OS clipboard in the Electron main process. */
+export interface ClipboardImagePayload {
+  name: string;
+  mimeType: string;
+  bytes: Uint8Array;
+}
+
+export interface PrintStudioElectronAPI {
+  isElectron: boolean;
+  /** Reads a file the OS referred to by path (command line, "Open with…"). */
+  readLocalFile(path: string): Promise<LocalFilePayload>;
+  /** Subscribes to files passed to a second instance of the app; returns an unsubscribe. */
+  onCliOpenFiles(callback: (paths: string[]) => void): () => void;
+  /** Reads an image from the OS clipboard, or returns `null` when empty. */
+  readClipboardImage?: () => Promise<ClipboardImagePayload | null>;
+  listPrinters(): Promise<PrinterInfo[]>;
+  /** `null` when the sidecar is running; otherwise the reason an operator has to fix. */
+  getPrinterStatusNote(): Promise<string | null>;
+  getPrinterMargins(request: PrinterMarginRequest): Promise<PrinterMarginResult>;
+  updatePrinterProfile(printerName: string, profile: PrinterProfileSettings): Promise<PrinterInfo>;
+  setDefaultPrinter(printerName: string): Promise<boolean>;
+  /** Opens the native Windows driver preferences and returns refreshed printer profiles. */
+  openPrinterPreferences(printerName: string): Promise<PrinterInfo[]>;
+  submitPrintJob(
+    request: PrintJobRequest,
+    pdfBytes?: Uint8Array,
+    pageImages?: Uint8Array[]
+  ): Promise<SpoolerJobInfo>;
+  listSpoolerJobs(printerName?: string): Promise<SpoolerJobInfo[]>;
+  controlSpoolerJob(
+    printerName: string,
+    jobId: number,
+    action: 'pause' | 'resume' | 'restart' | 'cancel',
+    priority?: number
+  ): Promise<boolean>;
+  purgePrinterQueue(printerName: string): Promise<boolean>;
+  getVirtualPrinterStatus(): Promise<VirtualPrinterStatus>;
+  updateVirtualPrinterConfig(patch: Partial<VirtualPrinterConfig>): Promise<VirtualPrinterStatus>;
+  installVirtualPrinter(): Promise<VirtualPrinterStatus>;
+  uninstallVirtualPrinter(): Promise<VirtualPrinterStatus>;
+  onVirtualPrinterJob(callback: (payload: VirtualPrinterIncomingPayload) => void): () => void;
+  saveAutoSaveSession(project: PspProjectFile): Promise<boolean>;
+  loadAutoSaveSession(): Promise<PspProjectFile | null>;
+  saveSettings(settings: AppSettings): Promise<boolean>;
+  loadSettings(): Promise<AppSettings | null>;
+  /** Saved setting profiles, kept in their own file so a preset survives a settings reset. */
+  saveSettingsPresets(presets: SettingsPreset[]): Promise<boolean>;
+  loadSettingsPresets(): Promise<SettingsPreset[] | null>;
+  listSystemFonts(forceRefresh?: boolean): Promise<string[]>;
+  clearCache(): Promise<boolean>;
+  selectLithoFolder?: () => Promise<string | null>;
+  writeLithoFiles?: (folderPath: string, files: LithoWriteFileEntry[]) => Promise<LithoWriteFilesResult>;
+  saveLithoPresets?: (presets: LithoJobPreset[]) => Promise<boolean>;
+  loadLithoPresets?: () => Promise<LithoJobPreset[] | null>;
+  saveLithoPlateSizes?: (sizes: LithoPlateSizePreset[]) => Promise<boolean>;
+  loadLithoPlateSizes?: () => Promise<LithoPlateSizePreset[] | null>;
+  startLithoHotFolder?: (folderPath: string) => Promise<{ ok: boolean; error?: string }>;
+  stopLithoHotFolder?: () => Promise<boolean>;
+  onLithoHotFolderFile?: (callback: (payload: LithoHotFolderIncomingFile) => void) => () => void;
+}
+
+declare global {
+  interface Window {
+    printStudioAPI?: PrintStudioElectronAPI;
+  }
+}

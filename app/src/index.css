@@ -1,0 +1,306 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.theme-dark, .theme-dark *));
+
+@layer base {
+  :root,
+  .theme-light {
+    color-scheme: light;
+    --psp-bg-primary: #f1f5f9;
+    --psp-bg-surface: #ffffff;
+    --psp-bg-elevated: #f8fafc;
+    --psp-bg-canvas: #e9eef5;
+    --psp-bg-panel: #f8fafc;
+    --psp-bg-panel-raised: #ffffff;
+    --psp-bg-panel-chrome: #ffffff;
+    --psp-border-subtle: #e2e8f0;
+    --psp-border-strong: #cbd5e1;
+    --psp-text-primary: #0f172a;
+    --psp-text-muted: #64748b;
+    --psp-accent: #0284c7;
+    --psp-focus-ring: #0284c7;
+    --psp-radius-sm: 0.375rem;
+    --psp-radius-md: 0.5rem;
+    --psp-radius-lg: 0.75rem;
+    --psp-tool-rail-size: 3rem;
+    --psp-sidebar-size: 16.5rem;
+    --psp-tool-panel-size: clamp(17.5rem, 21vw, 20rem);
+    --psp-tooltip-delay: 320ms;
+    --psp-font-fa: "Vazirmatn", "IRANSans", "Tahoma", system-ui, -apple-system, sans-serif;
+    --psp-font-en: "Inter", system-ui, -apple-system, sans-serif;
+  }
+
+  .theme-dark {
+    color-scheme: dark;
+    --psp-bg-primary: #020617;
+    --psp-bg-surface: #0f172a;
+    --psp-bg-elevated: #1e293b;
+    --psp-bg-canvas: #0b1220;
+    --psp-bg-panel: #0f172a;
+    --psp-bg-panel-raised: #1e293b;
+    --psp-bg-panel-chrome: #0a1222;
+    --psp-border-subtle: rgb(148 163 184 / 18%);
+    --psp-border-strong: rgb(148 163 184 / 30%);
+    --psp-text-primary: #f8fafc;
+    --psp-text-muted: #94a3b8;
+    --psp-accent: #0284c7;
+    --psp-focus-ring: #38bdf8;
+  }
+
+  html[dir="rtl"] body {
+    font-family: var(--psp-font-fa);
+  }
+
+  html[dir="ltr"] body {
+    font-family: var(--psp-font-en);
+  }
+}
+
+
+/* Application shell: fixed chrome rows (QuickBar + TopToolRibbon), single minmax workspace row, and status bar. */
+.psp-app-shell {
+  display: grid;
+  grid-template-rows: max-content max-content minmax(0, 1fr) max-content;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--psp-bg-primary);
+  color: var(--psp-text-primary);
+}
+
+.psp-app-shell__topbar,
+.psp-app-shell__navigation,
+.psp-app-shell__workspace,
+.psp-app-shell__status {
+  min-width: 0;
+}
+
+.psp-app-shell__navigation {
+  width: 100%;
+  overflow: visible;
+  z-index: 25;
+}
+
+.psp-app-shell__workspace {
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--psp-bg-canvas);
+}
+
+.psp-tool-rail {
+  inline-size: var(--psp-tool-rail-size);
+  flex: 0 0 var(--psp-tool-rail-size);
+  min-block-size: 0;
+}
+
+.psp-tool-panel {
+  display: flex;
+  flex: 0 0 var(--psp-tool-panel-size);
+  flex-direction: column;
+  inline-size: var(--psp-tool-panel-size);
+  min-inline-size: 0;
+  min-block-size: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--psp-border-subtle);
+  background: var(--psp-bg-panel);
+  color: var(--psp-text-primary);
+  transition: inline-size 140ms ease, flex-basis 140ms ease;
+}
+
+.psp-tool-panel--collapsed {
+  flex-basis: 2.25rem;
+  inline-size: 2.25rem;
+}
+
+.psp-tool-panel-ribbon {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.psp-properties-dock {
+  inline-size: var(--psp-tool-panel-size);
+  flex: 0 0 var(--psp-tool-panel-size);
+  min-inline-size: 0;
+  min-block-size: 0;
+}
+
+.psp-properties-dock [data-text-control-panel],
+.psp-properties-dock [data-shape-control-panel],
+.psp-properties-dock [data-watermark-control-panel],
+.psp-properties-dock [data-booklet-control-panel],
+.psp-tool-panel [data-text-control-panel],
+.psp-tool-panel [data-shape-control-panel],
+.psp-tool-panel [data-watermark-control-panel],
+.psp-tool-panel [data-booklet-control-panel],
+.psp-tool-panel [data-eraser-control-panel] {
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+  block-size: 100%;
+  flex-shrink: 1;
+  border-inline-start: 0;
+  border-inline-end: 0;
+  border-left: 0;
+  border-right: 0;
+}
+
+.psp-segmented-control {
+  max-inline-size: 100%;
+}
+
+.psp-segmented-control [data-segment-option] {
+  min-inline-size: 0;
+}
+
+[data-cross-margin-widget] input:focus-visible {
+  outline: 2px solid var(--psp-focus-ring);
+  outline-offset: 1px;
+}
+
+.psp-tool-panel-ribbon__content {
+  align-content: start;
+  overscroll-behavior: contain;
+}
+
+.psp-workspace-drawer {
+  box-shadow: 0 -0.75rem 2rem rgb(0 0 0 / 16%);
+  overscroll-behavior: contain;
+}
+
+.psp-tool-panel-ribbon__content > div {
+  max-width: 100%;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.psp-tool-panel-ribbon__content select,
+.psp-tool-panel-ribbon__content input {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.psp-tool-panel-ribbon__content [class*="border-e"] {
+  border-inline-end: 0 !important;
+  border-block-end: 1px solid var(--psp-border-subtle);
+  padding-inline-end: 0 !important;
+  padding-block-end: 0.65rem;
+  inline-size: 100%;
+}
+
+.psp-app-shell__status {
+  min-height: 0;
+}
+
+.psp-app-shell__layers {
+  display: contents;
+}
+
+/* Shared, non-portaled tooltip. Its delay is intentionally long enough to avoid hover noise. */
+.psp-tooltip {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.psp-tooltip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 1000;
+  inset-inline-start: 50%;
+  inset-block-end: calc(100% + 0.5rem);
+  max-width: min(18rem, calc(100vw - 2rem));
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--psp-border-strong);
+  border-radius: var(--psp-radius-sm);
+  background: #0f172a;
+  color: #f8fafc;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 28%);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-50%);
+  transition: opacity 120ms ease, visibility 0s linear;
+}
+
+.psp-tooltip:hover::after,
+.psp-tooltip:focus-within::after {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: var(--psp-tooltip-delay), var(--psp-tooltip-delay);
+}
+
+.psp-tooltip--bottom::after {
+  inset-block-start: calc(100% + 0.5rem);
+  inset-block-end: auto;
+}
+
+.psp-tooltip--inline-start::after {
+  inset-inline-start: auto;
+  inset-inline-end: calc(100% + 0.5rem);
+  inset-block-start: 50%;
+  inset-block-end: auto;
+  transform: translateY(-50%);
+}
+
+.psp-tooltip--inline-end::after {
+  inset-inline-start: calc(100% + 0.5rem);
+  inset-block-start: 50%;
+  inset-block-end: auto;
+  transform: translateY(-50%);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+
+/* Keep the insertion marker outside React's rendering path during dragover. */
+[data-page-id][data-drop-position]::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; width: 4px;
+  border-radius: 9999px;
+  background: #38bdf8;
+  z-index: 10;
+  pointer-events: none;
+}
+[data-page-id][data-drop-edge="left"]::after { left: -4px; }
+[data-page-id][data-drop-edge="right"]::after { right: -4px; }
+
+/* Non-printing ruler guides: wide touch targets, thin visual strokes. */
+.ruler-guide, .ruler-guide-ghost { position:absolute; padding:0; border:0; background:transparent; pointer-events:none; }
+.ruler-guide { pointer-events:auto; }
+.ruler-guide[data-axis="x"], .ruler-guide-ghost[data-axis="x"] { top:0; bottom:0; width:14px; transform:translateX(-50%); cursor:ew-resize; }
+.ruler-guide[data-axis="y"], .ruler-guide-ghost[data-axis="y"] { left:0; right:0; height:14px; transform:translateY(-50%); cursor:ns-resize; }
+.ruler-guide::before, .ruler-guide-ghost::before { content:""; position:absolute; background:#0891b2; box-shadow:0 0 1px white; }
+.ruler-guide[data-axis="x"]::before, .ruler-guide-ghost[data-axis="x"]::before { left:50%; top:0; bottom:0; width:1px; }
+.ruler-guide[data-axis="y"]::before, .ruler-guide-ghost[data-axis="y"]::before { top:50%; left:0; right:0; height:1px; }
+.ruler-guide-label { position:absolute; white-space:nowrap; border-radius:3px; padding:2px 4px; background:#0f172a; color:white; font:600 11px/1.2 sans-serif; direction:ltr; opacity:0; pointer-events:none; }
+.ruler-guide[data-axis="x"] .ruler-guide-label, .ruler-guide-ghost[data-axis="x"] .ruler-guide-label { left:10px; top:4px; }
+.ruler-guide[data-axis="y"] .ruler-guide-label, .ruler-guide-ghost[data-axis="y"] .ruler-guide-label { top:10px; left:4px; }
+.ruler-guide:hover .ruler-guide-label, .ruler-guide:focus-visible .ruler-guide-label, .ruler-guide[data-dragging] .ruler-guide-label, .ruler-guide-ghost .ruler-guide-label { opacity:1; }
+
+.ruler-guide[data-axis="x"][data-label-flip="true"] .ruler-guide-label, .ruler-guide-ghost[data-axis="x"][data-label-flip="true"] .ruler-guide-label { left:auto; right:10px; }
+.ruler-guide[data-axis="y"][data-label-flip="true"] .ruler-guide-label, .ruler-guide-ghost[data-axis="y"][data-label-flip="true"] .ruler-guide-label { top:auto; bottom:10px; }
+
+@font-face { font-family: "Shabnam"; src:url("shabnam-font/dist/Shabnam.woff2") format("woff2"); font-weight:400; font-display:swap; }
+@font-face { font-family: "Shabnam"; src:url("shabnam-font/dist/Shabnam-Bold.woff2") format("woff2"); font-weight:700; font-display:swap; }
+@font-face { font-family: "Sahel"; src:url("sahel-font/dist/Sahel.woff2") format("woff2"); font-weight:400; font-display:swap; }
+@font-face { font-family: "Sahel"; src:url("sahel-font/dist/Sahel-Bold.woff2") format("woff2"); font-weight:700; font-display:swap; }
