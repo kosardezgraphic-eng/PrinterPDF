@@ -16,6 +16,9 @@ import {
   FileWarning,
   Maximize2,
   SlidersHorizontal,
+  RotateCw,
+  Copy,
+  ImagePlus,
   Zap,
   Boxes,
   ClipboardPaste,
@@ -131,6 +134,9 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
     setShowPreflight,
     fitPageNonce,
     setActiveSheetIndex,
+    rotatePages,
+    duplicatePages,
+    deletePages,
     focusPageFromPreview,
     setZoomPercent,
     importFiles,
@@ -166,6 +172,8 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
       );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const sheetImageInputRef = useRef<HTMLInputElement>(null);
+  const pendingImageSheetRef = useRef<ComputedSheetSide | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const lastWheelStep = useRef(-Infinity);
   const pendingWheelEntry = useRef<{index:number; edge:'top'|'bottom'} | null>(null);
@@ -195,7 +203,7 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
   const [previewOnlyPageId, setPreviewOnlyPageId] = useState<string | null>(null);
   const [navigationTarget, setNavigationTarget] = useState<{pageId: string; sheetIndex: number; previewOnly: boolean} | null>(null);
   const [panning, setPanning] = useState(false);
-  const [sheetContextMenu, setSheetContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [sheetContextMenu, setSheetContextMenu] = useState<{ x: number; y: number; pageIds: string[]; sheetIndex: number } | null>(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   // A file drag fires `dragover` on the element under the cursor every few milliseconds and a
   // `dragleave` on the workspace each time the pointer crosses into a child element. Driving the
@@ -620,8 +628,10 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
                 e.preventDefault();
                 e.stopPropagation();
                 setSheetContextMenu({
-                  x: Math.max(0, Math.min(window.innerWidth - 220, e.clientX)),
-                  y: Math.max(0, Math.min(window.innerHeight - 170, e.clientY)),
+                  x: Math.max(0, Math.min(window.innerWidth - 240, e.clientX)),
+                  y: Math.max(0, Math.min(window.innerHeight - 260, e.clientY)),
+                  pageIds: [...new Set(sheetSide.cells.map(cell => cell.page?.id).filter((id): id is string => !!id))],
+                  sheetIndex: sheetSide.sideIndex - 1,
                 });
               }}
               onMouseMove={(e) => {
@@ -1354,6 +1364,26 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
           const list = e.target.files ? Array.from(e.target.files) : [];
           if (list.length > 0) void importFiles(list);
           e.target.value = '';
+        }}
+      />
+
+      <input
+        ref={sheetImageInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(event) => {
+          const files = event.target.files ? Array.from(event.target.files) : [];
+          const targetSheet = pendingImageSheetRef.current;
+          pendingImageSheetRef.current = null;
+          event.target.value = '';
+          if (!files.length || !targetSheet) return;
+          const { images } = routeDroppedFiles(files, true);
+          if (images.length) void addImageOverlayFiles(images, targetSheet, {
+            xMm: targetSheet.widthMm / 2,
+            yMm: targetSheet.heightMm / 2,
+          });
         }}
       />
 
@@ -2747,6 +2777,64 @@ export const PreviewWorkspace: React.FC<PreviewWorkspaceProps> = ({
               onClick={(e) => e.stopPropagation()}
               className="min-w-52 rounded-lg border border-slate-200 bg-white p-1 text-sm text-slate-800 shadow-xl dark:border-slate-600 dark:bg-slate-900 dark:text-white"
             >
+              {sheetContextMenu.pageIds.length > 0 && (
+                <>
+                  <button
+                    role="menuitem"
+                    type="button"
+                    data-sheet-action="rotate"
+                    className="flex w-full items-center gap-2 rounded px-3 py-2 text-start hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer"
+                    onClick={() => {
+                      rotatePages(sheetContextMenu.pageIds, 90);
+                      setSheetContextMenu(null);
+                    }}
+                  >
+                    <RotateCw className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400 shrink-0" aria-hidden="true" />
+                    <span>{lang === 'fa' ? 'چرخش ۹۰° صفحات این شیت (' + formatLocalizedNumber(sheetContextMenu.pageIds.length, lang) + ')' : 'Rotate pages on this sheet 90° (' + sheetContextMenu.pageIds.length + ')'}</span>
+                  </button>
+                  <button
+                    role="menuitem"
+                    type="button"
+                    data-sheet-action="duplicate"
+                    className="flex w-full items-center gap-2 rounded px-3 py-2 text-start hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer"
+                    onClick={() => {
+                      duplicatePages(sheetContextMenu.pageIds);
+                      setSheetContextMenu(null);
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden="true" />
+                    <span>{lang === 'fa' ? 'تکثیر صفحات این شیت (' + formatLocalizedNumber(sheetContextMenu.pageIds.length, lang) + ')' : 'Duplicate pages on this sheet (' + sheetContextMenu.pageIds.length + ')'}</span>
+                  </button>
+                  <button
+                    role="menuitem"
+                    type="button"
+                    data-sheet-action="add-image"
+                    className="flex w-full items-center gap-2 rounded px-3 py-2 text-start hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer"
+                    onClick={() => {
+                      pendingImageSheetRef.current = sheets[sheetContextMenu.sheetIndex] ?? null;
+                      setSheetContextMenu(null);
+                      sheetImageInputRef.current?.click();
+                    }}
+                  >
+                    <ImagePlus className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400 shrink-0" aria-hidden="true" />
+                    <span>{lang === 'fa' ? 'افزودن تصویر به شیت...' : 'Add image to sheet...'}</span>
+                  </button>
+                  <button
+                    role="menuitem"
+                    type="button"
+                    data-sheet-action="delete"
+                    className="flex w-full items-center gap-2 rounded px-3 py-2 text-start text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/15 cursor-pointer"
+                    onClick={() => {
+                      deletePages(sheetContextMenu.pageIds);
+                      setSheetContextMenu(null);
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <span>{lang === 'fa' ? 'حذف صفحات این شیت' : 'Delete pages on this sheet'}</span>
+                  </button>
+                  <div className="my-1 h-px bg-slate-200 dark:bg-slate-700/80" />
+                </>
+              )}
               <button
                 role="menuitem"
                 type="button"
