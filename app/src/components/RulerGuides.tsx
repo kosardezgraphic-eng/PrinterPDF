@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { MeasurementUnit, RulerGuide } from '@shared/models';
+import {createPortal} from 'react-dom';
 import { convertMmToUnit } from '../engine/layoutEngine';
 import { useAppStore } from '../store/useAppStore';
 
@@ -59,7 +60,7 @@ export function RulerGuideProvider({widthMm,heightMm,widthPx,heightPx,unit,langu
     return ()=>{window.removeEventListener('blur',cancel);window.removeEventListener('keydown',key);cancel();};
   },[widthMm,heightMm,unit,spaceDown,disabled,rulersVisible]);
   const start:Controller['start']=(e,axis,guide)=>{
-    if(disabled||spaceDown||dragging.current||(e.pointerType==='mouse'&&e.button!==0))return;
+    if(disabled||spaceDown||guide?.locked||dragging.current||(e.pointerType==='mouse'&&e.button!==0))return;
     const rect=paperRef.current?.getBoundingClientRect();const node=guide?e.currentTarget:ghostRef.current;
     if(!rect||!rect.width||!rect.height||!node)return;
     e.preventDefault();e.stopPropagation();
@@ -133,18 +134,31 @@ export function GuidePaperRef({children}:{children:React.ReactNode}) {
 }
 
 export function UserGuideLines() {
-  const c=controller();const moveGuide=useAppStore(s=>s.moveRulerGuide),remove=useAppStore(s=>s.removeRulerGuide);
+  const c=controller();const moveGuide=useAppStore(s=>s.moveRulerGuide),remove=useAppStore(s=>s.removeRulerGuide),updateGuide=useAppStore(s=>s.updateRulerGuide);
+  const [menu,setMenu]=useState<{id:string;x:number;y:number;position:string}|null>(null);
+  const language=c.language;
+  useEffect(()=>{if(!menu)return;const close=(event:PointerEvent)=>{const target=event.target instanceof Element?event.target:null;if(!target?.closest('[data-guide-context-menu]'))setMenu(null);};const key=(event:KeyboardEvent)=>{if(event.key==='Escape')setMenu(null);};document.addEventListener('pointerdown',close);window.addEventListener('keydown',key);return()=>{document.removeEventListener('pointerdown',close);window.removeEventListener('keydown',key);};},[menu]);
   return <div data-user-guides className="pointer-events-none absolute inset-0 z-20">
     <div ref={c.ghostRef} data-guide-ghost className="ruler-guide-ghost" style={{display:'none'}}><span data-ruler-guide-label className="ruler-guide-label" /></div>
     {c.guides.filter(g=>g.positionMm>=0 && g.positionMm<=(g.axis==='x'?c.widthMm:c.heightMm)).map(g=>{
       const name=c.language==='fa'?(g.axis==='x'?'خط راهنمای عمودی':'خط راهنمای افقی'):(g.axis==='x'?'Vertical guide':'Horizontal guide');
-      return <button key={g.id} type="button" disabled={c.disabled} data-ruler-guide={g.id} data-axis={g.axis} data-label-flip={String(g.positionMm/(g.axis==='x'?c.widthMm:c.heightMm)*(g.axis==='x'?c.widthPx:c.heightPx)>(g.axis==='x'?c.widthPx-72:c.heightPx-28))} className="ruler-guide group pointer-events-auto" style={{[g.axis==='x'?'left':'top']:`${g.positionMm/(g.axis==='x'?c.widthMm:c.heightMm)*100}%`,touchAction:'none'}}
-        aria-label={`${name}: ${format(g.positionMm,c.unit)}`} title={`${name}: ${format(g.positionMm,c.unit)} — ${c.language==='fa' ? (g.axis==='x' ? 'برای حذف، خط را به خط‌کش بالا بکشید' : 'برای حذف، خط را به خط‌کش کنار صفحه بکشید') : (g.axis==='x' ? 'Drag to the top ruler to remove' : 'Drag to the side ruler to remove')}`}
+      return <button key={g.id} type="button" disabled={c.disabled} data-ruler-guide={g.id} data-axis={g.axis} data-locked={String(!!g.locked)} data-label-flip={String(g.positionMm/(g.axis==='x'?c.widthMm:c.heightMm)*(g.axis==='x'?c.widthPx:c.heightPx)>(g.axis==='x'?c.widthPx-72:c.heightPx-28))} className="ruler-guide group pointer-events-auto" style={{[g.axis==='x'?'left':'top']:`${g.positionMm/(g.axis==='x'?c.widthMm:c.heightMm)*100}%`,touchAction:'none','--guide-color':g.color??'#0891b2'} as React.CSSProperties}
+        aria-label={`${name}: ${format(g.positionMm,c.unit)}`} title={`${name}: ${format(g.positionMm,c.unit)} — ${c.language==='fa' ? 'برای تنظیمات، کلیک راست کنید' : 'Right-click for guide options'}`}
+        onContextMenu={e=>{e.preventDefault();e.stopPropagation();setMenu({id:g.id,x:Math.min(e.clientX,window.innerWidth-250),y:Math.min(e.clientY,window.innerHeight-260),position:String(g.positionMm)});}}
         onPointerDown={e=>c.start(e,g.axis,g)} onPointerMove={e=>{c.move(e);const label=e.currentTarget.querySelector<HTMLElement>('[data-ruler-guide-label]');const rect=c.paperRef.current?.getBoundingClientRect();if(label&&rect){if(g.axis==='x')label.style.top=`${Math.max(0,Math.min(rect.height-22,e.clientY-rect.top))}px`;else label.style.left=`${Math.max(0,Math.min(rect.width-64,e.clientX-rect.left))}px`;}}}
         onPointerUp={e=>c.finish(e)} onPointerCancel={e=>c.finish(e,true)} onLostPointerCapture={e=>c.finish(e,true)} onClick={e=>e.stopPropagation()}
-        onKeyDown={e=>{if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();e.stopPropagation();remove(g.id);}else if((g.axis==='x'&&['ArrowLeft','ArrowRight'].includes(e.key))||(g.axis==='y'&&['ArrowUp','ArrowDown'].includes(e.key))){e.preventDefault();e.stopPropagation();const delta=e.key==='ArrowLeft'||e.key==='ArrowUp'?-1:1;moveGuide(g.id,Math.max(0,Math.min(g.axis==='x'?c.widthMm:c.heightMm,Math.round((g.positionMm+delta*(e.shiftKey?10:1))*10)/10)));}}}>
+        onKeyDown={e=>{if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();e.stopPropagation();remove(g.id);}else if(!g.locked&&((g.axis==='x'&&['ArrowLeft','ArrowRight'].includes(e.key))||(g.axis==='y'&&['ArrowUp','ArrowDown'].includes(e.key)))){e.preventDefault();e.stopPropagation();const delta=e.key==='ArrowLeft'||e.key==='ArrowUp'?-1:1;moveGuide(g.id,Math.max(0,Math.min(g.axis==='x'?c.widthMm:c.heightMm,Math.round((g.positionMm+delta*(e.shiftKey?10:1))*10)/10)));}}}>
         <span aria-hidden="true" data-ruler-guide-label className="ruler-guide-label">{format(g.positionMm,c.unit)}</span>
       </button>;
     })}
+    {menu && (()=>{const guide=c.guides.find(item=>item.id===menu.id);if(!guide)return null;return createPortal(<div data-guide-context-menu role="menu" dir={language==='fa'?'rtl':'ltr'} onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()} style={{position:'fixed',left:menu.x,top:menu.y,zIndex:1100}} className="pointer-events-auto min-w-[230px] rounded-xl border border-slate-200 bg-white p-2 text-sm text-slate-800 shadow-2xl dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100">
+      <div className="mb-2 border-b border-slate-100 px-2 pb-2 text-xs font-bold text-slate-500 dark:border-slate-700">{language==='fa'?'تنظیم خط راهنما':'Guide settings'}</div>
+      <button type="button" role="menuitem" className="w-full rounded-lg px-3 py-2 text-start hover:bg-slate-100 dark:hover:bg-slate-800" onClick={()=>{updateGuide(guide.id,{locked:!guide.locked});setMenu(null);}}>{guide.locked?(language==='fa'?'بازکردن قفل خط':'Unlock guide'):(language==='fa'?'قفل کردن خط':'Lock guide')}</button>
+      <label className="flex items-center justify-between gap-3 rounded-lg px-3 py-2 hover:bg-slate-100 dark:hover:bg-slate-800"><span>{language==='fa'?'تغییر رنگ':'Change color'}</span><input aria-label={language==='fa'?'رنگ خط راهنما':'Guide color'} type="color" value={guide.color??'#0891b2'} onChange={e=>updateGuide(guide.id,{color:e.target.value})} className="h-8 w-10 cursor-pointer rounded border-0 bg-transparent" /></label>
+      <label className="mt-1 block px-3 py-2"><span className="mb-1 block text-xs text-slate-500">{language==='fa'?'موقعیت دقیق (میلی‌متر)':'Exact position (mm)'}</span><input type="number" min="0" max={guide.axis==='x'?c.widthMm:c.heightMm} step="0.1" value={menu.position} onChange={e=>setMenu(current=>current?{...current,position:e.target.value}:null)} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-900 outline-none focus:border-sky-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white" /></label>
+      <button type="button" className="mt-1 w-full rounded-lg bg-sky-600 px-3 py-2 font-semibold text-white hover:bg-sky-500" onClick={()=>{const value=Number(menu.position);const max=guide.axis==='x'?c.widthMm:c.heightMm;if(Number.isFinite(value)&&value>=0&&value<=max)updateGuide(guide.id,{positionMm:Math.round(value*10)/10});setMenu(null);}}>{language==='fa'?'ثبت موقعیت':'Apply position'}</button>
+      <button type="button" role="menuitem" className="mt-1 w-full rounded-lg px-3 py-2 text-start text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/10" onClick={()=>{remove(guide.id);setMenu(null);}}>{language==='fa'?'حذف خط راهنما':'Delete guide'}</button>
+      <button type="button" className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800" onClick={()=>setMenu(null)}>{language==='fa'?'بستن':'Close'}</button>
+    </div>,document.body);})()}
   </div>;
 }

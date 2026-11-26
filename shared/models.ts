@@ -220,7 +220,7 @@ export interface MarginsMm {
 }
 
 /** Non-printing ruler guides measured from the left or top edge of the output sheet. */
-export interface RulerGuide { id: string; axis: 'x' | 'y'; positionMm: number }
+export interface RulerGuide { id: string; axis: 'x' | 'y'; positionMm: number; locked?: boolean; color?: string }
 
 export interface BookletSettings {
   enabled: boolean;
