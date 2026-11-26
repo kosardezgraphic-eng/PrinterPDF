@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { RotateCw, SlidersHorizontal } from 'lucide-react';
+import { Copy, RotateCw, SlidersHorizontal, Trash2 } from 'lucide-react';
 import type { ComputedCellPlacement, PageItem, PageRotation, PageTransform } from '@shared/models';
 import { useAppStore, type CanvasTool, type PageEditScope } from '../store/useAppStore';
 import {
@@ -198,6 +198,9 @@ export function PageCanvasCell({
   const setPerspectiveDraft = useAppStore((state) => state.setPerspectiveDraft);
   const applyCellTransform = useAppStore((state) => state.applyCellTransform);
   const reorderCellLayer = useAppStore((state) => state.reorderCellLayer);
+  const rotatePages = useAppStore((state) => state.rotatePages);
+  const duplicatePages = useAppStore((state) => state.duplicatePages);
+  const deletePages = useAppStore((state) => state.deletePages);
   const openPageSetup = useAppStore((state) => state.openPageSetup);
   const crispEnabled = useAppStore((state) => state.settings.previewFidelity === 'crisp');
   const eraseTool = useAppStore((state) => state.eraseTool);
@@ -1242,6 +1245,46 @@ export function PageCanvasCell({
                   {action.label}
                 </button>
               ))}
+              <div className="my-1 h-px bg-slate-700/80" />
+              <button
+                role="menuitem"
+                type="button"
+                data-context-action="rotate-page"
+                className="flex w-full items-center gap-2 rounded px-3 py-2 text-start hover:bg-slate-700"
+                onClick={() => {
+                  rotatePages([page.id], 90);
+                  setMenu(null);
+                }}
+              >
+                <RotateCw className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>{fa ? 'چرخش ۹۰ درجه' : 'Rotate 90°'}</span>
+              </button>
+              <button
+                role="menuitem"
+                type="button"
+                data-context-action="duplicate-page"
+                className="flex w-full items-center gap-2 rounded px-3 py-2 text-start hover:bg-slate-700"
+                onClick={() => {
+                  duplicatePages([page.id]);
+                  setMenu(null);
+                }}
+              >
+                <Copy className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>{fa ? 'تکثیر صفحه' : 'Duplicate page'}</span>
+              </button>
+              <button
+                role="menuitem"
+                type="button"
+                data-context-action="delete-page"
+                className="flex w-full items-center gap-2 rounded px-3 py-2 text-start text-rose-300 hover:bg-rose-950/50"
+                onClick={() => {
+                  deletePages([page.id]);
+                  setMenu(null);
+                }}
+              >
+                <Trash2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>{fa ? 'حذف صفحه' : 'Delete page'}</span>
+              </button>
               <div className="my-1 h-px bg-slate-700/80" />
               <button
                 role="menuitem"
