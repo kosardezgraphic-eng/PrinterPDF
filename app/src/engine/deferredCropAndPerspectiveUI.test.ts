@@ -59,6 +59,9 @@ describe('Deferred full-image Crop mode and Perspective Crop UI', () => {
       canvasTool: 'move',
       cropDrafts: {},
       perspectiveDrafts: {},
+      isApplyingPerspectiveCrop: false,
+      isDeskewing: false,
+      isAutoDetectingPerspective: false,
     });
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -567,6 +570,9 @@ describe('Deferred full-image Crop mode and Perspective Crop UI', () => {
     expect(magToggle.getAttribute('aria-pressed')).toBe('false');
     expect(container.querySelector('[data-corner-magnifier="tl"]')).toBeNull();
     expect(container.querySelector('[data-corner-tooltip="tl"]')).not.toBeNull();
+
+    // Cancel perspective draft before switching to standard Crop so no stray async rectification runs
+    act(() => container.querySelector<HTMLButtonElement>('[data-perspective-cancel]')!.click());
 
     // 2) Standard Crop handle hover shows dimension tooltip
     const cropBtn = container.querySelector<HTMLButtonElement>('[data-ribbon-tool="crop"]')!;

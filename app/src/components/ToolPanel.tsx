@@ -321,41 +321,123 @@ export const ToolPanel: React.FC = () => {
       }
       return (
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-xs">
-          <p className="text-slate-600 dark:text-slate-400">
-            {isFa
-              ? 'شکل هندسی مورد نظر را برای درج در صفحه انتخاب کنید:'
-              : 'Pick a geometric shape to insert onto the active sheet:'}
-          </p>
-          <div className="grid grid-cols-5 gap-1.5">
-            {SHAPE_TYPES.map((type) => (
+          <div className="space-y-1.5">
+            <p className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
+              {isFa
+                ? 'شکل هندسی مورد نظر را برای درج در صفحه انتخاب کنید:'
+                : 'Pick a geometric shape to insert onto the active page:'}
+            </p>
+            <div className="grid grid-cols-4 gap-1.5">
+              {SHAPE_TYPES.map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  disabled={!pages.length}
+                  title={shapeLabel(type, isFa)}
+                  aria-label={shapeLabel(type, isFa)}
+                  onClick={() => addShapeOverlay(type)}
+                  className="flex min-h-[50px] flex-col items-center justify-center gap-1 rounded-md border border-slate-200 bg-slate-50/70 px-1 py-1.5 text-slate-700 transition-colors hover:border-sky-400 hover:bg-sky-50 hover:text-sky-700 disabled:opacity-45 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:border-sky-500 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  <ShapePreview type={type} size={20} />
+                  <span className="max-w-full truncate text-[9.5px] font-medium leading-none">
+                    {shapeLabel(type, isFa)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="border-t border-slate-200 pt-2.5 dark:border-slate-800 space-y-1.5">
+            <div className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+              {isFa ? 'قالب‌های آماده چاپ:' : 'Quick starter shapes:'}
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
               <button
-                key={type}
                 type="button"
                 disabled={!pages.length}
-                title={shapeLabel(type, isFa)}
-                aria-label={shapeLabel(type, isFa)}
-                onClick={() => addShapeOverlay(type)}
-                className="flex flex-col items-center justify-center rounded-lg border border-slate-200 bg-white p-2 text-slate-700 hover:border-sky-400 hover:bg-sky-50 disabled:opacity-45 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+                onClick={() =>
+                  addShapeOverlay('rectangle', {
+                    fillColor: 'transparent',
+                    strokeColor: '#dc2626',
+                    strokeWidth: 0.75,
+                    strokeStyle: 'dashed',
+                  })
+                }
+                className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-start text-[11px] text-slate-700 hover:border-sky-400 hover:bg-sky-50 disabled:opacity-45 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
               >
-                <ShapePreview type={type} size={20} />
+                <span className="h-3.5 w-4 shrink-0 rounded-[2px] border-2 border-dashed border-rose-600" />
+                <span className="truncate">{isFa ? 'کادر برش' : 'Cut frame'}</span>
               </button>
-            ))}
+              <button
+                type="button"
+                disabled={!pages.length}
+                onClick={() =>
+                  addShapeOverlay('rounded-rect', {
+                    fillColor: '#fde047',
+                    strokeWidth: 0,
+                    opacity: 0.45,
+                    borderRadius: 3,
+                  })
+                }
+                className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-start text-[11px] text-slate-700 hover:border-sky-400 hover:bg-sky-50 disabled:opacity-45 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+              >
+                <span className="h-3.5 w-4 shrink-0 rounded bg-amber-300/80 border border-amber-400" />
+                <span className="truncate">{isFa ? 'هایلایت' : 'Highlight'}</span>
+              </button>
+              <button
+                type="button"
+                disabled={!pages.length}
+                onClick={() =>
+                  addShapeOverlay('line', {
+                    strokeColor: '#0f172a',
+                    strokeWidth: 0.5,
+                    strokeStyle: 'solid',
+                    lineOrientation: 'horizontal',
+                  })
+                }
+                className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-start text-[11px] text-slate-700 hover:border-sky-400 hover:bg-sky-50 disabled:opacity-45 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+              >
+                <span className="h-0.5 w-4 shrink-0 bg-slate-800 dark:bg-slate-200" />
+                <span className="truncate">{isFa ? 'خط جداکننده' : 'Divider rule'}</span>
+              </button>
+              <button
+                type="button"
+                disabled={!pages.length}
+                onClick={() =>
+                  addShapeOverlay('arrow', {
+                    strokeColor: '#0284c7',
+                    strokeWidth: 1.5,
+                    arrowStyle: 'double',
+                  })
+                }
+                className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-start text-[11px] text-slate-700 hover:border-sky-400 hover:bg-sky-50 disabled:opacity-45 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+              >
+                <ShapePreview type="arrow" size={14} shape={{ arrowStyle: 'double' }} />
+                <span className="truncate">{isFa ? 'پیکان دوسر' : 'Double arrow'}</span>
+              </button>
+            </div>
           </div>
+
           {shapeOverlays.length > 0 && (
-            <div className="space-y-1">
+            <div className="border-t border-slate-200 pt-2.5 dark:border-slate-800 space-y-1.5">
               <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                {isFa ? 'اشکال درج‌شده:' : 'Inserted shapes:'}
+                {isFa ? `اشکال درج‌شده (${shapeOverlays.length}):` : `Inserted shapes (${shapeOverlays.length}):`}
               </div>
               {shapeOverlays.map((sh, idx) => (
                 <button
                   key={sh.id}
                   type="button"
                   onClick={() => selectOverlay(sh.id)}
-                  className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-start hover:border-sky-400 dark:border-slate-700 dark:bg-slate-800 cursor-pointer"
+                  className="flex w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-start hover:border-sky-400 dark:border-slate-700 dark:bg-slate-800 cursor-pointer"
                 >
-                  <ShapePreview type={sh.type} size={14} shape={sh} />
-                  <span>
-                    {shapeLabel(sh.type, isFa)} #{idx + 1}
+                  <span className="flex min-w-0 items-center gap-2">
+                    <ShapePreview type={sh.type} size={16} shape={sh} showColors />
+                    <span className="truncate font-medium">
+                      {shapeLabel(sh.type, isFa)} #{idx + 1}
+                    </span>
+                  </span>
+                  <span className="shrink-0 font-mono text-[10px] text-slate-400 tabular-nums">
+                    {sh.strokeWidth.toFixed(1)}pt
                   </span>
                 </button>
               ))}

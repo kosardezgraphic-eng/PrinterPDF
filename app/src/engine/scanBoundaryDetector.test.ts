@@ -113,10 +113,9 @@ function makeFullFrameTextLinesRgba(width: number, height: number, tiltDeg: numb
       const ux = dx * cosA + dy * sinA + cx;
       const uy = -dx * sinA + dy * cosA + cy;
       const idx = (y * width + x) * 4;
-      const inMargins = ux > width * 0.14 && ux < width * 0.86 && uy > height * 0.14 && uy < height * 0.86;
       const linePhase = ((uy % 14) + 14) % 14;
       const wordGap = ((ux % 18) + 18) % 18;
-      const isInk = inMargins && linePhase < 3 && wordGap < 14;
+      const isInk = linePhase < 3 && wordGap < 14;
       const v = isInk ? 28 : 246;
       rgba[idx] = v;
       rgba[idx + 1] = v;

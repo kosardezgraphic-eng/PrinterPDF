@@ -172,14 +172,42 @@ export function shapeCommands(shape: PageOverlayShape, width: number, height: nu
       return line([[-halfW, 0], [halfW, 0]], false);
     case 'arrow': {
       // The head is built in physical units, so a long thin arrow does not grow a splayed tip.
+      const isVertical = shape.lineOrientation === 'vertical';
+      const isDouble = shape.arrowStyle === 'double';
+      if (isVertical) {
+        const head = Math.max(0.0001, Math.min(h * 0.3, w * 1.4));
+        const cmds: ShapeCommand[] = [
+          { op: 'M', x: 0, y: round(-halfH) },
+          { op: 'L', x: 0, y: round(halfH) },
+          { op: 'M', x: round(-head / 2), y: round(halfH - head) },
+          { op: 'L', x: 0, y: round(halfH) },
+          { op: 'L', x: round(head / 2), y: round(halfH - head) },
+        ];
+        if (isDouble) {
+          cmds.push(
+            { op: 'M', x: round(-head / 2), y: round(-halfH + head) },
+            { op: 'L', x: 0, y: round(-halfH) },
+            { op: 'L', x: round(head / 2), y: round(-halfH + head) },
+          );
+        }
+        return cmds;
+      }
       const head = Math.max(0.0001, Math.min(w * 0.3, h * 1.4));
-      return [
+      const cmds: ShapeCommand[] = [
         { op: 'M', x: round(-halfW), y: 0 },
         { op: 'L', x: round(halfW), y: 0 },
         { op: 'M', x: round(halfW - head), y: round(-head / 2) },
         { op: 'L', x: round(halfW), y: 0 },
         { op: 'L', x: round(halfW - head), y: round(head / 2) },
       ];
+      if (isDouble) {
+        cmds.push(
+          { op: 'M', x: round(-halfW + head), y: round(-head / 2) },
+          { op: 'L', x: round(-halfW), y: 0 },
+          { op: 'L', x: round(-halfW + head), y: round(head / 2) },
+        );
+      }
+      return cmds;
     }
     default:
       // `rectangle` and `square` are the same outline; the square differs by the ratio its panel and its
@@ -223,10 +251,11 @@ export function shapeDashPattern(style: PageOverlayShape['strokeStyle'] | undefi
   if (lineWidth <= 0) return undefined;
   if (style === 'dashed') return [round(lineWidth * 4), round(lineWidth * 2)];
   if (style === 'dotted') return [round(lineWidth), round(lineWidth * 2)];
+  if (style === 'dash-dot') return [round(lineWidth * 4), round(lineWidth * 1.5), round(lineWidth), round(lineWidth * 1.5)];
   return undefined;
 }
 
-export const SHAPE_STROKE_STYLES: PageOverlayShape['strokeStyle'][] = ['solid', 'dashed', 'dotted'];
+export const SHAPE_STROKE_STYLES: PageOverlayShape['strokeStyle'][] = ['solid', 'dashed', 'dotted', 'dash-dot'];
 export const SHAPE_LINE_CAPS: NonNullable<PageOverlayShape['lineCap']>[] = ['butt', 'round', 'square'];
 
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
@@ -278,6 +307,9 @@ export function normalizeShapeStyle(patch: Partial<PageOverlayShape>): Partial<P
   if (out.lineOrientation !== undefined && out.lineOrientation !== 'horizontal' && out.lineOrientation !== 'vertical') {
     out.lineOrientation = 'horizontal';
   }
+  if (out.arrowStyle !== undefined && out.arrowStyle !== 'single' && out.arrowStyle !== 'double') {
+    out.arrowStyle = 'single';
+  }
   return out;
 }
 
@@ -294,6 +326,10 @@ export function shapeCapabilities(type: ShapeType) {
     fill: !shapeIsStrokedOnly(type),
     /** How the ends of an open stroke are cut. */
     cap: shapeIsStrokedOnly(type),
+    /** Horizontal or vertical axis toggle for lines and arrows. */
+    orientation: shapeIsStrokedOnly(type),
+    /** Single vs double arrowheads. */
+    arrow: type === 'arrow',
     /** Round shapes look wrong when stretched, so the picker starts them with the ratio locked. */
     lockAspect: type === 'circle' || type === 'badge' || type === 'polygon' || type === 'star'
       || type === 'diamond' || type === 'square',

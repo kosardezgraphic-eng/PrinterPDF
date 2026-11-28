@@ -975,8 +975,8 @@ export function PageCanvasCell({
             const rot = cell.effectiveRotation;
             const baseW = rot === 90 || rot === 270 ? page.heightMm : page.widthMm;
             const baseH = rot === 90 || rot === 270 ? page.widthMm : page.heightMm;
-            const factor = unit === 'cm' ? 0.1 : unit === 'in' ? 1 / 25.4 : 1;
-            const unitSuffix = unit === 'cm' ? 'cm' : unit === 'in' ? 'in' : 'mm';
+            const factor = unit === 'inch' ? 1 / 25.4 : 1;
+            const unitSuffix = unit === 'inch' ? 'in' : 'mm';
             const cropWMm = (1 - liveRotCrop.left - liveRotCrop.right) * baseW * factor;
             const cropHMm = (1 - liveRotCrop.top - liveRotCrop.bottom) * baseH * factor;
             const leftPct = (cropBoxRect.x / Math.max(1, display.width)) * 100;
@@ -1122,8 +1122,8 @@ export function PageCanvasCell({
             const srcH = perspSrc ? perspSrc.heightMm : page.heightMm;
             const dispW = rot === 90 || rot === 270 ? srcH : srcW;
             const dispH = rot === 90 || rot === 270 ? srcW : srcH;
-            const factor = unit === 'cm' ? 0.1 : unit === 'in' ? 1 / 25.4 : 1;
-            const unitSuffix = unit === 'cm' ? 'cm' : unit === 'in' ? 'in' : 'mm';
+            const factor = unit === 'inch' ? 1 / 25.4 : 1;
+            const unitSuffix = unit === 'inch' ? 'in' : 'mm';
             const xVal = (pt.x * dispW * factor).toFixed(1);
             const yVal = (pt.y * dispH * factor).toFixed(1);
             const cornerLabels: Record<PerspectiveCornerKey, string> = fa

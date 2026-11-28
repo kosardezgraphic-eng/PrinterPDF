@@ -701,11 +701,8 @@ export async function importFilesBatch(
             typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
               ? URL.createObjectURL(new Blob([safeBuf], { type: activeMime }))
               : decodedPageToDataUrl({
-                  ...dPage,
                   bytes: activeBytes,
-                  mimeType: activeMime,
-                  width: activeW,
-                  height: activeH,
+                  mimeType: activeMime === 'image/jpeg' ? 'image/jpeg' : 'image/png',
                 });
           const pageId = `page-${docId}-1`;
 
@@ -1705,7 +1702,7 @@ export async function exportImposedPdf(params: {
         const stroke = item.strokeWidth > 0 ? shapeColorComponents(item.strokeColor) : null;
         if (!fill && !stroke) continue; // nothing to draw, so nothing to clip either
         const dash = shapeDashPattern(item.strokeStyle, lineWidthMm);
-        const pathCacheKey = `${item.type}|${item.lineOrientation ?? ''}|${item.borderRadius}|${Math.round(placement.width * 1000)}|${Math.round(placement.height * 1000)}`;
+        const pathCacheKey = `${item.type}|${item.lineOrientation ?? ''}|${item.arrowStyle ?? ''}|${item.sides ?? ''}|${item.innerRadiusPercent ?? ''}|${item.borderRadius}|${Math.round(placement.width * 1000)}|${Math.round(placement.height * 1000)}`;
         let svgPath = shapeSvgPathCache.get(pathCacheKey);
         if (!svgPath) {
           svgPath = shapeSvgPath(shapeCommands(item, placement.width, placement.height));

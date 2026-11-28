@@ -1184,7 +1184,7 @@ export async function autoDeskewDecodedImage(params: {
     let confidence = 0;
     let method: 'boundary' | 'projection' = 'boundary';
 
-    if (detection.found) {
+    if (detection.found && detection.method === 'contour') {
       const boundarySkew = estimateBoundarySkewAngleDeg(
         detection.quad,
         decoded.width,
@@ -1207,6 +1207,19 @@ export async function autoDeskewDecodedImage(params: {
         angleDeg = proj.angleDeg;
         confidence = proj.confidence;
         method = 'projection';
+      }
+    }
+
+    if (Math.abs(angleDeg) < 0.6 && detection.found && detection.method !== 'contour') {
+      const boundarySkew = estimateBoundarySkewAngleDeg(
+        detection.quad,
+        decoded.width,
+        decoded.height
+      );
+      if (boundarySkew.consistent && Math.abs(boundarySkew.angleDeg) >= 0.6) {
+        angleDeg = boundarySkew.angleDeg;
+        confidence = boundarySkew.confidence;
+        method = 'boundary';
       }
     }
 

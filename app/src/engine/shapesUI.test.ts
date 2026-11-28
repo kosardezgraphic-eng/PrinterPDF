@@ -212,4 +212,43 @@ describe('the shape panel',()=>{
     expect(stored().map(item=>item.id)).toEqual([second]);
     expect(host.querySelector('[data-shape-control-panel]')).toBeNull();
   });
+
+  it('centres preview SVG viewBoxes around zero and distinguishes rectangle, square and rounded-rect icons', () => {
+    const rectSvg = host.querySelector<SVGSVGElement>('[data-shape-type="rectangle"] [data-shape-preview="rectangle"]')!;
+    const squareSvg = host.querySelector<SVGSVGElement>('[data-shape-type="square"] [data-shape-preview="square"]')!;
+    const roundedSvg = host.querySelector<SVGSVGElement>('[data-shape-type="rounded-rect"] [data-shape-preview="rounded-rect"]')!;
+
+    const vbParts = (rectSvg.getAttribute('viewBox') ?? '').split(' ').map(Number);
+    expect(vbParts[0]).toBeLessThan(0);
+    expect(vbParts[1]).toBeLessThan(0);
+    expect(vbParts[0] + vbParts[2] / 2).toBeCloseTo(0, 4);
+    expect(vbParts[1] + vbParts[3] / 2).toBeCloseTo(0, 4);
+    expect(rectSvg.style.overflow).toBe('hidden');
+
+    const rectPath = rectSvg.querySelector('path')!.getAttribute('d')!;
+    const squarePath = squareSvg.querySelector('path')!.getAttribute('d')!;
+    const roundedPath = roundedSvg.querySelector('path')!.getAttribute('d')!;
+    expect(rectPath).not.toBe(squarePath);
+    expect(roundedPath).toContain('C ');
+  });
+
+  it('supports print style presets, colour swap, double/vertical arrows and fit/center actions', () => {
+    act(() => host.querySelector<HTMLButtonElement>('[data-shape-preset="cutbox"]')!.click());
+    expect(one()).toMatchObject({ fillColor: 'transparent', strokeColor: '#dc2626', strokeStyle: 'dashed', strokeWidth: 0.75 });
+
+    act(() => host.querySelector<HTMLButtonElement>('[data-shape-preset="solid"]')!.click());
+    expect(one()).toMatchObject({ fillColor: '#0284c7', strokeWidth: 0 });
+
+    act(() => host.querySelector<HTMLButtonElement>('[data-shape-swap-colors]')!.click());
+    expect(one().strokeColor).toBe('#0284c7');
+    expect(one().strokeWidth).toBeGreaterThan(0);
+
+    act(() => host.querySelector<HTMLButtonElement>('[data-shape-type="arrow"]')!.click());
+    act(() => host.querySelector<HTMLButtonElement>('[data-shape-arrow-style="double"]')!.click());
+    act(() => host.querySelector<HTMLButtonElement>('[data-shape-orientation="vertical"]')!.click());
+    expect(one()).toMatchObject({ type: 'arrow', arrowStyle: 'double', lineOrientation: 'vertical' });
+
+    act(() => host.querySelector<HTMLButtonElement>('[data-shape-fit-box]')!.click());
+    expect(one()).toMatchObject({ xPercent: 0, yPercent: 0, widthPercent: 100, heightPercent: 100 });
+  });
 });

@@ -858,14 +858,16 @@ export type ShapeLineCap = 'butt' | 'round' | 'square';
  */
 export interface PageOverlayShape extends OverlayBase {
   kind: 'shape'; type: ShapeType; fillColor: string; strokeColor: string;
-  strokeWidth: number; strokeStyle: 'solid' | 'dashed' | 'dotted'; borderRadius: number;
+  strokeWidth: number; strokeStyle: 'solid' | 'dashed' | 'dotted' | 'dash-dot'; borderRadius: number;
   /** Vertices of a `polygon`, points of a `star` (3–16); defaults 6 and 5. */
   sides?: number;
   /** How deep a `star`'s waist sits, as a percent of its radius (10–95). */
   innerRadiusPercent?: number;
   lineCap?: ShapeLineCap;
-  /** Direction for `line` shapes; defaults to horizontal so vertical cut/perforation guides never need 90-degree rotation. */
+  /** Direction for `line` and `arrow` shapes; defaults to horizontal so vertical cut/perforation guides never need 90-degree rotation. */
   lineOrientation?: 'horizontal' | 'vertical';
+  /** Arrowhead count for `arrow` shapes (`single` → or `double` ↔); defaults to `single`. */
+  arrowStyle?: 'single' | 'double';
 }
 export interface PageOverlayNumbering extends OverlayBase {
   kind: 'numbering'; enabled: boolean; fontSize: number; fontFamily: string; color: string;

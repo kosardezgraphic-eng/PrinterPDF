@@ -203,7 +203,17 @@ describe('shape style', () => {
     expect(shapeDashPattern('solid', 2)).toBeUndefined();
     expect(shapeDashPattern('dashed', 2)).toEqual([8, 4]);
     expect(shapeDashPattern('dotted', 2)).toEqual([2, 4]);
+    expect(shapeDashPattern('dash-dot', 2)).toEqual([8, 3, 2, 3]);
     expect(shapeDashPattern('dashed', 0)).toBeUndefined();
+  });
+
+  it('supports double-headed and vertical arrows while normalizing arrowStyle safely', () => {
+    const doubleH = cmds('arrow', { arrowStyle: 'double', lineOrientation: 'horizontal' });
+    expect(doubleH.filter(c => c.op === 'M')).toHaveLength(3);
+    const verticalDouble = cmds('arrow', { arrowStyle: 'double', lineOrientation: 'vertical' });
+    expect(verticalDouble.filter(c => c.op === 'M')).toHaveLength(3);
+    expect(verticalDouble[0]).toEqual({ op: 'M', x: 0, y: -40 });
+    expect(normalizeShapeStyle({ arrowStyle: 'triple' as PageOverlayShape['arrowStyle'] }).arrowStyle).toBe('single');
   });
 
   it('uses points for a stroke and millimetres for a radius, and says so in the numbers', () => {
